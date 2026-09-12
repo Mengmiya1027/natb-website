@@ -36,3 +36,15 @@ npm run dev
 ```sh
 npm run build
 ```
+
+## 部署到 GitHub Pages
+
+推送到 `master`（或 `main`）后，`.github/workflows/deploy-pages.yml` 会自动构建并发布；
+也可以在仓库的 Actions 页面手动触发。
+
+首次使用需要在仓库 **Settings → Pages → Build and deployment → Source** 里选择
+**GitHub Actions**，之后访问 `https://<用户名>.github.io/natb-website/`。
+
+`vite.config.js` 里的 `base` 由 CI 注入的 `GITHUB_REPOSITORY` 推断：项目站点用
+`/<仓库名>/`，仓库名形如 `xxx.github.io` 的用户站点用根路径。本地 `npm run dev`
+始终是根路径，需要覆盖时用 `npm run build -- --base=/自定义/`。
