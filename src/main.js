@@ -2,7 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
 import App from './App.vue'
-import { IconifyPlugin } from '@/plugins/iconify'
+import { IconifyPlugin } from '@/utils/iconify'
 
 const app = createApp(App)
 
