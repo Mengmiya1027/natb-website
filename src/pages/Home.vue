@@ -9,7 +9,7 @@ const TITLE = 'New Android Tool Box'
 const FONT_FAMILY = "'HarmonyOS Sans SC', Arial"
 const FONT_WEIGHT = 1000
 
-const HOLD_MS = 1000 // 汇聚成字后停留
+const HOLD_MS = 1000 // 粒子收尾后字在台上停一拍，之后才起飞
 const FLY_MS = 1200 // 飞到窗口标题的时长，改它要同步 .title-flight 的 transition
 
 const store = useAnimationStore()

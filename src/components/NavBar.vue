@@ -1,13 +1,22 @@
 <script setup>
+import { computed } from 'vue'
+import { useAnimationStore } from '@/stores/animation'
+
 // 右侧图片位：填入图片地址即可显示，留空时用占位图标
 const actionIcon = ''
 
 // 跟随 base，子路径部署也能取到 public 下的图标
 const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
+
+const store = useAnimationStore()
+
+// 开场分三段：空 → 汇聚 → 字飞行。顶栏跟字一起动，
+// 所以汇聚完了也按着不出，等字起飞那一刻才从屏幕外滑进来
+const shown = computed(() => store.isFlying || store.isLanded)
 </script>
 
 <template>
-  <header class="navbar">
+  <header class="navbar" :class="{ 'is-shown': shown }" :aria-hidden="shown ? undefined : 'true'">
     <div class="dock">
       <!-- 左：圆形图标 + 字样 -->
       <a class="brand" href="#">
@@ -42,6 +51,15 @@ const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
   justify-content: center;
   padding: calc(12px + env(safe-area-inset-top)) 12px 0;
   pointer-events: none;
+  /* 透视得挂在父级，才能照到 dock 的 3D 旋转 */
+  perspective: 900px;
+  perspective-origin: center top;
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+
+.navbar.is-shown {
+  opacity: 1;
 }
 
 /* 灵动岛式黑胶囊 */
@@ -57,6 +75,10 @@ const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
   border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: 999px;
   background: rgba(12, 12, 14, 0.78);
+  /* 绕顶边翻：起点立起来并抬到屏幕上方之外 */
+  transform-origin: center top;
+  transform: translateY(-160%) rotateX(-180deg);
+  transition: transform 1.2s ease;
   backdrop-filter: blur(18px) saturate(180%);
   -webkit-backdrop-filter: blur(18px) saturate(180%);
   box-shadow:
@@ -64,6 +86,10 @@ const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
     0 8px 24px rgba(0, 0, 0, 0.35);
   user-select: none;
   min-width: 50vw;
+}
+
+.navbar.is-shown .dock {
+  transform: translateY(0) rotateX(0);
 }
 
 .brand {

@@ -59,8 +59,8 @@ let timers = []
 let rafId = null
 let resizeTimer = null
 let resizeObserver = null
-let revealed = false
 let morphing = false
+let settled = false
 let morphFrames = 0
 let morphStart = 0
 let easeNow = -1
@@ -204,7 +204,7 @@ function rampEase(inst) {
 function watchConvergence(inst) {
   trackFps()
   rampEase(inst)
-  if (revealed || !morphing) return
+  if (settled || !morphing) return
   morphFrames += 1
   if (morphFrames % 4) return
 
@@ -222,23 +222,23 @@ function watchConvergence(inst) {
   if (meanErrNow <= MORPH_DONE_CSS_PX * inst.DPR) revealTitle()
 }
 
+// 汇聚收口：放静字渐显，粒子随后隐去
 function revealTitle() {
-  if (revealed) return
-  revealed = true
+  if (settled) return
+  settled = true
   clearTimers()
   store.setStage('reveal')
   measureTitle()
   staticVisible.value = true
+  // 渐显的同一刻粒子开始隐
   later(() => {
     store.setStage('fading')
     particleOpacity.value = 0
-    later(finishIntro, FADE_MS)
   }, REVEAL_MS - FADE_LEAD_MS)
-}
-
-function finishIntro() {
-  instance?.stop()
-  store.finish()
+  later(() => {
+    store.finish()
+    later(() => instance?.stop(), FADE_MS)
+  }, REVEAL_MS)
 }
 
 function startMorph() {
