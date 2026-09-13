@@ -10,8 +10,7 @@ import IconsResolver from 'unplugin-icons/resolver'
 // 已安装的 Iconify 图标集：@iconify-json/{solar,lucide,ph}
 const ICON_COLLECTIONS = ['solar', 'lucide', 'ph']
 
-// GitHub Pages 项目站点在子路径下，用户站点（xxx.github.io）在根路径
-// 本地 dev 保持根路径，CI 里由 GITHUB_REPOSITORY 推断
+// 项目站点在子路径，用户站点与本地 dev 用根路径
 function pagesBase() {
   const slug = process.env.GITHUB_REPOSITORY?.split('/')[1]
   if (!slug) return '/'
@@ -24,19 +23,18 @@ export default defineConfig({
   plugins: [
     vue(),
     // vueDevTools(),
-    // 自动导入 src/components 下的组件，同时把 <i-solar-home-outline /> 这类写法
-    // 解析为 unplugin-icons 生成的图标组件
+    // 自动导入组件，并把 <i-xxx /> 写法解析成图标组件
     Components({
       dts: false,
       resolvers: [
         IconsResolver({
           prefix: 'i',
-          // 限定可用图标集，避免写错名字时构建期静默联网下载
+          // 限定图标集，写错名字不会静默联网下载
           enabledCollections: ICON_COLLECTIONS,
         }),
       ],
     }),
-    // 构建时按需编译图标，未使用的图标会被摇树（tree-shake）掉
+    // 按需编译图标，未使用的会被摇树
     Icons({ compiler: 'vue3' }),
   ],
   resolve: {
@@ -46,7 +44,7 @@ export default defineConfig({
   },
   server: {
     watch: {
-      // 编辑器原子写留下的临时目录会让文件监听报 EBUSY 并中断 dev server
+      // 原子写留下的临时目录会让监听报 EBUSY，必须忽略
       ignored: ['**/.*.tmpdir/**', '**/*.tmp'],
     },
     host: '0.0.0.0',

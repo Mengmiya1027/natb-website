@@ -1,11 +1,7 @@
 /**
  * Iconify 图标（SVG body）转 Canvas Path2D
- *
- * Iconify 的 icon.body 是一段 SVG 片段，元素多为 <path>/<g>，也常见
- * <circle>/<rect rx>/<line>/<polyline>。Canvas 的 Path2D 只认 path data，
- * 所以这里逐元素换算成等价 path，再按「填充 / 描边」样式分组合并。
- *
- * 一个图标只解析一次，结果交给调用方缓存即可。
+ * Path2D 只认 path data，这里把各图形元素换算成等价 path，
+ * 再按填充/描边分组合并；每个图标只解析一次
  */
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -122,10 +118,7 @@ function addShape(style, d, groups) {
   group.path.addPath(new Path2D(d))
 }
 
-/**
- * 完整 SVG 文本 → Iconify 形状的 { body, width, height }
- * 静态导入的图标走这条路，只需字符串切分，不依赖 XMLSerializer
- */
+/** 完整 SVG 文本 → Iconify 形状，静态图标走这里，不依赖 XMLSerializer */
 export function svgToIconify(svgText) {
   if (typeof svgText !== 'string') return null
   const start = svgText.indexOf('<svg')

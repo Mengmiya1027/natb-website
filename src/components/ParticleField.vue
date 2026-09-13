@@ -4,7 +4,7 @@ import { TextToParticle } from 'masoneffect/textToParticle'
 import { useAnimationStore } from '@/stores/animation'
 import { measureTextLayout } from '@/utils/masonTextLayout'
 
-// 静态字的 DOM 由父级插槽给，这里只管量好、摆正、按时间轴放出来
+// 静态字 DOM 来自父级插槽，这里只管量、摆位与时间轴
 const props = defineProps({
   text: { type: String, required: true },
   fontFamily: { type: String, default: "'HarmonyOS Sans SC', Arial" },
@@ -102,7 +102,7 @@ async function measureTitle() {
     fontFamily: props.fontFamily,
     fontWeight: props.fontWeight,
     fontSize: layout.fontSize / layout.ratio + 'px',
-    // 字距与字数交给 CSS：落点要靠它收掉这份间距才能对上真标题
+    // 字距交给 CSS，落点靠它收掉间距才对得上真标题
     '--char-gap': gap + 'px',
     '--char-n': layout.chars.length,
   }
@@ -127,7 +127,7 @@ async function measureTitle() {
   }
 }
 
-// 与库同构地离屏画一遍，量出文字墨迹的上下边界
+// 离屏画一遍，量出文字墨迹的上下边界
 function measureInk(layout) {
   const off = document.createElement('canvas')
   off.width = layout.canvasW
@@ -158,8 +158,7 @@ function measureInk(layout) {
   return maxY < 0 ? null : { minY, maxY }
 }
 
-// 画布的 middle 基线各平台定义不一，用字体度量推算会偏；
-// 改以库的墨迹为基准：探针给出 DOM 真实基线，再整体移到位
+// middle 基线各平台定义不一，改用墨迹加 DOM 探针定位
 function baselineFix(layout, ink) {
   const host = hostRef.value
   if (!probeEl || !host || !ink) return 0
@@ -177,7 +176,7 @@ function onProbe(el) {
   probeEl = el
 }
 
-// 物理按帧推进，帧率低则真实耗时变长，这里实测帧率用于补偿
+// 物理按帧推进，帧率低会拖长时间，靠实测补偿
 function trackFps() {
   const now = performance.now()
   if (lastFrameAt) {
@@ -187,7 +186,7 @@ function trackFps() {
   lastFrameAt = now
 }
 
-// 起步压住，收尾反过来加速，免得像指数尾巴那样慢慢蹭到目标
+// 起步压住、收尾加速，免得像指数尾巴那样蹭过去
 function rampEase(inst) {
   if (!morphing) return
   const t = Math.min(1, (performance.now() - morphStart) / EASE_RAMP_MS)
@@ -208,7 +207,7 @@ function watchConvergence(inst) {
   morphFrames += 1
   if (morphFrames % 4) return
 
-  // 库的抖动项让速度永不归零，但误差会收敛，按误差判断该换字的时机
+  // 抖动项让速度不归零，只能按误差判断换字时机
   const list = inst.particles
   if (!list.length) return
   let sum = 0
@@ -245,10 +244,10 @@ function startMorph() {
   if (!instance) return
   store.setStage('morphing')
   morphStart = performance.now()
-  // 切目标那一帧必须先把 ease 归零，否则粒子带满值冲一帧再顿住
+  // 切目标时 ease 必须先归零，否则会冲一帧再顿住
   easeNow = 0
   instance.config.ease = 0
-  // 直接重建目标点：morph() 有防抖，目标未更新前会被误判成已汇聚
+  // 直接重建目标点，morph() 有防抖，未更新会被误判已汇聚
   instance.buildTargets()
   morphing = true
   morphFrames = 0

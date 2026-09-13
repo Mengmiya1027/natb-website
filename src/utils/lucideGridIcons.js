@@ -1,9 +1,7 @@
 /**
- * 网格背景默认用的 25 个 Lucide 图标
- *
- * 逐个静态 import，构建期只会把这 25 个 SVG 打进产物，
- * 不会因为动态图标名而带上整个 lucide 图标集。
- * 名字固定后，5×5 个格点正好各分到一个，不重样。
+ * 网格背景默认的 25 个 Lucide 图标
+ * 逐个静态 import，只把这 25 个 SVG 打进产物；
+ * 名字固定后 5×5 个格点各分一个，不重样。
  */
 import rocket from '~icons/lucide/rocket?raw'
 import star from '~icons/lucide/star?raw'

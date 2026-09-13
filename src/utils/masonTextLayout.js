@@ -1,6 +1,6 @@
 /**
- * 复刻 masoneffect 的文字栅格布局，把静态字对齐到粒子字上。
- * 对应 TextToParticle.buildTargets，库升级时要跟着核对。
+ * 复刻 masoneffect 的文字栅格布局，让静态字对齐粒子字。
+ * 对应 TextToParticle.buildTargets，升级库时要核对。
  */
 const MIN_FONT_SIZE = 12
 const CANVAS_PADDING = 40
@@ -51,7 +51,7 @@ function findFontSize(ctx, weight, family, text, maxWidth, maxHeight, initial) {
 
 /**
  * @param {{width:number,height:number,dpr:number,text:string,fontFamily:string,fontWeight:number|string}} options
- * width/height 为 CSS 像素，返回的坐标都在画布像素空间，需除以 ratio 换成 CSS 像素。
+ * width/height 为 CSS 像素，返回坐标在画布像素空间，需除以 ratio。
  */
 export function measureTextLayout({ width, height, dpr, text, fontFamily, fontWeight }) {
   let canvasW = Math.floor(width * dpr)
@@ -110,6 +110,6 @@ export function measureTextLayout({ width, height, dpr, text, fontFamily, fontWe
     centerY += lineHeight + lineGap
   }
 
-  // letterSpacing 为字间额外间距（画布像素），静态字与真标题要对齐它
+  // letterSpacing 是字间额外间距（画布像素），要与真标题对齐
   return { ratio, fontSize, letterSpacing: spacing, canvasW, canvasH, chars, offsetX }
 }

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useAnimationStore } from '@/stores/animation'
 
-// 右侧图片位：填入图片地址即可显示，留空时用占位图标
+// 右侧图片位：填地址即显示，留空用占位图标
 const actionIcon = ''
 
 // 跟随 base，子路径部署也能取到 public 下的图标
@@ -10,8 +10,7 @@ const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
 
 const store = useAnimationStore()
 
-// 开场分三段：空 → 汇聚 → 字飞行。顶栏跟字一起动，
-// 所以汇聚完了也按着不出，等字起飞那一刻才从屏幕外滑进来
+// 顶栏跟字同步：汇聚完先按着，等字起飞才滑进来
 const shown = computed(() => store.isFlying || store.isLanded)
 </script>
 

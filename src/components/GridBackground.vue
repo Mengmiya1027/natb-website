@@ -1,12 +1,9 @@
 <script setup>
 /**
- * 全屏背景：-30° 斜向无限滚动网格 + 交点 Lucide 图标
- *
- * 坐标约定：屏幕 = R(θ)·(世界格点 + 偏移)。滚动只改偏移，格点索引
- * 恒定不变，所以交点上的图标不会随滚动闪烁。
- *
- * 性能：图标先按当前像素比烘焙成小位图，主循环只做 drawImage；
- * 网格线合并成一条路径一次描边；绘制帧率与画布像素总量都有上限。
+ * 全屏背景：-30° 斜向无限滚动网格 + 交点图标
+ * 屏幕 = R(θ)·(世界格点 + 偏移)：滚动只改偏移，格点索引不变，
+ * 交点图标才不会随滚动闪烁。
+ * 性能：图标先烘焙成位图，网格线合并成一条路径。
  */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { loadIcon } from '@iconify/vue'
@@ -30,10 +27,7 @@ const props = defineProps({
   iconSize: { type: Number, default: 18 },
   /** 交点出现图标的概率，默认每个交点都有 */
   iconProbability: { type: Number, default: 1 },
-  /**
-   * 图标名池，默认 25 个 lucide 图标，正好铺满一个 5×5 块
-   * 不在 GRID_ICONS 里的名字会按需从 Iconify 加载
-   */
+  /** 图标名池，默认 25 个铺满一个 5×5 块；未内置的按需加载 */
   icons: {
     type: Array,
     default: () => [
@@ -46,10 +40,7 @@ const props = defineProps({
   },
   /** 图标是否跟随网格倾斜，默认保持水平 */
   rotateIcons: { type: Boolean, default: false },
-  /**
-   * 画布层级。负值会被祖先的不透明背景盖住，
-   * 用默认 0 时请给页面内容一个更高的 z-index
-   */
+  /** 画布层级；负值会被祖先背景盖住，故内容需更高 z-index */
   zIndex: { type: Number, default: 0 },
   /** 绘制帧率上限，滚动很慢时 30 足够，吃紧可再降 */
   fps: { type: Number, default: 30 },
@@ -141,7 +132,7 @@ function blockOrder(bi, bj) {
   return order
 }
 
-/** 交点取图标：块内 25 个位置各不相同，块之间互不影响 */
+/** 交点取图标：块内 25 个位置不重样，块间互不影响 */
 function iconAt(i, j, icons) {
   const bi = Math.floor(i / BLOCK)
   const bj = Math.floor(j / BLOCK)
@@ -174,7 +165,7 @@ function primeStaticIcons() {
   }
 }
 
-/** 把图标几何烘焙成位图，只在尺寸或颜色变化时重建 */
+/** 图标几何烘焙成位图，尺寸或颜色变化时才重建 */
 function buildSprite(geo) {
   const px = spritePx
   const canvas = document.createElement('canvas')
@@ -235,19 +226,19 @@ function syncSize() {
   scaleY = canvas.height / h
 }
 
-/** 偏移过大时扣掉整格周期，图案不变，索引基准同步补回 */
+/** 偏移过大时扣掉整格，图案不变，索引同步补回 */
 function normalizeShift(spacing) {
   if (Math.abs(ox) < GRID_RESET && Math.abs(oy) < GRID_RESET) return
   const nx = Math.round(ox / spacing)
   const ny = Math.round(oy / spacing)
   ox -= nx * spacing
   oy -= ny * spacing
-  // 扣掉整格后同一物理点的索引加了 nx，补偿量要反向抵消
+  // 索引补偿：扣掉整格后同一物理点多了 nx
   hx -= nx
   hy -= ny
 }
 
-/** 滚动：屏幕位移固定向左下，再换算成世界偏移增量 */
+/** 滚动：屏幕位移固定向左下，再换成世界偏移 */
 function advance(dt, c, s, spacing) {
   const v = reduceMotion ? 0 : props.speed
   const dx = -v * dt
@@ -257,7 +248,7 @@ function advance(dt, c, s, spacing) {
   normalizeShift(spacing)
 }
 
-/** 视口四角反映射，得到可见区域在世界坐标下的包围盒 */
+/** 视口四角反映射，求可见区域的世界包围盒 */
 function updateBounds(c, s) {
   let minX = Infinity
   let minY = Infinity
@@ -281,7 +272,7 @@ function updateBounds(c, s) {
 
 /** 整条直线裁到视口矩形，可见时写入 clipOut 并返回 true */
 function clipToView(x0, y0, dx, dy) {
-  // 直线沿参数 t 双向延伸，下界必须是负无穷，否则半条线会被丢掉
+  // 下界须为负无穷，否则直线只剩半条
   let t0 = -Infinity
   let t1 = Infinity
   // 四条边各收紧一次参数区间
@@ -318,13 +309,13 @@ function draw(c, s, theta) {
   ctx.clearRect(0, 0, viewW, viewH)
 
   updateBounds(c, s)
-  // 两端各放宽一格：边界取整不会漏掉贴边的线，越界部分由裁剪挡掉
+  // 两端各放宽一格，免得取整漏掉贴边线
   const i0 = Math.ceil(bounds.minX / spacing) - 1
   const i1 = Math.floor(bounds.maxX / spacing) + 1
   const j0 = Math.ceil(bounds.minY / spacing) - 1
   const j1 = Math.floor(bounds.maxY / spacing) + 1
 
-  // 间距太小时抽稀；起点对齐到步长倍数，索引集合才稳定
+  // 间距太小则抽稀；起点对齐步长倍数，索引才稳定
   let step = 1
   while (((i1 - i0) / step) * ((j1 - j0) / step) > MAX_CELLS) step *= 2
   const startI = Math.ceil(i0 / step) * step
@@ -352,7 +343,7 @@ function draw(c, s, theta) {
 
   if (props.iconProbability <= 0 || !icons.length) return
 
-  // 图标数量变了就清掉块排列，避免用旧尺寸的排列
+  // 图标数量变了就清掉块排列，免得用旧尺寸
   if (icons.length !== blockCount) {
     blockCount = icons.length
     blockCache.clear()

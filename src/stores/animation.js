@@ -2,10 +2,9 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 
 /**
- * 首页开场动画进程。
- * 阶段依次为：idle 未开始 → starfield 星空 → morphing 汇聚成字
- * → reveal 静态字渐显 → fading 粒子渐隐 → done 粒子收尾
- * → flying 那行字飞向窗口标题 → landed 开场结束。
+ * 开场动画阶段：idle 未开始 → starfield 星空 → morphing 汇聚成字
+ * → reveal 静态字渐显 → fading 渐隐 → done 粒子收尾
+ * → flying 飞向窗口标题 → landed 结束。
  */
 export const useAnimationStore = defineStore('animation', () => {
   const current = ref('idle')
