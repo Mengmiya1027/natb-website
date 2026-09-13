@@ -296,7 +296,7 @@ onMounted(() => {
   if (store.hasPlayed) {
     staticVisible.value = true
     particleOpacity.value = 0
-    store.finish()
+    if (!store.isLanded) store.finish() // 已经落位就别把进程倒回去
     return
   }
 
