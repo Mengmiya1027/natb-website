@@ -97,10 +97,14 @@ async function measureTitle() {
     fontWeight: props.fontWeight,
   })
 
+  const gap = layout.letterSpacing / layout.ratio
   titleStyle.value = {
     fontFamily: props.fontFamily,
     fontWeight: props.fontWeight,
     fontSize: layout.fontSize / layout.ratio + 'px',
+    // 字距与字数交给 CSS：落点要靠它收掉这份间距才能对上真标题
+    '--char-gap': gap + 'px',
+    '--char-n': layout.chars.length,
   }
   // 库的居中会让整行右偏，两层一起回正
   titleShift.value = -(layout.offsetX / layout.ratio).toFixed(2) + 'px'

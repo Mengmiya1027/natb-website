@@ -110,5 +110,6 @@ export function measureTextLayout({ width, height, dpr, text, fontFamily, fontWe
     centerY += lineHeight + lineGap
   }
 
-  return { ratio, fontSize, canvasW, canvasH, chars, offsetX }
+  // letterSpacing 为字间额外间距（画布像素），静态字与真标题要对齐它
+  return { ratio, fontSize, letterSpacing: spacing, canvasW, canvasH, chars, offsetX }
 }
