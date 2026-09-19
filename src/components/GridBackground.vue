@@ -48,6 +48,8 @@ const props = defineProps({
   maxDpr: { type: Number, default: 2 },
   /** 画布物理像素总量上限，超过就按比例降像素比 */
   maxPixels: { type: Number, default: 6e6 },
+  /** 冻住滚动与重绘：大窗展开时背景要静止，遮罩的模糊才不必每帧重算 */
+  paused: { type: Boolean, default: false },
 })
 
 const MIN_SPACING = 12 // 间距下限，防参数给 0
@@ -401,6 +403,13 @@ function draw(c, s, theta) {
 function frame(ts) {
   if (disposed) return
   rafId = requestAnimationFrame(frame)
+
+  // 冻住时只留着回调：既不推进偏移，也不重绘一帧
+  if (props.paused) {
+    drawnAt = ts
+    lastTs = ts
+    return
+  }
 
   // 滚动很慢，按 fps 限流即可，省掉一半以上的重绘
   const interval = 1000 / Math.max(1, props.fps || 60)

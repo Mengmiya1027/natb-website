@@ -1,6 +1,9 @@
 <script setup>
 import GridBackground from '@/components/GridBackground.vue'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import FeatureCard from '@/components/FeatureCard.vue'
+import FeatureViewer from '@/components/FeatureViewer.vue'
+import { useViewerStore } from '@/stores/viewer'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizeIcon, themeFromIcon } from '@/utils/themeColor'
 // 卡片主图标统一用 solar 的 bold-duotone，两层深浅自带层次
 import IconShieldKeyhole from '~icons/solar/shield-keyhole-bold-duotone'
@@ -46,66 +49,84 @@ function prepareLogo(source) {
   const parsed = readSvg(source)
   if (!parsed) return null
   const boxed = normalizeIcon(parsed.body, parsed.w, parsed.h)
+  const wrap = (inner) =>
+    `url("data:image/svg+xml,${encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${inner}</svg>`,
+    )}")`
   return {
     // 保留图标自己的配色，糊开后才是一块有细节的云母斑
-    src: `url("data:image/svg+xml,${encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${BLUR_FILTER}<g filter="url(#halo-blur)">${boxed}</g></svg>`,
-    )}")`,
+    src: wrap(`${BLUR_FILTER}<g filter="url(#halo-blur)">${boxed}</g>`),
+    // 大窗那版用清晰图标加 CSS 模糊：SVG 自带的滤镜每换一个尺寸都要重光栅一次，
+    // 正好撞在展开的头两帧上，实测一次三十多毫秒；CSS 模糊走合成，量级完全不同
+    srcSharp: wrap(boxed),
     theme: themeFromIcon(parsed.body, '#0a59f7'),
   }
 }
 
-// 八项特色功能，一条一张卡
+// 八项特色功能，一条一张卡；shot 是大窗右侧的实拍截图
 const FEATURES = [
   {
     icon: IconShieldKeyhole,
     logo: LogoCPlusPlus,
+    shot: 'root.png',
     title: '一键ROOT',
     desc: '支持Z2-Z11全系列机型一键ROOT，实时修补BOOT，安全稳定。',
   },
   {
     icon: IconCloudDownload,
     logo: LogoSwift,
+    shot: 'ota.png',
     title: '离线OTA升级',
     desc: '支持离线OTA升级解决验证异常。',
   },
   {
     icon: IconLayers,
     logo: LogoPython,
+    shot: 'rtos.png',
     title: 'RTOS支持',
     desc: '支持Z7Pro、Z9a等RTOS系统手表。',
   },
   {
     icon: IconWidget,
     logo: LogoJava,
+    shot: 'appmanager.png',
     title: '应用管理',
     desc: '多种安装方式，支持install/data/第三方安装器/install-create，总有一种适合您。',
   },
   {
     icon: IconCpuBolt,
     logo: LogoGo,
+    shot: '9008.png',
     title: '9008刷机',
     desc: '9008模式刷入Recovery/TWRP，备份与恢复。',
   },
   {
     icon: IconMagicStick,
     logo: LogoKotlin,
+    shot: 'magisk.png',
     title: 'Magisk模块',
     desc: 'Magisk模块安装、卸载、列表管理，更方便地享受模块的乐趣。',
   },
   {
     icon: IconFolderFiles,
     logo: LogoVue,
+    shot: 'filemanager.png',
     title: '文件管理',
     desc: '摒弃传统的ADB方案与文件管理器，直接在NATB内管理文件，省心省力。',
   },
   {
     icon: IconScreenShare,
     logo: LogoAndroid,
+    shot: 'scrcpy.png',
     title: '投屏控制',
     desc: 'scrcpy投屏控制，手表屏幕实时投影到电脑。',
   },
-].map(({ logo, ...item }) => ({ ...item, ...prepareLogo(logo) }))
+].map(({ logo, shot, ...item }) => ({
+  ...item,
+  ...prepareLogo(logo),
+  // 走 base，子路径部署也能取到 public 下的截图
+  shot: import.meta.env.BASE_URL + 'images/' + shot,
+}))
 
 // 车道整条斜过来 20°，屏幕四角投到它的纵轴上有多长，卡片就按这个长度备
 const ROT = Math.PI / 9
@@ -125,6 +146,102 @@ const LANES = [0, 1, 2]
 // 副标题占位：字数决定竖排字号，改文案不用动样式
 const SUBTITLE = '全方面支持小天才手表玩机需求'
 
+// 车道倾角，与 .lanes 的 rotate 同源：量卡片几何时要靠它把外接矩形解回去
+const LANE_ROT = 15
+
+const viewer = useViewerStore()
+const activeItem = computed(() => (viewer.active >= 0 ? LOOP[viewer.active] : null))
+// 点开的那张卡在屏幕上的真实几何，充当覆盖层 FLIP 的起点
+const originRect = ref(null)
+// 卡内各元素的同一份几何：大卡要逐元素飞，不能整卡一起放大
+const originParts = ref(null)
+// 被分身顶替的源卡，收尾时还它可见
+let sourceEl = null
+
+/**
+ * 元素躺在 15° 的车道里，拿到的是旋转后的外接矩形，
+ * 用三角函数反解出未旋转的真实宽高，中心取外接矩形中心（旋转不改中心）。
+ */
+function quadOrigin(el) {
+  const r = el.getBoundingClientRect()
+  const rad = (LANE_ROT * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const den = cos * cos - sin * sin
+  return {
+    cx: r.left + r.width / 2,
+    cy: r.top + r.height / 2,
+    w: (r.width * cos - r.height * sin) / den,
+    h: (r.height * cos - r.width * sin) / den,
+    rot: LANE_ROT,
+  }
+}
+
+/** 卡片会被 cloneNode 补齐，所以点击只能走委托，序号认 data-index */
+function pickCard(event) {
+  if (viewer.expanded) return
+  const el = event.target instanceof Element ? event.target.closest('.card') : null
+  if (!el || !lanesEl.value?.contains(el)) return
+  const index = Number(el.dataset.index)
+  if (!Number.isInteger(index) || index < 0 || index >= LOOP.length) return
+
+  const origin = quadOrigin(el)
+  // 圆角也带上：大卡的圆角是固定值，压回源卡那一档时要靠它反推补偿量
+  origin.radius = parseFloat(getComputedStyle(el).borderRadius) || 0
+  originRect.value = origin
+  // 共享元素用现成 class 量，小卡模板一个属性都不用加
+  const pick = (sel) => {
+    const node = el.querySelector(sel)
+    return node ? quadOrigin(node) : null
+  }
+  // 字号也带上：框宽未必等于文字宽，只按框宽缩放会把标题压扁
+  const font = (sel) => {
+    const node = el.querySelector(sel)
+    return node ? parseFloat(getComputedStyle(node).fontSize) : null
+  }
+  originParts.value = {
+    no: pick('.card-no'),
+    icon: pick('.card-icon'),
+    title: pick('.card-title'),
+    desc: pick('.card-desc'),
+    // 字号用于等比缩放的比值，水印也一样
+    fonts: {
+      no: font('.card-no'),
+      title: font('.card-title'),
+      desc: font('.card-desc'),
+    },
+  }
+  sourceEl = el
+  viewer.open(index)
+}
+
+/** 覆盖层预光栅完、动画即将起手，这一刻才把真卡藏掉，交接处不留空白 */
+function onViewerReady() {
+  if (sourceEl) sourceEl.style.visibility = 'hidden'
+}
+
+/**
+ * 真卡归位。收起时大窗会在卡片淡出前先发 release 把它放出来，
+ * 此时它被覆盖层压着看不见，交接处就没有空白也没有突变。
+ */
+function restoreSource() {
+  const el = sourceEl
+  if (!el) return
+  sourceEl = null
+  el.style.transition = 'none'
+  el.style.visibility = ''
+  void el.offsetWidth
+  // 等覆盖层卸载那一帧画完再放回过渡
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    el.style.transition = ''
+  }))
+}
+
+function onViewerClosed() {
+  restoreSource()
+  viewer.finish()
+}
+
 // 轨道里只留盖得住可见窗口的卡，滚出去的那张挪到队首，卡数只剩原来的三分之一
 const lanesEl = ref(null)
 const laneList = []
@@ -132,6 +249,9 @@ let rafId = 0
 let lastTs = 0
 let paused = false
 let lanesWatch = null
+// 预解码的排队句柄与它的取消函数，卸载时要收干净
+let warmId = 0
+let warmCleanup = null
 
 const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 
@@ -215,11 +335,19 @@ function measureLanes() {
   }
 }
 
+// 悬停或大窗展开都停滚：展开时指针被遮罩接管，只认悬停会把列表放跑
+let hovering = false
+function syncPause() {
+  paused = hovering || viewer.expanded
+}
+
 const onEnter = () => {
-  paused = true
+  hovering = true
+  syncPause()
 }
 const onLeave = () => {
-  paused = false
+  hovering = false
+  syncPause()
 }
 
 onMounted(() => {
@@ -257,19 +385,55 @@ onMounted(() => {
   }
   box.addEventListener('pointerenter', onEnter)
   box.addEventListener('pointerleave', onLeave)
+
+  // 预取并逐个预解码八张截图：展开那一下是最贵的，不能再等解码。
+  // 但解码要抢主线程，刚进页面就点会被它拖住近一秒（实测 200ms 时点要等 904ms），
+  // 所以只在浏览器闲着的时候跑，而且大窗一开就让路
+  const idle = (fn) => (window.requestIdleCallback
+    ? window.requestIdleCallback(fn, { timeout: 600 })
+    : window.setTimeout(fn, 60))
+  const stopIdle = (id) => (window.cancelIdleCallback ? window.cancelIdleCallback(id) : clearTimeout(id))
+
+  const warm = (list) => {
+    const [item, ...rest] = list
+    if (!item) return
+    // 展开或收起动画期间不抢：等它忙完再来
+    if (viewer.expanded) {
+      warmId = window.setTimeout(() => warm(list), 400)
+      return
+    }
+    warmId = idle(() => {
+      const img = new Image()
+      img.src = item.shot
+      const next = () => { warmId = window.setTimeout(() => warm(rest), 120) }
+      if (img.decode) img.decode().then(next, next)
+      else img.onload = next
+    })
+  }
+  warm(LOOP)
+  // 排队句柄可能来自 idle，也可能来自让路时的 setTimeout，两种都撤一次
+  warmCleanup = () => {
+    if (!warmId) return
+    stopIdle(warmId)
+    clearTimeout(warmId)
+  }
 })
+
+watch(() => viewer.expanded, syncPause)
 
 onBeforeUnmount(() => {
   if (rafId) cancelAnimationFrame(rafId)
   lanesWatch?.disconnect()
   lanesEl.value?.removeEventListener('pointerenter', onEnter)
   lanesEl.value?.removeEventListener('pointerleave', onLeave)
+  warmCleanup?.()
+  restoreSource()
 })
 </script>
 
 <template>
   <div class="feature">
-    <GridBackground :rotation="-30" :z-index="1" />
+    <GridBackground :rotation="-30" :z-index="1" :paused="viewer.expanded" />
 
     <div class="board">
       <!-- 左列：竖排白字，字号顶满整屏高度 -->
@@ -290,40 +454,42 @@ onBeforeUnmount(() => {
         <span class="panel-glow" aria-hidden="true"></span>
         <div class="stage">
           <div class="rail">
-            <div ref="lanesEl" v-once class="lanes">
+            <div
+              ref="lanesEl"
+              v-once
+              class="lanes"
+              :style="{ '--lane-rot': LANE_ROT + 'deg' }"
+              @click="pickCard"
+            >
               <div
                 v-for="lane in LANES"
                 :key="lane"
                 class="track"
               >
-                <article
+                <FeatureCard
                   v-for="(item, index) in LOOP"
                   :key="index"
-                  class="card"
-                  :style="{
-                    '--accent': item.theme.base,
-                    '--logo': item.src,
-                  }"
-                >
-                  <!-- 超大序号当背景水印，超出卡片的部分被裁掉 -->
-                  <span class="card-no" aria-hidden="true">{{ item.no }}</span>
-                  <!-- 品牌色水印：垫在磨砂层底下，透过玻璃化成一层彩雾 -->
-                  <span class="card-halo" aria-hidden="true"></span>
-                  <header class="card-head">
-                    <!-- 主图标走 solar 系列 -->
-                    <span class="card-icon">
-                      <component :is="item.icon" width="20" height="20" />
-                    </span>
-                    <h2 class="card-title">{{ item.title }}</h2>
-                  </header>
-                  <p class="card-desc">{{ item.desc }}</p>
-                </article>
+                  :item="item"
+                  :data-index="index"
+                />
               </div>
             </div>
           </div>
         </div>
       </section>
     </div>
+
+    <!-- 展开的大窗：Teleport 到 body，压在顶栏之上 -->
+    <FeatureViewer
+      v-if="viewer.expanded && activeItem && originRect"
+      :item="activeItem"
+      :origin="originRect"
+      :origin-parts="originParts"
+      :total="LOOP.length"
+      @ready="onViewerReady"
+      @release="restoreSource"
+      @closed="onViewerClosed"
+    />
   </div>
 </template>
 
@@ -472,8 +638,8 @@ onBeforeUnmount(() => {
   left: 60.5%;
   display: flex;
   gap: calc(var(--card-h) * 0.13); /* 列间收紧，三列成一整块 */
-  /* 先摆到区域中线，再斜过来 */
-  transform: translate(-50%, -50%) rotate(15deg);
+  /* 先摆到区域中线，再斜过来；角度由脚本给的 --lane-rot 定，量几何时才解得回去 */
+  transform: translate(-50%, -50%) rotate(var(--lane-rot, 15deg));
 }
 
 /* 三条车道各滚各的，位移由脚本每帧写一个 translateY */
@@ -483,182 +649,6 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   /* 提前提层：位移只走合成，卡内内容不必每帧重算 */
   will-change: transform;
-}
-
-/* 卡内一切尺寸都按卡高折算，比例由 --card-w 定 */
-.card {
-  /* 版式自成一格：这些子树的布局与样式计算可以不再波及外面 */
-  contain: layout style paint;
-  position: relative;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--card-h) * 0.026);
-  width: var(--card-w);
-  height: fit-content;
-  /* 间距用外边距，一份列表的高度才严格等于八张 */
-  margin-bottom: var(--card-gap);
-  /* 左右比上下宽一点：和浅色弧区并排，横向不留空虚 */
-  padding: calc(var(--card-h) * 0.056) calc(var(--card-h) * 0.064) calc(var(--card-h) * 0.088);
-
-  overflow: hidden;
-  /* 自成层叠上下文，水印才能垫在内容下 */
-  isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: calc(var(--card-h) * 0.066);
-  /* 深蓝墨底：底色几乎压满，压住后面浅弧区，深底上还要留住品牌色 */
-  background:
-    radial-gradient(
-      122% 96% at 88% 114%,
-      color-mix(in srgb, var(--accent) 24%, transparent) 0%,
-      transparent 64%
-    ),
-    radial-gradient(90% 70% at 8% -14%, rgba(255, 255, 255, 0.11) 0%, transparent 62%),
-    linear-gradient(158deg, #363c47 0%, #22262e 48%, #181b22 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.13),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 2px 4px rgba(8, 12, 24, 0.28),
-    0 14px 28px rgba(8, 12, 24, 0.26),
-    0 30px 58px rgba(8, 12, 24, 0.22);
-  transition:
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.32s ease,
-    border-color 0.32s ease;
-}
-
-/* 语言图标只当背景：原封不动的彩色图标糊开，在深底上化成一层品牌色雾 */
-.card-halo {
-  position: absolute;
-  right: calc(var(--card-h) * -0.03);
-  bottom: calc(var(--card-h) * -0.06);
-  z-index: -2; /* 垫到最底下 */
-  width: calc(var(--card-h) * 0.72);
-  height: calc(var(--card-h) * 0.72);
-  /* 直接用图标本身的彩色版，不再换成单色遮罩 */
-  background-image: var(--logo);
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-  /* 模糊已经烘进图标本身，这里只留一层渐隐：图形芯子还认得出，外圈直接化进底色 */
-  mask-image: radial-gradient(circle at 72% 72%, #000 30%, rgba(0, 0, 0, 0.45) 62%, transparent 92%);
-  -webkit-mask-image: radial-gradient(
-    circle at 72% 72%,
-    #000 30%,
-    rgba(0, 0, 0, 0.45) 62%,
-    transparent 92%
-  );
-  opacity: 0.34;
-  pointer-events: none;
-}
-
-/* 底部一道渐隐强调线，代替满卡留白 */
-.card::after {
-  content: '';
-  position: absolute;
-  left: calc(var(--card-h) * 0.064);
-  right: calc(var(--card-h) * 0.22);
-  bottom: calc(var(--card-h) * 0.06);
-  height: 3px;
-  border-radius: 3px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent) 92%, transparent),
-    color-mix(in srgb, var(--accent) 0%, transparent)
-  );
-}
-
-.card:hover {
-  transform: translateY(-8px) scale(1.015);
-  border-color: color-mix(in srgb, var(--accent) 46%, rgba(255, 255, 255, 0.14));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 4px 10px rgba(8, 12, 24, 0.34),
-    0 22px 42px rgba(8, 12, 24, 0.34),
-    0 38px 74px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.card:hover .card-halo {
-  opacity: 0.5;
-}
-
-/* 图标与标题同一行，图标在左、标题紧随 */
-.card-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: calc(var(--card-h) * 0.055);
-}
-
-.card-icon {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: calc(var(--card-h) * 0.185);
-  height: calc(var(--card-h) * 0.185);
-  /* 深处一点、亮处一点的品牌色，芯片在深底上透出光 */
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent);
-  border-radius: calc(var(--card-h) * 0.062);
-  background: linear-gradient(
-    150deg,
-    color-mix(in srgb, var(--accent) 30%, transparent),
-    color-mix(in srgb, var(--accent) 10%, transparent)
-  );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  color: color-mix(in srgb, var(--accent) 76%, #ffffff);
-}
-
-.card-icon svg {
-  display: block;
-  width: calc(var(--card-h) * 0.1);
-  height: calc(var(--card-h) * 0.1);
-}
-
-.card-title {
-  min-width: 0;
-  margin: 0;
-  font-size: max(17px, calc(var(--card-h) * 0.074));
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
-  color: #f2f5fa;
-}
-
-.card-desc {
-  /* 占住剩余高度，各卡版式一致 */
-  display: block;
-  flex: 1 1 auto;
-  /* 行数超了直接截断，卡片高度才稳 */
-  overflow: hidden;
-  max-height: calc(var(--card-h) * 0.46);
-  margin: 0;
-  /* 正文比上一版抬一档，标题字号保持原样 */
-  font-size: max(14px, calc(var(--card-h) * 0.07));
-  line-height: 1.68;
-  /* 中文末行不落单字，不支持也就是照旧换行 */
-  text-wrap: pretty;
-  overflow-wrap: break-word;
-  color: #b6c0d0;
-}
-
-/* 超大水印序号，压在右上角当背景板 */
-.card-no {
-  position: absolute;
-  top: calc(var(--card-h) * -0.12);
-  right: calc(var(--card-h) * -0.07);
-  z-index: -1; /* 垫到内容底下 */
-  font-family: Arial, system-ui;
-  font-size: calc(var(--card-h) * 0.44);
-  font-weight: 900;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  /* 深底上要更亮才认得出，仍压在水印的层次上 */
-  color: color-mix(in srgb, var(--accent) 52%, transparent);
-  pointer-events: none;
-}
-
-.card:hover .card-no {
-  color: color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
 @media (max-width: 900px) {
