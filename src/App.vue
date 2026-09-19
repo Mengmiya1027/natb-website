@@ -1,11 +1,13 @@
 <script setup>
-import HomePage from './pages/Home.vue'
+import HomePage from './pages/HomePage.vue'
 import NavBar from './components/NavBar.vue'
+import Features from "./pages/Features.vue";
 </script>
 
 <template>
   <NavBar />
-  <HomePage />
+<!--  <HomePage />-->
+  <Features/>
 </template>
 
 <style>
