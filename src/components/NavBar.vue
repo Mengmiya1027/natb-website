@@ -15,7 +15,12 @@ const shown = computed(() => store.isFlying || store.isLanded)
 </script>
 
 <template>
-  <header class="navbar" :class="{ 'is-shown': shown }" :aria-hidden="shown ? undefined : 'true'">
+  <header
+    class="navbar"
+    :class="{ 'is-shown': shown }"
+    :aria-hidden="shown ? undefined : 'true'"
+    :inert="!shown"
+  >
     <div class="dock">
       <!-- 左：圆形图标 + 字样 -->
       <a class="brand" href="#">

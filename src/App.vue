@@ -2,12 +2,14 @@
 import HomePage from './pages/HomePage.vue'
 import NavBar from './components/NavBar.vue'
 import Features from "./pages/Features.vue";
+import UpdateLog from "./pages/UpdateLog.vue";
 </script>
 
 <template>
   <NavBar />
 <!--  <HomePage />-->
-  <Features/>
+<!--  <Features/>-->
+  <UpdateLog/>
 </template>
 
 <style>
