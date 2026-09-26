@@ -125,6 +125,12 @@ const PERSPECTIVE = 1500
 const EDGE_GAP = 8
 const stageRef = ref(null)
 
+/* 两侧张数不等，定边界的是张数多的那一侧。这个数只由 index 决定，
+ * 拿它跟上次实测的那个比一下，就知道"切过去会不会改变几何"，
+ * 多数切换其实不必重量。 */
+const outerOf = (i) => Math.max(i, TOTAL - 1 - i)
+let measuredOuter = -1
+
 // 正在看之前是已看过，之后是没看过
 const stateOf = (i) => (i === index.value ? 'reading' : i < index.value ? 'read' : 'unread')
 const canPrev = computed(() => index.value < TOTAL - 1) // 还有没看过的
@@ -136,6 +142,32 @@ function goPrev() {
 }
 function goNext() {
   if (canNext.value) index.value -= 1
+}
+
+/** 点堆里的卡、点页脚的指示条都走这里：直接跳到那一版，不逐版推进 */
+function goTo(i) {
+  if (i < 0 || i >= TOTAL || i === index.value) return
+  index.value = i
+}
+
+/* ===== 连击加速 =====
+ * 一次切换的过渡还没走完就又切，说明用户在快速连翻。
+ * 这时若仍按 620ms 起跑，每次打断都恰好落在强缓动的慢尾巴上，
+ * 越点越"一卡一卡"；所以只把连击这一路缩短，单点仍是原节奏。
+ */
+const COMBO_GAP = 500 // 距上次切换短于这么久，就算连击
+const COMBO_K = 0.5 // 连击时的时长倍数
+const combo = ref(false)
+
+let lastSwitch = -Infinity
+
+/** 每次 index 变化记一笔：连击与否看两次切换的间隔，一步跨多张的跳转直接算快的 */
+function noteSwitch(force = false) {
+  const now = performance.now()
+  const quick = force || now - lastSwitch < COMBO_GAP
+  lastSwitch = now
+  // 值没变就别赋值，免得白白多 patch 一次根节点
+  if (combo.value !== quick) combo.value = quick
 }
 
 /* ===== 滚轮切换 =====
@@ -151,11 +183,14 @@ let wheelAcc = 0
 const wheelPx = (event) =>
   event.deltaMode === 1 ? event.deltaY * 40 : event.deltaMode === 2 ? event.deltaY * 800 : event.deltaY
 
-/** 指针落在卡片内的条目列表上、且列表还能滚时，滚轮整个归它：不抢，也不链式接管 */
+/** 指针落在"正在看那张"的条目列表上、且列表还能滚时，滚轮整个归它：不抢，也不链式接管 */
 function listOwnsWheel(node) {
   if (!(node instanceof Element)) return false
   const list = node.closest('.log-list')
-  return !!list && list.scrollHeight > list.clientHeight + 1
+  if (!list) return false
+  // 堆里的卡现在也接指针了，但只认点击跳转：不然鼠标一偏，滚轮就再也切不动版本
+  if (list.closest('.log-card')?.dataset.state !== 'reading') return false
+  return list.scrollHeight > list.clientHeight + 1
 }
 
 function onWheel(event) {
@@ -228,8 +263,7 @@ function measure() {
   const unit = cardW < GAP_STEP_NARROW_W ? GAP_STEP_NARROW : GAP_STEP
   // 横版卡很宽，直接按卡宽推深度会退得太夸张，封顶到竖版的量级
   const depth = Math.round(Math.min(cardW * 0.16, 80))
-  // 两侧张数不等，定边界的是张数多的那一侧
-  const outer = Math.max(index.value, TOTAL - 1 - index.value)
+  const outer = outerOf(index.value)
   const tilt = tiltedGeom(stage)
   const rad = (tilt.deg * Math.PI) / 180
   const half = (cardW / 2) * tilt.scale
@@ -247,6 +281,7 @@ function measure() {
     step: unit,
     depth,
   }
+  measuredOuter = outer
 }
 
 let frame = 0
@@ -259,8 +294,19 @@ function scheduleMeasure() {
   })
 }
 
-// 两侧张数一变，能推的最远处也跟着变
-watch(index, scheduleMeasure)
+/* index 一变，必须在"写 translate 的那次渲染之前"把几何定稿。
+ * 走 scheduleMeasure 会拖到下一帧，等于过渡已经起跑才改目标值：
+ * CSS 只能从当前中间值重新插值一整段，看着就是一顿。
+ * 所以这里同步量，且只在几何真会变时量——多数切换 outer 没动，直接跳过。 */
+watch(
+  index,
+  (to, from) => {
+    // 一步跨多张就是直接跳转，按连击的节奏走，别让长位移慢悠悠地爬
+    noteSwitch(Math.abs(to - from) > 1)
+    if (outerOf(to) !== measuredOuter) measure()
+  },
+  { flush: 'sync' },
+)
 
 const stamp = (d) => (d ?? '').replace(/-/g, '.')
 const zhStamp = (d) => {
@@ -290,20 +336,47 @@ const folio = computed(() => {
 const folioRef = ref(null)
 const folioNudge = ref(0.024) // 量不出来时的兜底（≈ 字距绝对值的一半）
 
+/* 每换一版都要量一次底纹的墨迹重心，但画布不必跟着重建：
+ * 建 canvas 再取 2d 上下文是这几步里最贵的一环，缓存下来就只剩一次 measureText。
+ * 同一个版本号回头再看时结果完全一样，再按"字体 + 字距 + 字符串"缓存一层。 */
+let folioCtx
+let folioCtxProbed = false
+const folioNudgeCache = new Map()
+
+function folioContext() {
+  if (folioCtxProbed) return folioCtx
+  folioCtxProbed = true
+  if (typeof document === 'undefined') return (folioCtx = null)
+  const ctx = document.createElement('canvas').getContext('2d')
+  // 老引擎没有 canvas letterSpacing，量不了就退回兜底值
+  folioCtx = ctx && typeof ctx.letterSpacing === 'string' ? ctx : null
+  return folioCtx
+}
+
 function measureFolio() {
   const el = folioRef.value
-  const ctx = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null
+  const ctx = folioContext()
   if (!el || !ctx) return
   const cs = getComputedStyle(el)
   const px = parseFloat(cs.fontSize)
   if (!px) return
   // 字体与字距都从元素自身读，样式改了这里自动跟上（注意字号要带单位，否则整条 font 作废）
-  if (typeof ctx.letterSpacing !== 'string') return
-  ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
-  ctx.letterSpacing = cs.letterSpacing
-  const m = ctx.measureText(folio.value)
+  const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+  const spacing = cs.letterSpacing
+  const text = folio.value
+  const key = `${font}|${spacing}|${text}`
+  const hit = folioNudgeCache.get(key)
+  if (hit !== undefined) {
+    folioNudge.value = hit
+    return
+  }
+  ctx.font = font
+  ctx.letterSpacing = spacing
+  const m = ctx.measureText(text)
   const inkCenter = (-m.actualBoundingBoxLeft + m.actualBoundingBoxRight) / 2
-  folioNudge.value = (inkCenter - m.width / 2) / px
+  const nudge = (inkCenter - m.width / 2) / px
+  folioNudgeCache.set(key, nudge)
+  folioNudge.value = nudge
 }
 
 watch(folio, measureFolio)
@@ -332,6 +405,8 @@ onMounted(() => {
   // 字体到位后卡宽可能变，底纹的墨迹补偿也要按真字体重算
   document.fonts?.ready?.then(() => {
     scheduleMeasure()
+    // 真字体到位后墨迹重心会变，之前按回退字体量出来的结果全部作废
+    folioNudgeCache.clear()
     measureFolio()
   })
   if (typeof ResizeObserver !== 'undefined' && stageRef.value) {
@@ -356,7 +431,8 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 </script>
 
 <template>
-  <div class="log-page">
+  <!-- --dur-k 是连击时的时长倍数：单点 1，连着翻 0.5，卡片只认 --dur-run -->
+  <div class="log-page" :style="{ '--dur-k': combo ? COMBO_K : 1 }">
     <!-- 背景：public 里的图 + 压暗层 + 巨型版本底纹 -->
     <div class="log-backdrop" aria-hidden="true">
       <div class="log-backdrop__img" :style="{ backgroundImage: `url(${backdrop})` }"></div>
@@ -396,6 +472,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
             :data-state="stateOf(i)"
             :style="cardStyle(i)"
             :aria-current="i === index ? 'true' : undefined"
+            @click="goTo(i)"
           >
             <p class="log-card__mark" aria-hidden="true">{{ card.folio ?? card.version }}</p>
 
@@ -473,13 +550,18 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
         <p class="log-ordinal">
           <b>{{ String(index).padStart(2, '0') }}</b> / {{ String(RELEASE_COUNT).padStart(2, '0') }}
         </p>
-        <ul class="log-meter" aria-hidden="true">
-          <li
-            v-for="{ card, i } in METER_ITEMS"
-            :key="card.version"
-            class="log-meter__piece"
-            :data-state="stateOf(i)"
-          ></li>
+        <!-- 每一段都能点：点了直接跳到那一版 -->
+        <ul class="log-meter" aria-label="版本导航">
+          <li v-for="{ card, i } in METER_ITEMS" :key="card.version">
+            <button
+              type="button"
+              class="log-meter__piece"
+              :data-state="stateOf(i)"
+              :aria-current="i === index ? 'true' : undefined"
+              :aria-label="`查看 ${card.version}`"
+              @click="goTo(i)"
+            ></button>
+          </li>
         </ul>
         <p class="log-hint">MADE BY NATB DEVELOPER GROUP</p>
       </footer>
@@ -511,6 +593,10 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur: 620ms;
+  /* 连击时按这个倍数缩短。单点仍是 --dur 原节奏，
+     真正生效的时长统一走 --dur-run，卡片只认它。 */
+  --dur-k: 1;
+  --dur-run: calc(var(--dur) * var(--dur-k));
   --card-w: clamp(232px, 32vw, 460px);
   --card-h: clamp(300px, 46vh, 480px);
 
@@ -693,13 +779,19 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   /* 位移由脚本写 translate，这里只负责姿态 */
   rotate: y var(--tilt);
   scale: var(--card-scale);
-  will-change: translate, rotate, scale;
+  /* 悬浮 / 按下的缩放另走 transform，跟三态的 scale 分开：
+     挤在同一个属性里的话，两者只能共享同一条过渡时长，
+     悬浮反馈会被切换的 620ms 拖成"飘"过去的。 */
+  transform: scale(var(--card-hover, 1));
+  will-change: translate, rotate, scale, transform;
   /* 带角形的层，每帧重画阴影的代价最大：box-shadow 故意不进过渡列表，
      换状态时阴影直接切换（位移动效遮得住），省掉的是每帧一次的路径+模糊重算 */
   transition:
-    translate var(--dur) var(--ease),
-    rotate var(--dur) var(--ease),
-    scale var(--dur) var(--ease),
+    translate var(--dur-run) var(--ease),
+    rotate var(--dur-run) var(--ease),
+    scale var(--dur-run) var(--ease),
+    /* 悬浮与按下是自己的一档快节奏，不跟着切换时长走 */
+    transform 160ms var(--ease),
     background-color 420ms ease;
 }
 
@@ -816,12 +908,24 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   color: var(--ink-2);
 }
 
-/* 只有正在看的那张接指针，堆里的卡片纯展示 */
-.log-card[data-state='reading'] {
+/* 堆里的卡也接指针了：悬浮会略微浮起，点一下就直接跳过去 */
+.log-card {
+  --card-hover: 1;
   pointer-events: auto;
 }
+
 .log-card:not([data-state='reading']) {
-  pointer-events: none;
+  cursor: pointer;
+}
+
+/* 悬浮在堆里的卡上：略微浮起一点，但别抢了正在看那张的份量 */
+.log-card:not([data-state='reading']):hover {
+  --card-hover: 1.032;
+}
+
+/* 按下先收一下，松手才跳 */
+.log-card:not([data-state='reading']):active {
+  --card-hover: 0.962;
 }
 
 /* ===== 卡内 ===== */
@@ -1072,30 +1176,97 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   font-weight: 600;
 }
 
+/* 渐变里的两个色标要能过渡，就必须注册成 <color>：
+   background-image 本身在 CSS 里不可插值，切换时会整段跳过去；
+   把色标抽成变量、交给 @property 管，颜色才真的走得动。 */
+@property --meter-a {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: rgba(255, 255, 255, 0.3);
+}
+
+@property --meter-b {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: rgba(255, 255, 255, 0.3);
+}
+
 .log-meter {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* 进度条与卡片同一套状态：靠亮度与光圈别，不只靠颜色 */
+.log-meter > li {
+  display: flex;
+}
+
+/* 进度条与卡片同一套状态：靠亮度与光圈别，不只靠颜色。
+   每一段现在都是按钮，点一下直接跳到那一版。 */
 .log-meter__piece {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
   width: clamp(18px, 2.4vw, 34px);
   height: 4px;
+  padding: 0;
+  border: 0;
+  appearance: none;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.3);
-  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  /* 两端同色时就是原来的纯色，两端不同色时才是渐变收口 */
+  --meter-a: rgba(255, 255, 255, 0.3);
+  --meter-b: rgba(255, 255, 255, 0.3);
+  background: linear-gradient(90deg, var(--meter-a), var(--meter-b) 64%);
+  cursor: pointer;
+  /* 长度要滑过去、厚度要跟手、颜色也要一路淡过去 */
+  transition:
+    width 340ms var(--ease),
+    height 180ms ease,
+    --meter-a 320ms ease,
+    --meter-b 320ms ease,
+    box-shadow 300ms ease;
+}
+
+/* 条本身只有 4px 高，点击热区靠伪元素撑开（左右各 3px，正好不越过 6px 的缝） */
+.log-meter__piece::before {
+  content: '';
+  position: absolute;
+  inset: -11px -3px;
 }
 
 .log-meter__piece[data-state='read'] {
-  background: rgba(255, 255, 255, 0.62);
+  --meter-a: rgba(255, 255, 255, 0.62);
+  --meter-b: rgba(255, 255, 255, 0.62);
 }
 
+/* 正在看的那段：比别的长一截，并用渐变收口 */
 .log-meter__piece[data-state='reading'] {
-  background: #fff;
+  width: clamp(28px, 3.6vw, 50px);
+  --meter-a: rgba(122, 167, 255, 0.92);
+  --meter-b: #fff;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+/* 微交互刻意不跟着卡片放大，改用"变亮 + 变厚"这套语言 */
+.log-meter__piece:hover,
+.log-meter__piece:focus-visible {
+  height: 6px;
+  --meter-a: rgba(255, 255, 255, 0.84);
+  --meter-b: rgba(255, 255, 255, 0.84);
+}
+
+.log-meter__piece[data-state='reading']:hover,
+.log-meter__piece[data-state='reading']:focus-visible {
+  --meter-a: #aac7ff;
+  --meter-b: #fff;
+}
+
+.log-meter__piece:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
 }
 
 .log-hint {
