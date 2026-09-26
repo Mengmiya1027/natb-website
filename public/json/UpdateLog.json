@@ -1,0 +1,47 @@
+{
+  "$comment": "NATB 官网唯一的版本数据源。「更新日志」页逐版渲染这份清单，「项目信息」页的最新版本号取的也是它——releases 的第一条即最新版本（前端还会按 date 倒序再归一一次，顺序写反也不会串版）。换版本只改这一个文件，页面代码一行都不用动。kind 只认 new / opt / fix / soon 四种。",
+  "releases": [
+    {
+      "version": "v1.0.3",
+      "date": "2026-09-12",
+      "items": [
+        { "kind": "fix", "tag": "修复", "text": "修复已知问题提升稳定性" },
+        { "kind": "new", "tag": "新增", "text": "新增RTOS专区，可以对RTOS设备进行操作" },
+        { "kind": "new", "tag": "新增", "text": "新增了一些菜单" },
+        { "kind": "new", "tag": "新增", "text": "制作了官网 https://natb.top" },
+        { "kind": "new", "tag": "新增", "text": "有个菜单可以去探险~" }
+      ]
+    },
+    {
+      "version": "v1.0.2",
+      "date": "2026-08-20",
+      "items": [
+        { "kind": "new", "tag": "新增", "text": "新增深度防云控XP模块newxtcfreedom" },
+        { "kind": "opt", "tag": "优化", "text": "优化7.1机型兼容性" },
+        { "kind": "fix", "tag": "修复", "text": "修复安装应用时签名检测问题" },
+        { "kind": "new", "tag": "新增", "text": "新增离线OTA模拟点击功能" }
+      ]
+    },
+    {
+      "version": "v1.0.1",
+      "date": "2026-08-10",
+      "items": [
+        { "kind": "fix", "tag": "修复", "text": "修复一键ROOT多个机型兼容性问题" },
+        { "kind": "opt", "tag": "优化", "text": "优化UI界面" },
+        { "kind": "new", "tag": "新增", "text": "新增查询云控封禁信息功能" }
+      ]
+    },
+    {
+      "version": "v1.0.0",
+      "date": "2026-08-01",
+      "items": [
+        { "kind": "new", "tag": "新增", "text": "NATB首个正式版本" },
+        { "kind": "new", "tag": "新增", "text": "继承ATB若干工具箱功能" },
+        { "kind": "new", "tag": "新增", "text": "支持全系列机型一键ROOT" },
+        { "kind": "new", "tag": "新增", "text": "支持离线OTA升级" },
+        { "kind": "new", "tag": "新增", "text": "支持XP框架安装" },
+        { "kind": "new", "tag": "新增", "text": "支持应用管理" }
+      ]
+    }
+  ]
+}

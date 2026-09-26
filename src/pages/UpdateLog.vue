@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAnimationStore } from '@/stores/animation'
+import { useUpdateLog } from '@/utils/updateLog'
 // 标签图标要按 kind 动态取，只能显式导入组件（模板里的 <i-xxx> 是静态解析的）
 import IconSparkles from '~icons/lucide/sparkles'
 import IconZap from '~icons/lucide/zap'
@@ -9,51 +10,10 @@ import IconWrench from '~icons/lucide/wrench'
 /**
  * 更新记录：最新的排在最前，index 指向正在看的那版。
  * kind 决定条目图标与标签强度，文案本身保持原样。
+ * 版本日志本身不在这份文件里：整份清单来自 public/json/UpdateLog.json，
+ * 「项目信息」页那行版本号读的是同一份清单的第一条（最新排在最前）。
  */
-const RELEASES = [
-  {
-    version: 'v1.0.3',
-    date: '2026-09-12',
-    items: [
-      { kind: 'fix', tag: '修复', text: '修复已知问题提升稳定性' },
-      { kind: 'new', tag: '新增', text: '新增RTOS专区，可以对RTOS设备进行操作' },
-      { kind: 'new', tag: '新增', text: '新增了一些菜单' },
-      { kind: 'new', tag: '新增', text: '制作了官网 https://natb.top' },
-      { kind: 'new', tag: '新增', text: '有个菜单可以去探险~' },
-    ],
-  },
-  {
-    version: 'v1.0.2',
-    date: '2026-08-20',
-    items: [
-      { kind: 'new', tag: '新增', text: '新增深度防云控XP模块newxtcfreedom' },
-      { kind: 'opt', tag: '优化', text: '优化7.1机型兼容性' },
-      { kind: 'fix', tag: '修复', text: '修复安装应用时签名检测问题' },
-      { kind: 'new', tag: '新增', text: '新增离线OTA模拟点击功能' },
-    ],
-  },
-  {
-    version: 'v1.0.1',
-    date: '2026-08-10',
-    items: [
-      { kind: 'fix', tag: '修复', text: '修复一键ROOT多个机型兼容性问题' },
-      { kind: 'opt', tag: '优化', text: '优化UI界面' },
-      { kind: 'new', tag: '新增', text: '新增查询云控封禁信息功能' },
-    ],
-  },
-  {
-    version: 'v1.0.0',
-    date: '2026-08-01',
-    items: [
-      { kind: 'new', tag: '新增', text: 'NATB首个正式版本' },
-      { kind: 'new', tag: '新增', text: '继承ATB若干工具箱功能' },
-      { kind: 'new', tag: '新增', text: '支持全系列机型一键ROOT' },
-      { kind: 'new', tag: '新增', text: '支持离线OTA升级' },
-      { kind: 'new', tag: '新增', text: '支持XP框架安装' },
-      { kind: 'new', tag: '新增', text: '支持应用管理' },
-    ],
-  },
-]
+const { status: logStatus, releases, error: loadError } = useUpdateLog()
 
 const STATE_TEXT = { unread: '未读', reading: '阅读中', read: '已读' }
 const STATE_SHORT = { unread: '没看过', reading: '正在看', read: '已看过' }
@@ -95,18 +55,39 @@ const END = {
   items: [],
 }
 
-const CARDS = [SOON, ...RELEASES, END].map((release) => ({ ...release, items: release.items.map(withParts) }))
-const TOTAL = CARDS.length
+/* ===== 数据三态 =====
+ * ready 才有牌堆可摆：loading / error 各摆一张占位卡，页面骨架与背景照旧。
+ * 拉不到数据时既不会白屏，也不会把"一份空的更新日志"当成真的显示出来。
+ */
+const ready = computed(() => logStatus.value === 'ready' && releases.value.length > 0)
+const stateText = computed(() => {
+  if (logStatus.value === 'error') return '版本数据加载失败'
+  return logStatus.value === 'ready' ? '暂无更新记录' : '正在读取版本数据'
+})
+const stateSub = computed(() =>
+  logStatus.value === 'error'
+    ? `没能读到 public/json/UpdateLog.json${loadError.value ? `（${loadError.value}）` : ''}，稍后刷新页面再试`
+    : '版本清单来自 public/json/UpdateLog.json',
+)
+
+// 数据到了才把两张反色卡夹上去：预告在最前、收尾垫最后，中间的版本一律按日期倒序
+const CARDS = computed(() =>
+  [SOON, ...releases.value, END].map((release) => ({ ...release, items: release.items.map(withParts) })),
+)
+const TOTAL = computed(() => CARDS.value.length)
 // 两张反色卡不算版本：页眉的版本数、底部指示条都只认已发布的
-const PUBLISHED = CARDS.filter((card) => !card.dark)
-const RELEASE_COUNT = RELEASES.length
-const METER_ITEMS = CARDS.map((card, i) => ({ card, i })).filter((entry) => !entry.card.dark)
+const PUBLISHED = computed(() => CARDS.value.filter((card) => !card.dark))
+const RELEASE_COUNT = computed(() => releases.value.length)
+const METER_ITEMS = computed(() =>
+  CARDS.value.map((card, i) => ({ card, i })).filter((entry) => !entry.card.dark),
+)
 // 页眉的横跨区间只算已发布的版本，反色卡没有日期
-const NEWEST = PUBLISHED[0]
-const OLDEST = PUBLISHED[PUBLISHED.length - 1]
+const NEWEST = computed(() => PUBLISHED.value[0])
+const OLDEST = computed(() => PUBLISHED.value[PUBLISHED.value.length - 1])
 
 // index 即进度：0 是预告，末尾是收尾，开局停在第一个带版本号的
-const index = ref(Math.max(0, CARDS.findIndex((card) => !card.dark)))
+// 牌堆只在 ready 时才渲染，下标 1 因此一定对得上"最新的那一版"
+const index = ref(1)
 // pitch 组内相邻间距，push 整组外推倍数，step 组内倍数，都由容器实测得出
 const geo = ref({ pitch: 132, push: 0, step: 0.6, depth: 48 })
 // 横向间距不是等距的，两级分开管（都是实测 pitch 的倍数）：
@@ -162,8 +143,9 @@ const ENTER_DUR = {
   hint: 560,
 }
 // 最远那张卡是 |step| 最大的：它落定，这段入场就算走完
-const CARD_STEP_MAX = Math.max(...CARDS.map((_, i) => Math.abs(i - index.value)))
-const ENTER_END = ENTER.cards + ENTER.cardStep * CARD_STEP_MAX + ENTER_DUR.card + 40
+// 卡数要等数据到位才定，所以这两个数跟着算；定时器在真起跑时才读它们
+const CARD_STEP_MAX = computed(() => Math.max(...CARDS.value.map((_, i) => Math.abs(i - index.value))))
+const ENTER_END = computed(() => ENTER.cards + ENTER.cardStep * CARD_STEP_MAX.value + ENTER_DUR.card + 40)
 
 const ms = (v) => `${v}ms`
 // 同一份数字交给 CSS：:style 挂在根节点上，var() 一路继承下去
@@ -224,7 +206,7 @@ function finishEntrance() {
 function openEntrance() {
   gated.value = false
   entering.value = true
-  enterTimer = window.setTimeout(finishEntrance, ENTER_END)
+  enterTimer = window.setTimeout(finishEntrance, ENTER_END.value)
 }
 
 /** 入场没收干净就要切版：先把它收干净，切换才是终态对终态，不会叠着半透明的卡翻页 */
@@ -235,12 +217,12 @@ function ensureSettled() {
 /* 两侧张数不等，定边界的是张数多的那一侧。这个数只由 index 决定，
  * 拿它跟上次实测的那个比一下，就知道"切过去会不会改变几何"，
  * 多数切换其实不必重量。 */
-const outerOf = (i) => Math.max(i, TOTAL - 1 - i)
+const outerOf = (i) => Math.max(i, TOTAL.value - 1 - i)
 let measuredOuter = -1
 
 // 正在看之前是已看过，之后是没看过
 const stateOf = (i) => (i === index.value ? 'reading' : i < index.value ? 'read' : 'unread')
-const canPrev = computed(() => index.value < TOTAL - 1) // 还有没看过的
+const canPrev = computed(() => index.value < TOTAL.value - 1) // 还有没看过的
 const canNext = computed(() => index.value > 0) // 还有已看过的
 
 /** 只按时间语义命名，左右落点交给模板绑：更早就 +1，更新就 -1 */
@@ -255,7 +237,7 @@ function goNext() {
 
 /** 点堆里的卡、点页脚的指示条都走这里：直接跳到那一版，不逐版推进 */
 function goTo(i) {
-  if (i < 0 || i >= TOTAL || i === index.value) return
+  if (i < 0 || i >= TOTAL.value || i === index.value) return
   ensureSettled()
   index.value = i
 }
@@ -384,7 +366,7 @@ function measure() {
   const room = Math.max(0, (window.innerWidth / 2 - EDGE_GAP) / k - half * Math.abs(Math.cos(rad)))
   // 最外侧那位的组内倍数，不含外推
   const outerBase = GAP_NEAR + Math.max(0, outer - 1) * unit
-  const cap = room / Math.max(1, TOTAL - 1)
+  const cap = room / Math.max(1, TOTAL.value - 1)
   const pitch = Math.max(1, Math.round(Math.min(cardW * PITCH_K, Math.max(cardW * 0.18, cap))))
   geo.value = {
     pitch,
@@ -427,15 +409,20 @@ const zhStamp = (d) => {
 }
 
 const announce = computed(() => {
-  const card = CARDS[index.value]
+  const card = CARDS.value[index.value]
+  // 数据还没到（loading / error）时没有牌堆可播报，占位文案自己带 role="status"
+  if (!card) return ''
   const when = card.date ? zhStamp(card.date) : '没有日期'
   const what = card.count ?? `${card.items.length} 项更新`
-  return `正在看 ${card.version}，${when}，${what}；已看过 ${index.value} 版，没看过 ${TOTAL - 1 - index.value} 版`
+  return `正在看 ${card.version}，${when}，${what}；已看过 ${index.value} 版，没看过 ${TOTAL.value - 1 - index.value} 版`
 })
 
 // 底纹显示的就是当前版本的号（1.0.0 这种），跟着 index 走
 const folio = computed(() => {
-  const card = CARDS[index.value]
+  // 数据没到位时没有"当前版本"可言：这时牌堆没渲染，底纹也别漏出装饰卡的占位词
+  if (!ready.value) return ''
+  const card = CARDS.value[index.value]
+  if (!card) return ''
   // 反色卡没有版本号，底纹用它自己的占位词
   return card.folio ?? card.version.slice(1)
 })
@@ -509,7 +496,52 @@ function onKeydown(event) {
   }
 }
 
+/* ===== 舞台的绑定与解绑 =====
+ * 牌堆要等数据到位才渲染出来（v-if 挂在 ready 上），所以滚轮与尺寸观测不能只在挂载那一下绑死：
+ * 元素一出现就接上，元素一撤就摘干净，两处都走下面这两个函数。
+ */
 let observer = null
+let stager = null
+
+/** 接上舞台：滚轮监听、尺寸观测、首帧测量三件事绑在同一个元素上 */
+function bindStage() {
+  const stage = stageRef.value
+  if (!stage || stage === stager) return
+  unbindStage()
+  stager = stage
+  // 非被动才能在切换时拦掉页面滚动；滚轮只在卡片区接管
+  stage.addEventListener('wheel', onWheel, { passive: false })
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(scheduleMeasure)
+    observer.observe(stage)
+  }
+  // 刚进 DOM 的卡还没量过：几何与底纹墨迹补偿都按真卡宽先量一次
+  scheduleMeasure()
+  measureFolio()
+}
+
+function unbindStage() {
+  stager?.removeEventListener('wheel', onWheel)
+  stager = null
+  observer?.disconnect()
+  observer = null
+}
+
+// 数据一到位牌堆才挂上去，绑定与首测都跟着这一刻走
+watch(ready, (on) => {
+  if (!on) {
+    unbindStage()
+    return
+  }
+  nextTick(() => {
+    bindStage()
+    // 张数也是这一刻才定下的：入场还有多久收尾，得按真实卡数重排一次定时器
+    if (entering.value) {
+      clearTimeout(enterTimer)
+      enterTimer = window.setTimeout(finishEntrance, ENTER_END.value)
+    }
+  })
+})
 
 onMounted(() => {
   measure()
@@ -521,21 +553,16 @@ onMounted(() => {
     folioNudgeCache.clear()
     measureFolio()
   })
-  if (typeof ResizeObserver !== 'undefined' && stageRef.value) {
-    observer = new ResizeObserver(scheduleMeasure)
-    observer.observe(stageRef.value)
-  }
+  bindStage()
   window.addEventListener('resize', scheduleMeasure)
   window.addEventListener('keydown', onKeydown)
-  // 非被动才能在切换时拦掉页面滚动；滚轮只在卡片区接管
-  stageRef.value?.addEventListener('wheel', onWheel, { passive: false })
 
   /* ===== 入场 =====
    * 首屏渲染时类就挂上了，动画此刻已在跑，这里只负责按时间表收尾；
    * 若开场还在演，则先等它落位（最多 GATE_MAX），门一开再从 0% 起跑。
    */
   if (entering.value) {
-    enterTimer = window.setTimeout(finishEntrance, ENTER_END)
+    enterTimer = window.setTimeout(finishEntrance, ENTER_END.value)
   } else if (gated.value) {
     stopGate = watch(() => anim.isLanded, (landed) => {
       if (!landed) return
@@ -556,12 +583,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (frame) cancelAnimationFrame(frame)
-  observer?.disconnect()
+  unbindStage()
   // 入场的两个句柄与那条等待分支一起收干净
   if (enterTimer) clearTimeout(enterTimer)
   if (enterGate) clearTimeout(enterGate)
   stopGate?.()
-  stageRef.value?.removeEventListener('wheel', onWheel)
   window.removeEventListener('resize', scheduleMeasure)
   window.removeEventListener('keydown', onKeydown)
 })
@@ -594,10 +620,11 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
           <p class="log-kicker">NATB / CHANGELOG</p>
           <h1 class="log-title">更新日志</h1>
         </div>
-        <dl class="log-head__meta">
+        <!-- 数量与区间都由数据算出来，数据没到位时整块不出现，免得先亮两个空数字 -->
+        <dl v-if="ready" class="log-head__meta">
           <div>
             <dt>横跨</dt>
-            <dd>{{ stamp(OLDEST.date) }} — {{ stamp(NEWEST.date) }}</dd>
+            <dd>{{ stamp(OLDEST?.date) }} — {{ stamp(NEWEST?.date) }}</dd>
           </div>
           <div>
             <dt>共</dt>
@@ -606,7 +633,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
         </dl>
       </header>
 
-      <section ref="stageRef" class="log-stage" aria-label="版本更新记录">
+      <section v-if="ready" ref="stageRef" class="log-stage" aria-label="版本更新记录">
         <div class="log-track">
           <article
             v-for="(card, i) in CARDS"
@@ -690,7 +717,16 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
         </button>
       </section>
 
-      <footer class="log-foot">
+      <div v-else class="log-state" role="status">
+        <!-- 数据还没到、或压根没读到：牌堆位置换一张占位卡。
+             页面骨架、背景与底纹照旧，只有"该有牌堆的地方"换成一句话。
+             这一块自己带 role="status"，读屏用户同样听得到当前处于哪一态。 -->
+        <p class="log-state__mark" aria-hidden="true">{{ logStatus === 'error' ? '!' : '···' }}</p>
+        <p class="log-state__text">{{ stateText }}</p>
+        <p class="log-state__sub">{{ stateSub }}</p>
+      </div>
+
+      <footer v-if="ready" class="log-foot">
         <p class="log-ordinal">
           <b>{{ String(index).padStart(2, '0') }}</b> / {{ String(RELEASE_COUNT).padStart(2, '0') }}
         </p>
@@ -1294,6 +1330,50 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   outline-offset: 3px;
 }
 
+/* ===== 数据占位 =====
+ * 牌堆还没摆上来（或没摆成）时站的这一格：等高、居中、一句话。
+ * 不做卡片、不描边：这不是"一条日志"，只是把当前处于哪一态说清楚，别抢后面真卡片的戏。 */
+.log-state {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.log-state__mark {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(26px, 3.6vw, 40px);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  /* 只做底纹式的存在感：这一格的主角是下面那两行字 */
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.log-state__text {
+  margin: 0;
+  font-size: clamp(14px, 1.5vw, 17px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--on-glass);
+}
+
+.log-state__sub {
+  margin: 0;
+  max-width: 44ch;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+  color: var(--on-glass-2);
+  /* 失败原因（HTTP 404 这类）可能很长，窄屏宁可自己断行 */
+  overflow-wrap: anywhere;
+}
+
 /* ===== 页脚 ===== */
 /* 三段等分：两侧各占掉同样多的弹性宽度，中间的指示条就严格落在屏幕中线上 */
 .log-foot {
@@ -1616,6 +1696,12 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 .log-page.is-entering .log-card {
   animation: enter-card var(--enter-dur-card) var(--ease) both;
   animation-delay: calc(var(--enter-cards) + var(--enter-i, 0) * var(--enter-card-step));
+}
+
+/* ── 占位卡：数据没到位时站在牌堆那一格，跟着页眉一道淡入，不抢戏 ── */
+.log-page.is-entering .log-state {
+  animation: enter-rise var(--enter-dur-meta) var(--ease) both;
+  animation-delay: var(--enter-meta);
 }
 
 /* ── 页脚三段：序号、指示条（逐段展开）、落款 ── */
