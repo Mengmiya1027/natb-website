@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useAnimationStore } from '@/stores/animation'
 // 标签图标要按 kind 动态取，只能显式导入组件（模板里的 <i-xxx> 是静态解析的）
 import IconSparkles from '~icons/lucide/sparkles'
 import IconZap from '~icons/lucide/zap'
@@ -125,6 +126,112 @@ const PERSPECTIVE = 1500
 const EDGE_GAP = 8
 const stageRef = ref(null)
 
+/* ===== 入场动效的时间表 =====
+ * 与 Features 页同一套做法：阶梯只写这一份，注入成 --enter-* 交给 CSS，
+ * 样式只管姿态与曲线，时间轴不会在两边各写一遍。
+ * 顺序：背景照片 → 压暗层 → 巨型版本底纹 → 页眉三段 → 两张切换按钮
+ * → 卡片按"离正在看那张的距离"发牌 → 页脚三段。
+ */
+const ENTER = {
+  shot: 0, // 背景照片（顺带缓慢收一档放大）
+  scrim: 60, // 压暗层
+  folio: 140, // 巨型版本底纹
+  kicker: 120, // NATB / CHANGELOG
+  title: 200, // 更新日志
+  meta: 300, // 横跨 / 共 N 版本
+  navLeft: 420, // 回到更新
+  navRight: 500, // 查看更早
+  cards: 560, // 正在看那张先落
+  cardStep: 70, // 每远一层晚这么多
+  ordinal: 700, // 02 / 04
+  meter: 720, // 指示条首段
+  meterStep: 60,
+  hint: 820, // 页脚落款
+}
+const ENTER_DUR = {
+  shot: 1400,
+  scrim: 900,
+  folio: 900,
+  kicker: 620,
+  title: 700,
+  meta: 620,
+  nav: 520,
+  card: 620,
+  ordinal: 560,
+  meter: 520,
+  hint: 560,
+}
+// 最远那张卡是 |step| 最大的：它落定，这段入场就算走完
+const CARD_STEP_MAX = Math.max(...CARDS.map((_, i) => Math.abs(i - index.value)))
+const ENTER_END = ENTER.cards + ENTER.cardStep * CARD_STEP_MAX + ENTER_DUR.card + 40
+
+const ms = (v) => `${v}ms`
+// 同一份数字交给 CSS：:style 挂在根节点上，var() 一路继承下去
+const enterVars = {
+  '--enter-shot': ms(ENTER.shot),
+  '--enter-scrim': ms(ENTER.scrim),
+  '--enter-folio': ms(ENTER.folio),
+  '--enter-kicker': ms(ENTER.kicker),
+  '--enter-title': ms(ENTER.title),
+  '--enter-meta': ms(ENTER.meta),
+  '--enter-nav-left': ms(ENTER.navLeft),
+  '--enter-nav-right': ms(ENTER.navRight),
+  '--enter-cards': ms(ENTER.cards),
+  '--enter-card-step': ms(ENTER.cardStep),
+  '--enter-ordinal': ms(ENTER.ordinal),
+  '--enter-meter': ms(ENTER.meter),
+  '--enter-meter-step': ms(ENTER.meterStep),
+  '--enter-hint': ms(ENTER.hint),
+  '--enter-dur-shot': ms(ENTER_DUR.shot),
+  '--enter-dur-scrim': ms(ENTER_DUR.scrim),
+  '--enter-dur-folio': ms(ENTER_DUR.folio),
+  '--enter-dur-kicker': ms(ENTER_DUR.kicker),
+  '--enter-dur-title': ms(ENTER_DUR.title),
+  '--enter-dur-meta': ms(ENTER_DUR.meta),
+  '--enter-dur-nav': ms(ENTER_DUR.nav),
+  '--enter-dur-card': ms(ENTER_DUR.card),
+  '--enter-dur-ordinal': ms(ENTER_DUR.ordinal),
+  '--enter-dur-meter': ms(ENTER_DUR.meter),
+  '--enter-dur-hint': ms(ENTER_DUR.hint),
+}
+
+/* ===== 入场的开关 =====
+ * 开场还在演就先把整页按住（visibility 连底图一起藏），字一落位再从零起跑；
+ * 少动效时两个都不开，元素直接停在终态。
+ */
+const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
+const anim = useAnimationStore()
+const gated = ref(!reduceMotion && anim.isIntro)
+const entering = ref(!reduceMotion && !anim.isIntro)
+// 开场迟迟不落位也要放行：页面不能一直空着
+const GATE_MAX = 5000
+let enterTimer = 0
+let enterGate = 0
+let stopGate = null
+
+/** 收尾：动画整批撤掉，元素回落到的静态样式就是动画终态，交接不跳 */
+function finishEntrance() {
+  if (enterTimer) {
+    clearTimeout(enterTimer)
+    enterTimer = 0
+  }
+  if (!entering.value && !gated.value) return
+  entering.value = false
+  gated.value = false
+}
+
+/** 从"按住"切到"起跑"：同一帧里换类，各条时间轴都从 0% 开始 */
+function openEntrance() {
+  gated.value = false
+  entering.value = true
+  enterTimer = window.setTimeout(finishEntrance, ENTER_END)
+}
+
+/** 入场没收干净就要切版：先把它收干净，切换才是终态对终态，不会叠着半透明的卡翻页 */
+function ensureSettled() {
+  if (entering.value) finishEntrance()
+}
+
 /* 两侧张数不等，定边界的是张数多的那一侧。这个数只由 index 决定，
  * 拿它跟上次实测的那个比一下，就知道"切过去会不会改变几何"，
  * 多数切换其实不必重量。 */
@@ -138,15 +245,18 @@ const canNext = computed(() => index.value > 0) // 还有已看过的
 
 /** 只按时间语义命名，左右落点交给模板绑：更早就 +1，更新就 -1 */
 function goPrev() {
+  ensureSettled()
   if (canPrev.value) index.value += 1
 }
 function goNext() {
+  ensureSettled()
   if (canNext.value) index.value -= 1
 }
 
 /** 点堆里的卡、点页脚的指示条都走这里：直接跳到那一版，不逐版推进 */
 function goTo(i) {
   if (i < 0 || i >= TOTAL || i === index.value) return
+  ensureSettled()
   index.value = i
 }
 
@@ -194,6 +304,8 @@ function listOwnsWheel(node) {
 }
 
 function onWheel(event) {
+  // 滚轮一动就算接管：先把入场收干净，再照下面的规矩分流
+  ensureSettled()
   const dy = wheelPx(event)
   if (!dy) return
   if (listOwnsWheel(event.target)) {
@@ -417,11 +529,38 @@ onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   // 非被动才能在切换时拦掉页面滚动；滚轮只在卡片区接管
   stageRef.value?.addEventListener('wheel', onWheel, { passive: false })
+
+  /* ===== 入场 =====
+   * 首屏渲染时类就挂上了，动画此刻已在跑，这里只负责按时间表收尾；
+   * 若开场还在演，则先等它落位（最多 GATE_MAX），门一开再从 0% 起跑。
+   */
+  if (entering.value) {
+    enterTimer = window.setTimeout(finishEntrance, ENTER_END)
+  } else if (gated.value) {
+    stopGate = watch(() => anim.isLanded, (landed) => {
+      if (!landed) return
+      stopGate?.()
+      stopGate = null
+      clearTimeout(enterGate)
+      enterGate = 0
+      openEntrance()
+    })
+    enterGate = window.setTimeout(() => {
+      stopGate?.()
+      stopGate = null
+      enterGate = 0
+      openEntrance()
+    }, GATE_MAX)
+  }
 })
 
 onBeforeUnmount(() => {
   if (frame) cancelAnimationFrame(frame)
   observer?.disconnect()
+  // 入场的两个句柄与那条等待分支一起收干净
+  if (enterTimer) clearTimeout(enterTimer)
+  if (enterGate) clearTimeout(enterGate)
+  stopGate?.()
   stageRef.value?.removeEventListener('wheel', onWheel)
   window.removeEventListener('resize', scheduleMeasure)
   window.removeEventListener('keydown', onKeydown)
@@ -432,7 +571,12 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 
 <template>
   <!-- --dur-k 是连击时的时长倍数：单点 1，连着翻 0.5，卡片只认 --dur-run -->
-  <div class="log-page" :style="{ '--dur-k': combo ? COMBO_K : 1 }">
+  <!-- 入场开关挂在根上：整套动画只认 .is-entering，收尾时撤掉它即回到终态 -->
+  <div
+    class="log-page"
+    :class="{ 'is-entering': entering, 'is-gated': gated }"
+    :style="[enterVars, { '--dur-k': combo ? COMBO_K : 1 }]"
+  >
     <!-- 背景：public 里的图 + 压暗层 + 巨型版本底纹 -->
     <div class="log-backdrop" aria-hidden="true">
       <div class="log-backdrop__img" :style="{ backgroundImage: `url(${backdrop})` }"></div>
@@ -470,7 +614,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
             class="log-card"
             :class="{ 'log-card--dark': card.dark, 'log-card--end': card.end }"
             :data-state="stateOf(i)"
-            :style="cardStyle(i)"
+            :style="[cardStyle(i), { '--enter-i': Math.abs(i - index) }]"
             :aria-current="i === index ? 'true' : undefined"
             @click="goTo(i)"
           >
@@ -552,7 +696,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
         </p>
         <!-- 每一段都能点：点了直接跳到那一版 -->
         <ul class="log-meter" aria-label="版本导航">
-          <li v-for="{ card, i } in METER_ITEMS" :key="card.version">
+          <li v-for="({ card, i }, k) in METER_ITEMS" :key="card.version" :style="{ '--m-i': k }">
             <button
               type="button"
               class="log-meter__piece"
@@ -1405,6 +1549,177 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   .log-meter__piece,
   .log-folio {
     transition: none;
+  }
+}
+
+/* ===== 入场动效 =====
+ * 只管姿态与曲线，起跑点与时长全部来自脚本注入的 --enter-*。
+ * 整套挂在 .is-entering 下：撤掉这个类，动画连同上浮一起消失，
+ * 元素回落到的静态样式就是动画终态，交接处不跳变。
+ * 少动效时脚本根本不会加这个类，此处无须再挡一层。
+ * 两个不能碰的地方：卡片的"堆叠位置"由内联 translate / rotate / scale 写着，
+ * 切换按钮的定位由 translate 写着 —— 入场只动 opacity 与 transform（底纹另用 scale），
+ * 所以卡片的入场位移是叠在堆叠姿态之外的一层，翻版时不会互相打架。
+ */
+.log-page.is-gated {
+  /* 开场还没落位：整页先按住。visibility 连底图一起藏，不会漏出底色 */
+  visibility: hidden;
+}
+
+/* ── 背景：照片慢慢收一档放大，压暗层随后跟上 ── */
+.log-page.is-entering .log-backdrop__img {
+  animation: enter-shot var(--enter-dur-shot) ease-out both;
+  animation-delay: var(--enter-shot);
+}
+
+.log-page.is-entering .log-backdrop__scrim {
+  animation: enter-fade var(--enter-dur-scrim) ease both;
+  animation-delay: var(--enter-scrim);
+}
+
+/* 巨型版本底纹：从略小、略淡涨上来，先把整页的质感垫住 */
+.log-page.is-entering .log-folio {
+  animation: enter-folio var(--enter-dur-folio) var(--ease) both;
+  animation-delay: var(--enter-folio);
+}
+
+/* ── 页眉三段：小字先立，标题跟上，数字最后到位 ── */
+.log-page.is-entering .log-kicker {
+  animation: enter-rise var(--enter-dur-kicker) var(--ease) both;
+  animation-delay: var(--enter-kicker);
+}
+
+.log-page.is-entering .log-title {
+  animation: enter-rise var(--enter-dur-title) var(--ease) both;
+  animation-delay: var(--enter-title);
+}
+
+.log-page.is-entering .log-head__meta {
+  animation: enter-rise var(--enter-dur-meta) var(--ease) both;
+  animation-delay: var(--enter-meta);
+}
+
+/* ── 两张切换按钮：各自从自己那一侧滑进来 ── */
+.log-page.is-entering .log-nav--left {
+  animation: enter-nav-left var(--enter-dur-nav) var(--ease) both;
+  animation-delay: var(--enter-nav-left);
+}
+
+.log-page.is-entering .log-nav--right {
+  animation: enter-nav-right var(--enter-dur-nav) var(--ease) both;
+  animation-delay: var(--enter-nav-right);
+}
+
+/* ── 卡片：从"正在看那张"往两侧依次发牌，越远的越晚落 ──
+   终态写上 scale(var(--card-hover))，和静态样式逐字相同：
+   入场期间悬停浮起照样跟手，收尾那一刻也不会因为换了属性而弹一下 */
+.log-page.is-entering .log-card {
+  animation: enter-card var(--enter-dur-card) var(--ease) both;
+  animation-delay: calc(var(--enter-cards) + var(--enter-i, 0) * var(--enter-card-step));
+}
+
+/* ── 页脚三段：序号、指示条（逐段展开）、落款 ── */
+.log-page.is-entering .log-ordinal {
+  animation: enter-rise var(--enter-dur-ordinal) var(--ease) both;
+  animation-delay: var(--enter-ordinal);
+}
+
+.log-page.is-entering .log-meter__piece {
+  /* 条本身靠宽度表达"正在看"，入场用横向展开，不去动宽度 */
+  transform-origin: center;
+  animation: enter-piece var(--enter-dur-meter) var(--ease) both;
+  animation-delay: calc(var(--enter-meter) + var(--m-i, 0) * var(--enter-meter-step));
+}
+
+.log-page.is-entering .log-hint {
+  animation: enter-rise var(--enter-dur-hint) var(--ease) both;
+  animation-delay: var(--enter-hint);
+}
+
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes enter-shot {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes enter-folio {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes enter-nav-left {
+  from {
+    opacity: 0;
+    transform: translateX(22px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes enter-nav-right {
+  from {
+    opacity: 0;
+    transform: translateX(-22px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 从下、从远处浮上来：透视里退 70px 就是"更小更远"，落定即归位 */
+@keyframes enter-card {
+  from {
+    opacity: 0;
+    transform: translateY(26px) translateZ(-70px) scale(var(--card-hover, 1));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) translateZ(0) scale(var(--card-hover, 1));
+  }
+}
+
+@keyframes enter-piece {
+  from {
+    opacity: 0;
+    transform: scaleX(0.18);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

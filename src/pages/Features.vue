@@ -3,7 +3,8 @@ import GridBackground from '@/components/GridBackground.vue'
 import FeatureCard from '@/components/FeatureCard.vue'
 import FeatureViewer from '@/components/FeatureViewer.vue'
 import { useViewerStore } from '@/stores/viewer'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useAnimationStore } from '@/stores/animation'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizeIcon, themeFromIcon } from '@/utils/themeColor'
 // 卡片主图标统一用 solar 的 bold-duotone，两层深浅自带层次
 import IconShieldKeyhole from '~icons/solar/shield-keyhole-bold-duotone'
@@ -132,6 +133,8 @@ const FEATURES = [
 const ROT = Math.PI / 9
 // 与原来 48 秒滚过一份八张的手感对齐
 const SPEED = 37.7
+// 入场收尾后的起步斜率：每秒抬这么多，约 0.4s 到满速 —— 滚动是"起步"不是"啪一下"
+const SPEED_RAMP = 2.6
 // 三条车道各错开三张
 const PHASE_STEP = 3
 // 一份八项循环铺开：八张就够盖住可见跨度，宽屏不够时再整份补，序号才连得住
@@ -149,7 +152,86 @@ const SUBTITLE = '全方面支持小天才手表玩机需求'
 // 车道倾角，与 .lanes 的 rotate 同源：量卡片几何时要靠它把外接矩形解回去
 const LANE_ROT = 15
 
+// 副标题拆成一字一格：入场时逐字亮起，十三个字不会挤在同一帧里
+const GHOST = [...SUBTITLE]
+
+/* ===== 入场动效的时间表 =====
+ * 阶梯只写这一份：每个元素的起跑点与时长都从这里注入成 --enter-*，
+ * 样式只负责姿态与曲线，时间轴不会在 CSS 与 JS 里各写一遍。
+ * 顺序：网格底纹 → 左侧蓝雾 / 弧外蓝光 → 弧面与掠光 → 左列四块（主标题自上而下擦出）
+ * → 卡片逐张落位、底线收势。
+ */
+const ENTER = {
+  grid: 0, // 网格底纹
+  bloom: 40, // 左上那层蓝雾
+  glow: 60, // 弧外蓝光
+  stage: 120, // 弧面
+  sweep: 240, // 弧上掠光
+  rule: 150, // 主次之间的分隔线
+  title: 210, // 主标题
+  ghost: 390, // 副标题首字
+  ghostStep: 40, // 副标题逐字间隔
+  mark: 540, // 列尾英文标记
+  cards: 600, // 首张卡
+  laneStep: 76, // 车道之间错开
+  cardStep: 46, // 同车道相邻两张错开
+  lineLag: 150, // 卡底线比卡本身晚一点
+}
+const ENTER_DUR = {
+  grid: 900,
+  bloom: 1000,
+  glow: 820,
+  stage: 520,
+  sweep: 880,
+  rule: 560,
+  title: 820,
+  ghost: 460,
+  mark: 560,
+  card: 580,
+  line: 480,
+}
+// 最后一张卡的底线抽完，再留一帧余量：到这一刻动画整批撤掉
+const ENTER_END =
+  ENTER.cards +
+  ENTER.laneStep * (LANES.length - 1) +
+  ENTER.cardStep * (LOOP.length - 1) +
+  ENTER.lineLag +
+  ENTER_DUR.line +
+  16
+
+const ms = (v) => `${v}ms`
+// 同一份数字交给 CSS：:style 挂在根节点上，var() 一路继承下去
+const enterVars = {
+  '--enter-grid': ms(ENTER.grid),
+  '--enter-bloom': ms(ENTER.bloom),
+  '--enter-glow': ms(ENTER.glow),
+  '--enter-stage': ms(ENTER.stage),
+  '--enter-sweep': ms(ENTER.sweep),
+  '--enter-rule': ms(ENTER.rule),
+  '--enter-title': ms(ENTER.title),
+  '--enter-ghost': ms(ENTER.ghost),
+  '--enter-ghost-step': ms(ENTER.ghostStep),
+  '--enter-mark': ms(ENTER.mark),
+  '--enter-cards': ms(ENTER.cards),
+  '--enter-lane-step': ms(ENTER.laneStep),
+  '--enter-card-step': ms(ENTER.cardStep),
+  '--enter-line-lag': ms(ENTER.lineLag),
+  '--enter-dur-grid': ms(ENTER_DUR.grid),
+  '--enter-dur-bloom': ms(ENTER_DUR.bloom),
+  '--enter-dur-glow': ms(ENTER_DUR.glow),
+  '--enter-dur-stage': ms(ENTER_DUR.stage),
+  '--enter-dur-sweep': ms(ENTER_DUR.sweep),
+  '--enter-dur-rule': ms(ENTER_DUR.rule),
+  '--enter-dur-title': ms(ENTER_DUR.title),
+  '--enter-dur-ghost': ms(ENTER_DUR.ghost),
+  '--enter-dur-mark': ms(ENTER_DUR.mark),
+  '--enter-dur-card': ms(ENTER_DUR.card),
+  '--enter-dur-line': ms(ENTER_DUR.line),
+}
+
 const viewer = useViewerStore()
+// 开场那场粒子戏还没落位时，这里的入场要等着
+const anim = useAnimationStore()
 const activeItem = computed(() => (viewer.active >= 0 ? LOOP[viewer.active] : null))
 // 点开的那张卡在屏幕上的真实几何，充当覆盖层 FLIP 的起点
 const originRect = ref(null)
@@ -178,13 +260,18 @@ function quadOrigin(el) {
 }
 
 /** 卡片会被 cloneNode 补齐，所以点击只能走委托，序号认 data-index */
-function pickCard(event) {
+async function pickCard(event) {
   if (viewer.expanded) return
   const el = event.target instanceof Element ? event.target.closest('.card') : null
   if (!el || !lanesEl.value?.contains(el)) return
   const index = Number(el.dataset.index)
   if (!Number.isInteger(index) || index < 0 || index >= LOOP.length) return
 
+  // 入场还没跑完就点：先把动画撤掉，等类真正落地再量，量到的才是落位后的几何
+  if (entering.value) {
+    finishEntrance()
+    await nextTick()
+  }
   const origin = quadOrigin(el)
   // 圆角也带上：大卡的圆角是固定值，压回源卡那一档时要靠它反推补偿量
   origin.radius = parseFloat(getComputedStyle(el).borderRadius) || 0
@@ -248,12 +335,46 @@ const laneList = []
 let rafId = 0
 let lastTs = 0
 let paused = false
+// 入场收尾后从 0 抬到 1：轨道起步有个加速，不是一上来就满速
+let speedK = 0
 let lanesWatch = null
 // 预解码的排队句柄与它的取消函数，卸载时要收干净
 let warmId = 0
 let warmCleanup = null
 
 const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
+
+/* ===== 入场的开关 =====
+ * 开场还在演就先把整页按住（visibility 连背景一起藏，不漏底），字一落位再从零起跑；
+ * 少动效时两个都不开，元素直接停在终态，一帧动画都不跑。
+ */
+const gated = ref(!reduceMotion && anim.isIntro)
+const entering = ref(!reduceMotion && !anim.isIntro)
+// 开场迟迟不落位也要放行：页面不能一直空着
+const GATE_MAX = 5000
+let enterTimer = 0
+let enterGate = 0
+let stopGate = null
+
+/** 收尾：动画连同蒙版一起撤掉，元素回到静态样式 —— 那正是动画的终态，交接不跳 */
+function finishEntrance() {
+  if (enterTimer) {
+    clearTimeout(enterTimer)
+    enterTimer = 0
+  }
+  if (!entering.value && !gated.value) return
+  entering.value = false
+  gated.value = false
+  syncPause()
+}
+
+/** 从"按住"切到"起跑"：同一帧里换类，各条时间轴都从 0% 开始 */
+function openEntrance() {
+  gated.value = false
+  entering.value = true
+  syncPause()
+  enterTimer = window.setTimeout(finishEntrance, ENTER_END)
+}
 
 /** 量一遍每张卡的高度（含间距），之后轮转就不必再摸布局 */
 function readHeights(lane) {
@@ -308,8 +429,10 @@ function frame(ts) {
   const dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0
   lastTs = ts
   if (paused || reduceMotion) return
+  // 停过之后接着跑：速度系数只在上限内慢慢抬，中途悬停打断也不会重置
+  speedK = Math.min(1, speedK + dt * SPEED_RAMP)
   for (const lane of laneList) {
-    lane.d += SPEED * dt
+    lane.d += SPEED * dt * speedK
     // 内容顶边快要让出窗口时补上队尾那张，任何时刻窗口里都不该缺卡
     let guard = 0
     while (lane.d > lane.a && guard++ < 24) rotateLane(lane)
@@ -335,11 +458,13 @@ function measureLanes() {
   }
 }
 
-// 悬停或大窗展开都停滚：展开时指针被遮罩接管，只认悬停会把列表放跑
+// 悬停、入场未收干净、大窗展开都停滚：展开时指针被遮罩接管，只认悬停会把列表放跑
 let hovering = false
 function syncPause() {
-  paused = hovering || viewer.expanded
+  paused = gated.value || entering.value || hovering || viewer.expanded
 }
+// 入场没跑完就把滚动扣住，等卡片落定再起步
+syncPause()
 
 const onEnter = () => {
   hovering = true
@@ -417,6 +542,29 @@ onMounted(() => {
     stopIdle(warmId)
     clearTimeout(warmId)
   }
+
+  /* ===== 入场 =====
+   * 首屏渲染时类就挂上了，动画此刻已在跑，这里只负责按时间表收尾；
+   * 若开场还在演，则先等它落位（最多 GATE_MAX），门一开再从 0% 起跑。
+   */
+  if (entering.value) {
+    enterTimer = window.setTimeout(finishEntrance, ENTER_END)
+  } else if (gated.value) {
+    stopGate = watch(() => anim.isLanded, (landed) => {
+      if (!landed) return
+      stopGate?.()
+      stopGate = null
+      clearTimeout(enterGate)
+      enterGate = 0
+      openEntrance()
+    })
+    enterGate = window.setTimeout(() => {
+      stopGate?.()
+      stopGate = null
+      enterGate = 0
+      openEntrance()
+    }, GATE_MAX)
+  }
 })
 
 watch(() => viewer.expanded, syncPause)
@@ -427,12 +575,20 @@ onBeforeUnmount(() => {
   lanesEl.value?.removeEventListener('pointerenter', onEnter)
   lanesEl.value?.removeEventListener('pointerleave', onLeave)
   warmCleanup?.()
+  // 入场的两个句柄与那条等待分支一起收干净
+  if (enterTimer) clearTimeout(enterTimer)
+  if (enterGate) clearTimeout(enterGate)
+  stopGate?.()
   restoreSource()
 })
 </script>
 
 <template>
-  <div class="feature">
+  <div
+    class="feature"
+    :class="{ 'is-entering': entering, 'is-gated': gated }"
+    :style="enterVars"
+  >
     <GridBackground :rotation="-30" :z-index="1" :paused="viewer.expanded" />
 
     <div class="board">
@@ -442,8 +598,8 @@ onBeforeUnmount(() => {
       <!-- 主次之间的分隔细线 -->
       <span class="board-rule" aria-hidden="true"></span>
 
-      <!-- 副标题：竖排，独占一列，字数多也不许超过这列宽 -->
-      <p class="board-ghost" :style="{ '--ghost-count': SUBTITLE.length }">{{ SUBTITLE }}</p>
+      <!-- 副标题：竖排，独占一列，字数多也不许超过这列宽；一字一格，入场逐字亮 -->
+      <p class="board-ghost" :style="{ '--ghost-count': SUBTITLE.length }"><span v-for="(ch, i) in GHOST" :key="i" class="board-ghost__ch" :style="{ '--ch-i': i }">{{ ch }}</span></p>
 
       <!-- 列尾英文标记，收住左侧重心 -->
       <span class="board-mark" aria-hidden="true">FEATURES</span>
@@ -465,12 +621,14 @@ onBeforeUnmount(() => {
                 v-for="lane in LANES"
                 :key="lane"
                 class="track"
+                :style="{ '--lane-i': lane }"
               >
                 <FeatureCard
                   v-for="(item, index) in LOOP"
                   :key="index"
                   :item="item"
                   :data-index="index"
+                  :style="{ '--card-i': index }"
                 />
               </div>
             </div>
@@ -499,15 +657,31 @@ onBeforeUnmount(() => {
   --title-size: min(20vh, 15vw);
   /* 全页强调色，卡片另按自身图标算主题色 */
   --accent: #0a59f7;
+  /* 入场共用一条缓动：只靠错峰分出层次，才像一口气 */
+  --enter-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   position: fixed;
   inset: 0;
   overflow: hidden;
-  /* 左侧一层蓝雾，和右边弧区接上，深灰才不硬切 */
-  background:
-    radial-gradient(42% 58% at 13% 50%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 72%),
-    #2E3234; /* 首帧兜底，别闪白 */
+  /* 只留底色：左侧那层蓝雾挪进 ::before，入场时才有地方晕开 */
+  /* 深灰首帧兜底，别闪白 */
+  background: #2E3234;
   user-select: none;
+}
+
+/* 左侧一层蓝雾，和右边弧区接上，深灰才不硬切 */
+.feature::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* 与原来挂在 background 上同层：垫在网格底下 */
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    42% 58% at 13% 50%,
+    color-mix(in srgb, var(--accent) 26%, transparent),
+    transparent 72%
+  );
 }
 
 .board {
@@ -659,6 +833,224 @@ onBeforeUnmount(() => {
 
   .board-mark {
     display: none;
+  }
+}
+
+/* ===== 入场动效 =====
+ * 这里只管姿态与曲线，起跑点与时长全部来自脚本注入的 --enter-*。
+ * 整套都挂在 .is-entering 下：撤掉这个类，动画连同蒙版一起消失，
+ * 元素回落到的静态样式就是动画的终态，交接处不跳变。
+ * 少动效时脚本根本不会加这个类，此处无须再挡一层。
+ */
+.feature.is-gated {
+  /* 开场还没落位：整页先按住。visibility 连背景一起藏，不会漏出底色 */
+  visibility: hidden;
+}
+
+/* ── 背景与弧区 ── */
+.feature.is-entering::before {
+  animation: enter-bloom var(--enter-dur-bloom) var(--enter-ease) both;
+  animation-delay: var(--enter-bloom);
+}
+
+.feature.is-entering .grid-background {
+  animation: enter-fade var(--enter-dur-grid) ease both;
+  animation-delay: var(--enter-grid);
+}
+
+/* 蓝光先到、弧面后到：光扫进来，面才跟着亮 */
+.feature.is-entering .panel-glow {
+  animation: enter-glow var(--enter-dur-glow) var(--enter-ease) both;
+  animation-delay: var(--enter-glow);
+}
+
+/* 弧面只淡入：它裹着全部卡片，动 transform 会把车道几何量歪 */
+.feature.is-entering .stage {
+  animation: enter-fade var(--enter-dur-stage) ease both;
+  animation-delay: var(--enter-stage);
+}
+
+/* 掠光：一道软光沿弧面从左扫到右，正好压在卡片入场的前半段上 */
+.feature.is-entering .stage::after {
+  content: '';
+  position: absolute;
+  top: -14%;
+  bottom: -14%;
+  left: 0;
+  width: 34%;
+  pointer-events: none;
+  background: linear-gradient(
+    97deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.52) 44%,
+    rgba(186, 214, 255, 0.34) 60%,
+    transparent 100%
+  );
+  animation: enter-sweep var(--enter-dur-sweep) var(--enter-ease) both;
+  animation-delay: var(--enter-sweep);
+}
+
+/* ── 左列 ── */
+.feature.is-entering .board-rule {
+  animation: enter-rule var(--enter-dur-rule) var(--enter-ease) both;
+  animation-delay: var(--enter-rule);
+}
+
+/* 主标题自上而下"淌"出来：蒙版比字高三倍，一条软边从顶上一路走到底。
+   用蒙版而不是逐字包 span —— 这行是 background-clip:text 的渐变字，
+   一个字一层 transform 会把裁切路径和实际字形错开 */
+.feature.is-entering .board-title {
+  --wipe-mask: linear-gradient(180deg, #000 0%, #000 40%, transparent 52%, transparent 100%);
+
+  mask-image: var(--wipe-mask);
+  -webkit-mask-image: var(--wipe-mask);
+  mask-size: 100% 300%;
+  -webkit-mask-size: 100% 300%;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: 0 100%;
+  -webkit-mask-position: 0 100%;
+  animation: enter-title var(--enter-dur-title) var(--enter-ease) both;
+  animation-delay: var(--enter-title);
+}
+
+/* 副标题逐字亮：字多，间隔小，连起来是一道往下淌的波 */
+.feature.is-entering .board-ghost__ch {
+  animation: enter-fade var(--enter-dur-ghost) ease both;
+  animation-delay: calc(var(--enter-ghost) + var(--ch-i, 0) * var(--enter-ghost-step));
+}
+
+.feature.is-entering .board-mark {
+  animation: enter-mark var(--enter-dur-mark) var(--enter-ease) both;
+  animation-delay: var(--enter-mark);
+}
+
+/* ── 卡片：先按车道错开，再按卡序错开，一张接一张落位 ── */
+.feature.is-entering .card {
+  animation: enter-card var(--enter-dur-card) var(--enter-ease) both;
+  animation-delay: calc(
+    var(--enter-cards) + var(--lane-i, 0) * var(--enter-lane-step) + var(--card-i, 0) *
+      var(--enter-card-step)
+  );
+}
+
+/* 卡底线比卡本身晚一点抽出来，落位就有个收势 */
+.feature.is-entering .card::after {
+  transform-origin: left center;
+  animation: enter-line var(--enter-dur-line) var(--enter-ease) both;
+  animation-delay: calc(
+    var(--enter-cards) + var(--lane-i, 0) * var(--enter-lane-step) + var(--card-i, 0) *
+      var(--enter-card-step) + var(--enter-line-lag)
+  );
+}
+
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes enter-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes enter-glow {
+  from {
+    opacity: 0;
+    transform: translateX(72px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes enter-sweep {
+  from {
+    opacity: 0;
+    transform: translateX(-125%) skewX(-14deg);
+  }
+  20% {
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 0.32;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(340%) skewX(-14deg);
+  }
+}
+
+@keyframes enter-rule {
+  from {
+    opacity: 0;
+    transform: scaleY(0.06);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 蒙版从上往下走：起点整条藏在字上方，终点把四字连同外圈光晕一起放出来。
+   终点不取 0%：留一点负偏移，标题那圈 drop-shadow 才不会被蒙版裁掉 */
+@keyframes enter-title {
+  from {
+    opacity: 0;
+    transform: translateY(-0.12em);
+    mask-position: 0 100%;
+    -webkit-mask-position: 0 100%;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    mask-position: 0 6%;
+    -webkit-mask-position: 0 6%;
+  }
+}
+
+@keyframes enter-mark {
+  from {
+    opacity: 0;
+    transform: translateY(-0.55em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 卡片从车道下方浮起来：位移沿车道自己的纵轴，与滚动方向同源 */
+@keyframes enter-card {
+  from {
+    opacity: 0;
+    translate: 0 calc(var(--card-h) * 0.09);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes enter-line {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>
