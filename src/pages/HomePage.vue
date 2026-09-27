@@ -14,6 +14,19 @@ const FLY_MS = 1200 // 飞到窗口标题的时长，改它要同步 .title-flig
 
 const store = useAnimationStore()
 
+/* 两侧缓缓上浮的微光尘：位置、起点、节奏各给一套，两列不会同拍，
+ * 看上去才像浮尘而不是一段循环动画。值直接当行内自定义属性喂给样式。 */
+const DUST = [
+  { '--x': '9%', '--y': '16%', '--dur': '15s', '--delay': '0s' },
+  { '--x': '26%', '--y': '4%', '--dur': '19s', '--delay': '-6s' },
+  { '--x': '41%', '--y': '24%', '--dur': '13s', '--delay': '-3s' },
+  { '--x': '17%', '--y': '34%', '--dur': '22s', '--delay': '-11s' },
+  { '--x': '33%', '--y': '2%', '--dur': '17s', '--delay': '-8.5s' },
+  { '--x': '53%', '--y': '20%', '--dur': '16s', '--delay': '-14s' },
+  { '--x': '68%', '--y': '11%', '--dur': '20s', '--delay': '-5s' },
+  { '--x': '78%', '--y': '29%', '--dur': '14s', '--delay': '-17s' },
+]
+
 const flightRef = ref(null) // 飞行中的那行字，落位后就撤
 const titleRef = ref(null) // 窗口里的真标题，落位后由它接管
 const targetProbe = ref(null) // 量落点的基线
@@ -199,6 +212,38 @@ onBeforeUnmount(clearTimers)
             </div>
           </div>
         </div>
+        <!-- 两侧与底角的装饰层：空白在卡片外面，所以这一层只做加法、绝不进卡片内部。
+             整层 pointer-events:none，不抢任何点击；尺寸全吃样式里的 --gap。 -->
+        <div class="side-deco" aria-hidden="true">
+          <span class="orbit orbit-left"><i class="ring ring-a" /><i class="ring ring-b" /><i class="ring ring-c" /></span>
+          <span class="orbit orbit-right"><i class="ring ring-a" /><i class="ring ring-b" /><i class="ring ring-c" /></span>
+          <span class="corner-glow corner-glow-left"></span>
+          <span class="corner-glow corner-glow-right"></span>
+          <span class="halo halo-left"></span>
+          <span class="halo halo-right"></span>
+          <span class="veils veils-left"><i class="veil veil-a"></i><i class="veil veil-b"></i></span>
+          <span class="veils veils-right"><i class="veil veil-a"></i><i class="veil veil-b"></i></span>
+          <!-- 两侧只放光：同心光弧 + 沿轨运行的光点 + 缓缓上浮的微光尘。
+               这里是"空间站外的星轨与尘埃"，塞第二块字墙只会跟卡片抢戏 -->
+          <span class="orbit orbit-left">
+            <i class="arc arc-a"></i><i class="arc arc-b"></i><i class="arc arc-c"></i>
+            <i class="spark spark-a"></i><i class="spark spark-b"></i>
+          </span>
+          <span class="orbit orbit-right">
+            <i class="arc arc-a"></i><i class="arc arc-b"></i><i class="arc arc-c"></i>
+            <i class="spark spark-a"></i><i class="spark spark-b"></i>
+          </span>
+          <span class="dust dust-left"><i v-for="(d, i) in DUST" :key="i" :style="d"></i></span>
+          <span class="dust dust-right"><i v-for="(d, i) in DUST" :key="i" :style="d"></i></span>
+          <p class="deco-note deco-note-left">
+            <span class="note-strong">NATB</span>
+            <span class="note-dim">小天才手表 ADB 工具箱</span>
+          </p>
+          <p class="deco-note deco-note-right">
+            <span class="note-strong">仅供学习交流使用</span>
+            <span class="note-dim">ROOT有风险，操作需谨慎</span>
+          </p>
+        </div>
         <grid-background zIndex="1" />
         <!-- 最底下一行：占满宽度 -->
         <div class="developer-group" aria-label="NATB DEVELOPER GROUP">
@@ -352,6 +397,7 @@ onBeforeUnmount(clearTimers)
 /* ===== wrapper：整体灰色背景 ===== */
 .wrapper {
   box-sizing: border-box;
+  position: relative; /* 装饰层以整屏为坐标系，改这里要连 .side-deco 一起看 */
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -665,6 +711,432 @@ onBeforeUnmount(clearTimers)
   height: 0.8em;
 }
 
+/* ===== 两侧与底角的装饰层 =====
+ * 空白在卡片外面：左右两侧各约 530px（1920 下），以及底部弧线裁出来的左下、右下两个暗角。
+ * 这里只做"画面不再空"的加法——两侧各一组同心轨道环 + 竖排鬼影标语，左下/右下各一行小字。
+ * --gap 就是卡片两侧的实际空隙，本层所有横向尺寸都吃它，
+ * 于是环再大也只在自己的那半侧里长，永远压不到卡片上。 */
+.side-deco {
+  --gap: max(0px, calc((100vw - 860px) / 2));
+
+  position: absolute;
+  inset: 0;
+  z-index: 3; /* 压在 .cover(2) 与网格(1) 之上；本层只出现在卡片之外 */
+  overflow: hidden;
+  pointer-events: none; /* 纯装饰，绝不抢按钮与卡片的点击 */
+}
+
+/* 同心轨道环：圆心落在屏幕外沿，画面里只留几道弧。
+   整组压到下半侧，跟两侧的字墙错开，各自占一段 */
+.orbit {
+  position: absolute;
+  top: 64%;
+  width: min(calc(var(--gap) * 1.55), 780px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+}
+.orbit-left {
+  left: 0;
+}
+.orbit-right {
+  right: 0;
+  translate: 50% -50%;
+}
+
+/* 实线细环：虚线看着廉价，实线贴着极光边缘更像星轨 */
+.ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border: 1px solid rgba(150, 190, 255, 0.22);
+  border-radius: 50%;
+}
+.ring-a {
+  width: 100%;
+  height: 100%;
+}
+.ring-b {
+  width: 68%;
+  height: 68%;
+  border-color: rgba(150, 190, 255, 0.13);
+}
+.ring-c {
+  width: 40%;
+  height: 40%;
+  border-color: rgba(150, 190, 255, 0.34);
+}
+
+/* 环上两枚光点：呼应右下角的土星按钮与底部那道蓝色弧光 */
+.ring-a::after,
+.ring-c::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: #9ec4ff;
+}
+.ring-a::after {
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  box-shadow: 0 0 12px 3px rgba(90, 150, 255, 0.65);
+}
+.ring-c::after {
+  right: 4%;
+  bottom: 14%;
+  width: 4px;
+  height: 4px;
+  background: rgba(205, 228, 255, 0.92);
+  box-shadow: 0 0 10px 2px rgba(120, 170, 255, 0.55);
+}
+
+/* 底角补光：弧线切出来的两个角本来最黑，各铺一层低饱和蓝光把它们托起来。
+   最外圈收到 78% 就归零，光晕永远够不到卡片边缘，不会在卡片上留下一抹蓝。 */
+.corner-glow {
+  position: absolute;
+  bottom: -6%;
+  width: calc(var(--gap) * 1.6);
+  height: calc(var(--gap) * 1.05);
+  background: radial-gradient(
+    closest-side,
+    rgba(96, 154, 255, 0.34),
+    rgba(10, 89, 247, 0.16) 46%,
+    rgba(10, 89, 247, 0) 78%
+  );
+}
+.corner-glow-left {
+  left: calc(var(--gap) * -0.3);
+}
+.corner-glow-right {
+  right: calc(var(--gap) * -0.3);
+}
+
+/* 极光纱：两侧各两条大尺度模糊光带，缓慢漂移。
+   它们是"空气"而不是物件——只把暗处填成有颜色的光，不去跟卡片抢戏。
+   整组裁在自己那半侧里，所以再大也压不到卡片上 */
+.veils {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--gap);
+  overflow: hidden;
+}
+/* 裁切边落在卡片那一侧，必须用遮罩渐隐收口：
+   光带本来要伸到卡片上方，被 overflow 硬切就会在卡片边缘留下一道直边，
+   而装饰层压在卡片之上，这道直边是露出来的 */
+.veils-left {
+  left: 0;
+  -webkit-mask: linear-gradient(to right, #000 72%, #0000 100%);
+  mask: linear-gradient(to right, #000 72%, #0000 100%);
+}
+.veils-right {
+  right: 0;
+  -webkit-mask: linear-gradient(to right, #0000 0%, #000 28%);
+  mask: linear-gradient(to right, #0000 0%, #000 28%);
+}
+
+.veil {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  opacity: 0.85;
+}
+.veil-a {
+  left: -24%;
+  top: -7%;
+  width: 132%;
+  height: 30%;
+  background: linear-gradient(
+    104deg,
+    rgba(132, 94, 255, 0.5),
+    rgba(56, 132, 255, 0.34) 58%,
+    rgba(56, 132, 255, 0)
+  );
+  animation: veil-drift-a 23s ease-in-out infinite alternate;
+}
+.veil-b {
+  left: -32%;
+  top: 3%;
+  width: 142%;
+  height: 26%;
+  background: linear-gradient(
+    88deg,
+    rgba(52, 190, 235, 0.34),
+    rgba(74, 120, 255, 0.4) 60%,
+    rgba(74, 120, 255, 0)
+  );
+  animation: veil-drift-b 31s ease-in-out infinite alternate;
+}
+@keyframes veil-drift-a {
+  from {
+    translate: 0 -6%;
+    rotate: -5deg;
+  }
+  to {
+    translate: 0 8%;
+    rotate: 4deg;
+  }
+}
+@keyframes veil-drift-b {
+  from {
+    translate: 0 6%;
+    rotate: 5deg;
+  }
+  to {
+    translate: 0 -7%;
+    rotate: -4deg;
+  }
+}
+
+/* 呼吸光晕：给两侧各铺一层会缓慢明灭的冷光，暗的地方先"亮起来" */
+.halo {
+  position: absolute;
+  width: calc(var(--gap) * 1.5);
+  height: calc(var(--gap) * 1.5);
+  border-radius: 50%;
+  /* 74% 处归零：光晕够不到卡片边缘。圆心抬到屏外，只留下半幅在画面里，
+     整幅能见的部分变少，所以浓度比原先给足一点 */
+  background: radial-gradient(closest-side, rgba(78, 140, 255, 0.44), rgba(70, 130, 255, 0) 74%);
+  animation: halo-breathe 12s ease-in-out infinite;
+}
+/* 光斑贴到最上沿：圆心抬到屏幕之上，画面里只剩它向下化开的下半幅，
+   看上去就是顶部的光洒下来。两档错开高度，不至于像镜像复制 */
+.halo-left {
+  left: calc(var(--gap) * -0.42);
+  top: -34%;
+}
+.halo-right {
+  right: calc(var(--gap) * -0.42);
+  top: -44%;
+  animation-delay: -6s; /* 两侧错开半个周期，不会同明同灭 */
+}
+@keyframes halo-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    scale: 1;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.06;
+  }
+}
+
+/* 同心光弧：圆心落在屏幕外沿，画面里只留半圈。
+   conic-gradient 铺色、mask 掏空成发丝环，弧的两端由渐变自己收干净；
+   再让每道弧以不同速度、不同方向慢转，光就会沿着弧面来回走 */
+.orbit {
+  position: absolute;
+  top: 52%;
+  width: min(calc(var(--gap) * 1.62), 820px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+}
+.orbit-left {
+  left: 0;
+}
+.orbit-right {
+  right: 0;
+  translate: 50% -50%;
+}
+
+.arc {
+  position: absolute;
+  border-radius: 50%;
+  /* 软带环：中部最实、内外各留一段渐隐。发丝环压在极光上根本看不见，
+     光有厚度才立得住 */
+  -webkit-mask: radial-gradient(
+    closest-side,
+    #0000 89%,
+    rgba(0, 0, 0, 0.45) 93%,
+    #000 96.5%,
+    rgba(0, 0, 0, 0.4) 99%,
+    #0000 100%
+  );
+  mask: radial-gradient(
+    closest-side,
+    #0000 89%,
+    rgba(0, 0, 0, 0.45) 93%,
+    #000 96.5%,
+    rgba(0, 0, 0, 0.4) 99%,
+    #0000 100%
+  );
+  animation: arc-travel 84s linear infinite;
+}
+/* 每道弧都比半圈长，任何时刻画面里都留着一段，不会转"空" */
+.arc-a {
+  inset: 0;
+  background: conic-gradient(
+    from 200deg,
+    #0000 0deg,
+    rgba(140, 195, 255, 0.85) 44deg,
+    rgba(232, 246, 255, 1) 78deg,
+    rgba(130, 185, 255, 0.45) 190deg,
+    #0000 250deg,
+    #0000 360deg
+  );
+}
+.arc-b {
+  inset: 15%;
+  background: conic-gradient(from 20deg, #0000 0deg, rgba(110, 170, 255, 0.7) 70deg, #0000 205deg);
+  animation-duration: 132s;
+  animation-direction: reverse;
+}
+.arc-c {
+  inset: 30%;
+  background: conic-gradient(from 300deg, #0000 0deg, rgba(180, 226, 255, 1) 46deg, #0000 150deg);
+  animation-duration: 66s;
+}
+@keyframes arc-travel {
+  to {
+    rotate: 1turn;
+  }
+}
+
+/* 沿轨运行的光点：各挂一道弧，透明度与大小都靠 box-shadow 摊开 */
+.spark {
+  position: absolute;
+  inset: 0;
+  animation: arc-travel 52s linear infinite;
+}
+.spark-b {
+  inset: 30%;
+  animation-duration: 88s;
+  animation-direction: reverse;
+}
+.spark::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #f4f9ff;
+  box-shadow:
+    0 0 4px 1px rgba(255, 255, 255, 0.95),
+    0 0 14px 4px rgba(160, 205, 255, 0.9),
+    0 0 38px 14px rgba(64, 126, 255, 0.5);
+}
+
+/* 浮尘：只在属于自己那半侧里飘，靠 overflow 把越界的一粒直接裁掉，
+   于是无论视口多窄都不会有一粒飘到卡片上 */
+.dust {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--gap);
+  overflow: hidden;
+}
+.dust-left {
+  left: 0;
+}
+.dust-right {
+  right: 0;
+}
+.dust i {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #e4f0ff;
+  box-shadow:
+    0 0 6px 1px rgba(190, 220, 255, 0.8),
+    0 0 16px 4px rgba(110, 170, 255, 0.5);
+  opacity: 0;
+  animation: dust-drift var(--dur) linear var(--delay) infinite;
+}
+@keyframes dust-drift {
+  0% {
+    opacity: 0;
+    translate: 0 10vh;
+  }
+  15% {
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 -32vh;
+  }
+}
+
+/* 少动效就别让它们动：光弧、光点与光带停住，浮尘留在原地当静态星点 */
+@media (prefers-reduced-motion: reduce) {
+  .side-deco .halo,
+  .side-deco .veil,
+  .side-deco .arc,
+  .side-deco .spark {
+    animation: none;
+  }
+  .dust i {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+/* 底角小字：左边摆项目身份，右边摆免责声明（两条都取自站内既有文案）。
+   宽度上限吃 --gap：窄屏宁可把字截断，也不许它越过卡片边缘。 */
+.deco-note {
+  position: absolute;
+  bottom: calc(12% + 26px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: calc(var(--gap) * 0.8); /* 与下面的 0.14 相加仍小于 1，留出安全余量 */
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  overflow: hidden;
+}
+.deco-note > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.deco-note-left {
+  left: calc(var(--gap) * 0.14);
+  align-items: flex-start;
+}
+.deco-note-right {
+  right: calc(var(--gap) * 0.14);
+  align-items: flex-end;
+  text-align: right;
+}
+/* 两行小字上压一道发丝线，角落的字才有落脚的边 */
+.deco-note::before {
+  content: '';
+  width: 34px;
+  height: 1px;
+  background: rgba(160, 200, 255, 0.45);
+}
+.deco-note-left::before {
+  align-self: flex-start;
+}
+.deco-note-right::before {
+  align-self: flex-end;
+}
+.note-strong {
+  color: rgba(255, 255, 255, 0.68);
+  font-weight: 700;
+}
+.note-dim {
+  color: rgba(226, 238, 255, 0.42);
+}
+
+/* 太窄就没有"两侧"可言：整层撤掉，宁可留白也不挤到卡片上 */
+@media (max-width: 1100px) {
+  .side-deco {
+    display: none;
+  }
+}
+
 /* ===== 入场编排 =====
    黑幕开褪即起跑，窗口、顶栏、正文、底带依次进场。
    只用 translate/scale，免得动的时候带歪量好的落点；
@@ -705,6 +1177,11 @@ onBeforeUnmount(clearTimers)
 @keyframes band-rise {
   from { opacity: 0; translate: 0 60%; }
   to   { opacity: 1; translate: 0 0; }
+}
+
+/* 两侧装饰跟着黑幕退场一起淡入，比卡片略晚一拍，先让人看见卡片 */
+.home.is-revealing .side-deco {
+  animation: enter-fade 1400ms ease 260ms backwards;
 }
 
 .home.is-revealing .background,

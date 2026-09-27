@@ -131,6 +131,8 @@ onMounted(() => {
   window.addEventListener('resize', scheduleFit)
   // 字体晚一步到齐会改写高度，落定后再量一次
   document.fonts?.ready?.then(scheduleFit, () => {})
+  // 提示与视频无关（少动效、省流量也照常）：放在下面那两处提前返回之前
+  startHint()
 
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
   const saveData = navigator.connection?.saveData === true
@@ -183,13 +185,116 @@ async function copy(row) {
   }, 1800)
 }
 
+/* ===== 鼠标提示 =====
+ * 桌面端独有的一句邀请："滑动鼠标，感受烟花与引力交织"。
+ * 判定口径与背景倾斜、指针烟花完全一致（同一条媒体查询）：触摸设备上那两样效果本来就不启动，
+ * 这句提示也就不该出现——所以既不在屏幕上报到，也不挂监听。
+ * 用户第一次连续滑动横跨 80vw（或竖跨 80vh）就渐隐收工：该试的都试到了，提示不必继续占版面。
+ */
+const HINT_SWIPE_X = 0.8 // 横向 80vw：按视口宽度折算，与 CSS 里的 vw 同口径
+const HINT_SWIPE_Y = 0.7 // 纵向 80vh：同理，与 vh 同口径
+const HINT_PAUSE = 1000 // 停手超过 1s 就算这一段滑动断了，跨度重算
+
+const hintGone = ref(false)
+/* 量的是"这一段滑动横跨/竖跨了多宽"，而不是把每一步的微小位移累加起来。
+ * 累加路程看着更灵敏，实际会在桌面上随手一晃时瞬间攒过阈值——
+ * 用户还没看清这行字，它就先退场了。跨度只认真划出去的那一下。 */
+let hintLive = false // 这一段滑动是否已经开始记跨度
+let hintMinX = 0
+let hintMaxX = 0
+let hintMinY = 0
+let hintMaxY = 0
+let hintLast = 0 // 上一次采样时刻，用来判断这一段断没断
+
+function onHintMove(event) {
+  const now = performance.now()
+  // 停手一段时间：上一段滑动已经结束，四个边界一起清零，下一次从头记
+  if (now - hintLast > HINT_PAUSE) hintLive = false
+  hintLast = now
+
+  const x = event.clientX
+  const y = event.clientY
+  if (!hintLive) {
+    hintLive = true
+    hintMinX = x
+    hintMaxX = x
+    hintMinY = y
+    hintMaxY = y
+    return
+  }
+  if (x < hintMinX) hintMinX = x
+  if (x > hintMaxX) hintMaxX = x
+  if (y < hintMinY) hintMinY = y
+  if (y > hintMaxY) hintMaxY = y
+
+  // 横向够 80vw 或纵向够 80vh：任意一头达标就渐隐收工，
+  // 监听立刻摘掉——"首次"之后不再回来
+  const swungX = hintMaxX - hintMinX > window.innerWidth * HINT_SWIPE_X
+  const swungY = hintMaxY - hintMinY > window.innerHeight * HINT_SWIPE_Y
+  if (swungX || swungY) {
+    hintGone.value = true
+    window.removeEventListener('pointermove', onHintMove)
+    // 这行字退场后左栏变矮，矮屏的自适应要按新高度重量一次
+    nextTick(scheduleFit)
+  }
+}
+
+/** 挂监听：只在真的有指针、真的会出烟花与引力的设备上挂 */
+function startHint() {
+  if (hintGone.value) return
+  if (window.matchMedia?.('(hover: none), (pointer: coarse)')?.matches) return
+  window.addEventListener('pointermove', onHintMove, { passive: true })
+}
+
 /* ===== 入场 =====
  * 与 Features / UpdateLog 同一套做法：时间表只写这一份，注入成 --enter-*，
  * 样式只管姿态与曲线。少动效时压根不加这个类，元素直接停在终态。
+ *
+ * 这一页排的是一条"镜头推开雨窗"的连续动线，而不是把元素一个个淡进来：
+ *   0ms    实拍层浮起并收一档放大（像镜头落定）＋ 一道光自左向右扫过雨窗＋ 左上辉光起势
+ *   100ms  眉标一边拉开字距一边落位
+ *   200ms  标题按字显影：每字 68ms 阶梯，字面从下被光"推"出来，笔画带一瞬冷光，字距同步收拢
+ *   520ms  副题那道线画开，项目全名跟上
+ *   640ms  鼠标提示
+ *   700ms  清单自上下笔：每行 75ms 依次落位，行上沿一道光随行从左跑到右，序号先到、数值随后
+ *   1100ms 两张声明卡同拍显影
  */
-const ENTER = { kicker: 60, title: 150, sub: 250, rows: 330, rowStep: 70, note: 740, mark: 820 }
-const DUR = { rise: 620, note: 560 }
-const ENTER_END = ENTER.mark + DUR.note + 40
+const TITLE_CHARS = '项目信息'.split('') // 标题按字显影：逐字一个 span，错开登场
+
+const ENTER = {
+  media: 0, // 实拍层：浮起 + 收放大
+  sweep: 60, // 横扫过雨窗的那道白光
+  bloom: 0, // 左上角冷调辉光起势
+  grid: 140, // 杂志栏格自中间铺开
+  kicker: 100,
+  title: 200,
+  titleStep: 68, // 每个字的阶梯
+  sub: 520,
+  hint: 640,
+  rows: 700,
+  rowStep: 75,
+  note: 1100, // 两张声明卡同拍落地（不分先后）
+}
+const DUR = {
+  media: 1500,
+  sweep: 1500,
+  bloom: 1500,
+  grid: 1300,
+  kicker: 620,
+  title: 900,
+  rule: 620,
+  sub: 620,
+  hint: 620,
+  row: 680,
+  note: 620,
+}
+// 谁最后落定，入场就到谁为止：撤掉 .is-entering 的那一刻，全场已经是终态
+const ENTER_END =
+  Math.max(
+    ENTER.title + ENTER.titleStep * (TITLE_CHARS.length - 1) + DUR.title,
+    ENTER.rows + ENTER.rowStep * (ROWS.value.length - 1) + DUR.row,
+    ENTER.note + DUR.note,
+  ) + 60
 
 const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 // 帧首就挂上，动画当帧起跑；这里只管按时间表收尾
@@ -200,20 +305,35 @@ if (entering.value) enterTimer = window.setTimeout(() => (entering.value = false
 
 const ms = (v) => `${v}ms`
 const enterVars = {
+  '--enter-media': ms(ENTER.media),
+  '--enter-sweep': ms(ENTER.sweep),
+  '--enter-bloom': ms(ENTER.bloom),
+  '--enter-grid': ms(ENTER.grid),
   '--enter-kicker': ms(ENTER.kicker),
   '--enter-title': ms(ENTER.title),
+  '--enter-title-step': ms(ENTER.titleStep),
   '--enter-sub': ms(ENTER.sub),
+  '--enter-hint': ms(ENTER.hint),
   '--enter-rows': ms(ENTER.rows),
   '--enter-row-step': ms(ENTER.rowStep),
   '--enter-note': ms(ENTER.note),
-  '--enter-mark': ms(ENTER.mark),
-  '--enter-dur-rise': ms(DUR.rise),
+  '--enter-dur-media': ms(DUR.media),
+  '--enter-dur-sweep': ms(DUR.sweep),
+  '--enter-dur-bloom': ms(DUR.bloom),
+  '--enter-dur-grid': ms(DUR.grid),
+  '--enter-dur-kicker': ms(DUR.kicker),
+  '--enter-dur-title': ms(DUR.title),
+  '--enter-dur-rule': ms(DUR.rule),
+  '--enter-dur-sub': ms(DUR.sub),
+  '--enter-dur-hint': ms(DUR.hint),
+  '--enter-dur-row': ms(DUR.row),
   '--enter-dur-note': ms(DUR.note),
 }
 
 onBeforeUnmount(() => {
   document.documentElement.classList.remove(SCROLL_LOCK)
   window.removeEventListener('resize', scheduleFit)
+  window.removeEventListener('pointermove', onHintMove)
   if (fitRaf) cancelAnimationFrame(fitRaf)
   clearTimeout(copyTimer)
   if (enterTimer) clearTimeout(enterTimer)
@@ -273,6 +393,8 @@ onBeforeUnmount(() => {
           <span class="info-bg__scrim"></span>
           <span class="info-bg__grid"></span>
           <span class="info-bg__grain"></span>
+          <!-- 开场那道光：自左向右横扫过雨窗，只在入场那一下出现（静态就停在透明） -->
+          <span class="info-bg__sweep"></span>
         </div>
       </TiltCard>
     </div>
@@ -281,11 +403,32 @@ onBeforeUnmount(() => {
       <!-- 左栏：眉标、标题、项目全名。桌面端跟着滚动吸住，像杂志的页眉块 -->
       <header class="info-head">
         <p class="info-kicker">NATB / PROJECT INFO</p>
-        <h1 class="info-title">项目信息</h1>
+        <!-- 标题按字显影：一个字一个 span，各自从下被光推出来。
+             可读性走 h1 的 aria-label，逐字 span 对读屏隐藏，别念成四个孤立字。 -->
+        <h1 class="info-title" aria-label="项目信息">
+          <span
+            v-for="(ch, i) in TITLE_CHARS"
+            :key="i"
+            class="info-title__ch"
+            :style="{ '--ch-i': i }"
+            aria-hidden="true"
+          >{{ ch }}</span>
+        </h1>
         <div class="info-sub">
           <span class="info-sub__rule" aria-hidden="true"></span>
           <p class="info-sub__text">{{ PROJECT }}</p>
         </div>
+
+        <!-- 桌面端的邀请：一枚"手左右滑动"的图标 + 一行呼吸的字。
+             第一次横跨 80vw（或竖跨 80vh）就渐隐退场（撤销后整行折起，不留空档），逻辑见脚本「鼠标提示」。 -->
+        <p
+          class="info-hint"
+          :class="{ 'is-gone': hintGone }"
+          :aria-hidden="hintGone ? 'true' : undefined"
+        >
+          <i-ph-hand-swipe-right-bold class="info-hint__icon" width="19" height="19" aria-hidden="true" />
+          <span class="info-hint__text">滑动鼠标，感受烟花与引力交织</span>
+        </p>
       </header>
 
       <!-- 右栏：五项信息。用 dl 表结构，读屏里"标签—值"成对读出 -->
@@ -434,7 +577,8 @@ onBeforeUnmount(() => {
 }
 
 /* 触屏上没有鼠标可跟：倾斜、光斑、烟花在组件内部就已整体不启动，
- * 这里顺带把"为倾斜预留的放大余量"收掉，背景回到满屏、不放大。 */
+ * 这里顺带把"为倾斜预留的放大余量"收掉，背景回到满屏、不放大。
+ * （鼠标提示的隐藏写在它自己那组样式后面——同权重的规则压不住后面的基础声明。） */
 @media (hover: none), (pointer: coarse) {
   .info-bg-tilt {
     inset: 0;
@@ -544,6 +688,23 @@ onBeforeUnmount(() => {
   background-size: 180px 180px;
 }
 
+/* 开场那道光：一条斜向的柔光带，横扫过雨窗。
+ * 尺寸就是背景框本身，靠 translate 从画面外扫到画面外；静态停在看不见。 */
+.info-bg__sweep {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(
+    104deg,
+    transparent 42%,
+    rgba(226, 238, 255, 0.08) 47%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(226, 238, 255, 0.08) 53%,
+    transparent 58%
+  );
+  pointer-events: none;
+}
+
 /* ===== 版心 ===== */
 .info-sheet {
   position: relative;
@@ -579,6 +740,12 @@ onBeforeUnmount(() => {
   letter-spacing: -0.035em;
 }
 
+/* 标题按字显影用的字箱：inline-block 才能各自吃 transform 与 clip-path，
+ * 排在一起仍然读作一整行（字距由 .info-title 的 letter-spacing 管）。 */
+.info-title__ch {
+  display: inline-block;
+}
+
 /* 项目全名：一道短横线把标题与英文名连起来，像杂志的副题 */
 .info-sub {
   margin: calc(clamp(20px, 3vh, 34px) * var(--fit)) 0 0;
@@ -598,6 +765,67 @@ onBeforeUnmount(() => {
   font-weight: 500;
   letter-spacing: 0.04em;
   color: var(--ink-2);
+}
+
+/* ===== 鼠标提示 =====
+ * 标题块最后一行：一枚"手左右滑动"的图标 + 一句呼吸的字。
+ * 它是"邀请"不是"内容"，所以比正文再轻一档；退场只有渐隐，没有任何位移或压扁。 */
+.info-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: calc(clamp(18px, 2.4vh, 28px) * var(--fit)) 0 0;
+  /* 汉字不进食等宽栈（会掉进宋体回退）：与副题同一档，只把字距放开一点 */
+  font-size: calc(clamp(12px, 1.15vw, 13.5px) * var(--fit));
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  /* 退场：透明度先独自走完 560ms；高度与留白用 0s + 同样长的延迟，
+   * 等这行字全透明了才瞬间收掉——所以看不见"滑走"，也看不见"被挤没"。 */
+  max-height: 4rem;
+  overflow: hidden;
+  transition:
+    opacity 560ms ease,
+    max-height 0s linear 560ms,
+    margin-top 0s linear 560ms;
+}
+
+.info-hint.is-gone {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+.info-hint__icon {
+  display: block;
+  flex: none;
+  /* 图标不跟着呼吸：一亮一暗的是那句话，图标只是它的锚点 */
+  color: var(--accent-deep);
+}
+
+/* 呼吸只动透明度、不动位置——它是提示，不该抢标题的戏。
+ * 下限 0.72 是配着 --ink-2 定的：再暗就压到 AA 对比度线下了。 */
+.info-hint__text {
+  animation: info-breathe 3.4s ease-in-out infinite;
+}
+
+@keyframes info-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+/* 触屏上没有鼠标可滑：整行不出现（脚本里的判定用同一条媒体查询）。
+ * 必须落在这组基础样式之后：同权重时后写的胜出，写在前面会被 display:flex 盖掉。 */
+@media (hover: none), (pointer: coarse) {
+  .info-hint {
+    display: none;
+  }
 }
 
 /* ===== 信息清单 =====
@@ -634,6 +862,21 @@ onBeforeUnmount(() => {
   padding: var(--row-pad) clamp(10px, 1.4vw, 20px) var(--row-pad) clamp(10px, 1.4vw, 20px);
   border-top: 1px solid var(--line-soft);
   transition: background-color 260ms ease;
+}
+
+/* 入场时沿行上沿跑过的那道光（静态不存在，只在入场那一下出现）。
+ * 上沿本来有一条发丝线（border-top），这道光就压在它上面滑过去，
+ * 于是"清单正在被写下来"这件事有了一个方向感，而不只是五行各自淡入。 */
+.info-row::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* 悬浮 / 键盘聚焦到行内控件时，行首浮起一小段强调色，行底铺一层极淡的冷调 */
@@ -988,46 +1231,190 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 入场 =====
- * 只动 opacity 与 transform，收尾时撤掉 .is-entering，元素回落到的静态样式就是终态。
+ * 一条动线四拍：镜头落定（背景）→ 刊头显影（眉标/标题/副题）→ 清单下笔（五行）→ 落款（两张卡）。
+ * 规矩不变：收尾时撤掉 .is-entering，元素回落到的静态样式就是终态——
+ * 所以每段 keyframes 的 to 都与静态样式逐字对齐，撤类那一刻不跳。
+ * 只用 opacity / transform / scale / clip-path / 字距：都能走合成器，
+ * 不碰布局属性（除了两处刻意为之的字距收拢，元素只有几个字）。
  */
-.info.is-entering .info-kicker,
-.info.is-entering .info-title,
-.info.is-entering .info-sub__text,
-.info.is-entering .info-row,
-.info.is-entering .info-note {
-  animation: info-rise var(--enter-dur-rise) var(--ease) both;
+
+/* ── 第一拍：镜头落定 ─────────────────────────────
+ * 实拍层浮起并收一档放大：像镜头推近后落定，画面从"还没对上焦"变清晰。 */
+.info.is-entering .info-bg__media {
+  animation: info-shot var(--enter-dur-media) var(--ease) both;
+  animation-delay: var(--enter-media);
 }
 
+/* 开场那道光横扫过雨窗：先亮后收，走到对面就退干净 */
+.info.is-entering .info-bg__sweep {
+  animation: info-sweep var(--enter-dur-sweep) cubic-bezier(0.3, 0, 0.2, 1) both;
+  animation-delay: var(--enter-sweep);
+}
+
+/* 左上冷调辉光起势：先大而淡，再收到它该在的位置 */
+.info.is-entering .info-bg__bloom {
+  animation: info-bloom var(--enter-dur-bloom) var(--ease) both;
+  animation-delay: var(--enter-bloom);
+}
+
+/* 杂志栏格自中间向两侧铺开，像版心刚刚被划好 */
+.info.is-entering .info-bg__grid {
+  animation: info-grid var(--enter-dur-grid) var(--ease) both;
+  animation-delay: var(--enter-grid);
+}
+
+/* ── 第二拍：刊头显影 ───────────────────────────── */
+
+/* 眉标：一边把字距拉开一边落位（等宽小字，字距就是它的表情） */
 .info.is-entering .info-kicker {
+  animation: info-track var(--enter-dur-kicker) var(--ease) both;
   animation-delay: var(--enter-kicker);
 }
 
+/* 标题整体收字距：出场时松、落定时紧——最见"编辑感"的一下 */
 .info.is-entering .info-title {
+  animation: info-track-tight var(--enter-dur-title) var(--ease) both;
   animation-delay: var(--enter-title);
 }
 
-.info.is-entering .info-sub__text {
-  animation-delay: var(--enter-sub);
+/* 标题逐字显影：字面从下方被推出来，笔画带一瞬冷光（光是"点燃"，不是"发光"） */
+.info.is-entering .info-title__ch {
+  animation: info-char var(--enter-dur-title) cubic-bezier(0.16, 1.02, 0.3, 1) both;
+  animation-delay: calc(var(--enter-title) + var(--ch-i) * var(--enter-title-step));
 }
 
+/* 副题：线先画开，字跟上 */
 .info.is-entering .info-sub__rule {
-  animation: info-draw 520ms var(--ease) both;
+  animation: info-draw var(--enter-dur-rule) var(--ease) both;
   animation-delay: var(--enter-sub);
 }
 
-/* 五行按序号依次落位，越靠后越晚 */
+.info.is-entering .info-sub__text {
+  animation: info-rise var(--enter-dur-sub) var(--ease) both;
+  animation-delay: var(--enter-sub);
+}
+
+/* 提示紧跟副题落位，比五行清单早半拍——它讲的是"这一页怎么玩" */
+.info.is-entering .info-hint {
+  animation: info-rise var(--enter-dur-hint) var(--ease) both;
+  animation-delay: var(--enter-hint);
+}
+
+/* ── 第三拍：清单下笔 ─────────────────────────────
+ * 一行一拍：行落位的同时，一道光沿它的上沿自左向右跑过去；
+ * 序号比行早 70ms（带一瞬强调色，像页边刚被笔点了一下），数值晚 50ms 收到本色。 */
 .info.is-entering .info-row {
+  animation: info-row-in var(--enter-dur-row) var(--ease) both;
   animation-delay: calc(var(--enter-rows) + var(--row-i) * var(--enter-row-step));
 }
 
+.info.is-entering .info-row::after {
+  animation: info-run var(--enter-dur-row) var(--ease) both;
+  animation-delay: calc(var(--enter-rows) + var(--row-i) * var(--enter-row-step));
+}
+
+.info.is-entering .info-row__no {
+  animation: info-no var(--enter-dur-row) var(--ease) both;
+  animation-delay: calc(var(--enter-rows) + var(--row-i) * var(--enter-row-step) - 70ms);
+}
+
+.info.is-entering .info-row__text {
+  animation: info-value var(--enter-dur-row) var(--ease) both;
+  animation-delay: calc(var(--enter-rows) + var(--row-i) * var(--enter-row-step) + 50ms);
+}
+
+/* ── 第四拍：落款 ───────────────────────────────
+ * 两张声明卡同拍落地：它们是一组并列的声明，没有先后之分。 */
 .info.is-entering .info-note {
-  animation-duration: var(--enter-dur-note);
+  animation: info-note-in var(--enter-dur-note) var(--ease) both;
   animation-delay: var(--enter-note);
 }
 
-/* 两张卡并排落地，商标那张错开一点点，像同一拍的先后 */
-.info.is-entering .info-note--mark {
-  animation-delay: var(--enter-mark);
+@keyframes info-shot {
+  from {
+    opacity: 0;
+    scale: 1.07;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes info-sweep {
+  0% {
+    opacity: 0;
+    transform: translate3d(-100%, 0, 0);
+  }
+  16% {
+    opacity: 1;
+  }
+  76% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+@keyframes info-bloom {
+  from {
+    opacity: 0;
+    scale: 1.45;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes info-grid {
+  from {
+    opacity: 0;
+    transform: scaleX(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes info-track {
+  from {
+    opacity: 0;
+    letter-spacing: 0.46em;
+  }
+  to {
+    opacity: 1;
+    letter-spacing: 0.26em;
+  }
+}
+
+@keyframes info-track-tight {
+  from {
+    letter-spacing: 0.08em;
+  }
+  to {
+    letter-spacing: -0.035em;
+  }
+}
+
+/* clip-path 四值闭合：从"整块压在字面下方"推到"完整露出"。
+ * 上下都留了负值余量，收尾那一下不会把笔画切掉一像素。 */
+@keyframes info-char {
+  from {
+    opacity: 0;
+    clip-path: inset(115% -6% -18% -6%);
+    transform: translateY(0.16em);
+    text-shadow: 0 0 28px rgba(122, 167, 255, 0.55);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(-18% -6% -18% -6%);
+    transform: none;
+    text-shadow: 0 0 0 rgba(122, 167, 255, 0);
+  }
 }
 
 @keyframes info-rise {
@@ -1050,6 +1437,69 @@ onBeforeUnmount(() => {
   }
 }
 
+@keyframes info-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 光带从行外左侧进来、跑出行外右侧：±100% 正好把这一行跑满 */
+@keyframes info-run {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  24% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes info-no {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+    color: var(--accent);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    color: var(--ink-3);
+  }
+}
+
+@keyframes info-value {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes info-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+    scale: 0.99;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    scale: 1;
+  }
+}
+
 @keyframes info-pulse {
   0%,
   100% {
@@ -1069,11 +1519,17 @@ onBeforeUnmount(() => {
   .info-row::before,
   .info-row__no,
   .info-row__label,
+  .info-hint,
   .info-btn--link svg {
     transition: none;
   }
 
   .info-badge__dot {
+    animation: none;
+  }
+
+  /* 提示照样会退场，只是不再呼吸、也不再渐隐——直接换到终态 */
+  .info-hint__text {
     animation: none;
   }
 }
