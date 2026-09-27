@@ -14,18 +14,67 @@ const FLY_MS = 1200 // 飞到窗口标题的时长，改它要同步 .title-flig
 
 const store = useAnimationStore()
 
-/* 两侧缓缓上浮的微光尘：位置、起点、节奏各给一套，两列不会同拍，
- * 看上去才像浮尘而不是一段循环动画。值直接当行内自定义属性喂给样式。 */
-const DUST = [
-  { '--x': '9%', '--y': '16%', '--dur': '15s', '--delay': '0s' },
-  { '--x': '26%', '--y': '4%', '--dur': '19s', '--delay': '-6s' },
-  { '--x': '41%', '--y': '24%', '--dur': '13s', '--delay': '-3s' },
-  { '--x': '17%', '--y': '34%', '--dur': '22s', '--delay': '-11s' },
-  { '--x': '33%', '--y': '2%', '--dur': '17s', '--delay': '-8.5s' },
-  { '--x': '53%', '--y': '20%', '--dur': '16s', '--delay': '-14s' },
-  { '--x': '68%', '--y': '11%', '--dur': '20s', '--delay': '-5s' },
-  { '--x': '78%', '--y': '29%', '--dur': '14s', '--delay': '-17s' },
-]
+/**
+ * 两侧缓缓上浮的微光点。简表一行一颗：[横向%, 纵向%, 周期s, 入场延迟s]。
+ * 左右各给一份、数值互不相同——共用一份就会变成复制粘贴，两边长得一模一样。
+ *
+ * 第四列是正的、且逐个递增：那条循环要等黑幕开始退才启动（见 .home.is-revealing .dust i），
+ * 于是每颗都从自己周期的起点慢慢淡入，而不是一进场就各自亮在半途。
+ *
+ * 纵向铺满整段（--y 从 2% 排到 76%），越靠下的越贴近卡片——
+ * 弧线在靠卡片那一侧放得更深，点落在弧线以内才看得见。
+ * 万一哪颗还是落进了灰色区也不必修：整层挂在被弧线裁切的 .background 里，裁切直接吃掉它。
+ */
+function dots(rows) {
+  return rows.map(([x, y, dur, delay]) => ({
+    '--x': `${x}%`,
+    '--y': `${y}%`,
+    '--dur': `${dur}s`,
+    '--delay': `${delay}s`,
+  }))
+}
+
+const DUST_LEFT = dots([
+  [6, 2, 16, 0.2],
+  [26, 5, 20, 1.0],
+  [52, 3, 14, 0.5],
+  [14, 11, 22, 1.6],
+  [40, 9, 17, 0.8],
+  [66, 13, 15, 2.0],
+  [8, 19, 19, 1.2],
+  [34, 22, 21, 2.4],
+  [58, 20, 16, 0.4],
+  [18, 29, 18, 2.2],
+  [46, 32, 23, 1.8],
+  [10, 38, 15, 2.9],
+  [62, 40, 17, 0.7],
+  [28, 46, 20, 2.7],
+  [50, 52, 14, 1.4],
+  [56, 58, 19, 3.1],
+  [64, 66, 22, 2.0],
+  [72, 76, 16, 3.4],
+])
+
+const DUST_RIGHT = dots([
+  [9, 7, 18, 0.3],
+  [33, 2, 15, 1.3],
+  [60, 6, 21, 0.7],
+  [20, 14, 16, 1.8],
+  [48, 11, 19, 0.3],
+  [70, 17, 13, 1.6],
+  [12, 24, 22, 1.0],
+  [38, 27, 14, 2.3],
+  [61, 25, 20, 0.6],
+  [24, 35, 17, 2.8],
+  [52, 38, 23, 1.5],
+  [16, 44, 15, 3.3],
+  [58, 33, 18, 0.9],
+  [30, 48, 16, 2.5],
+  [66, 45, 21, 2.1],
+  [46, 58, 19, 3.0],
+  [70, 55, 13, 1.2],
+  [64, 70, 17, 3.6],
+])
 
 const flightRef = ref(null) // 飞行中的那行字，落位后就撤
 const titleRef = ref(null) // 窗口里的真标题，落位后由它接管
@@ -166,6 +215,10 @@ onBeforeUnmount(clearTimers)
       <div class="wrapper">
         <div class="cover">
           <div class="background">
+            <!-- 光点层：挂在被弧线裁切的这一层里，弧线以外那片灰色由裁切自动吃掉，
+                 不必逐颗去算高度——光点只管把竖直方向铺满 -->
+            <span class="dust dust-left"><i v-for="(d, i) in DUST_LEFT" :key="i" :style="d"></i></span>
+            <span class="dust dust-right"><i v-for="(d, i) in DUST_RIGHT" :key="i" :style="d"></i></span>
             <!-- 背景模糊副本，避开 backdrop-filter 的合成竞态 -->
             <div class="glass" aria-hidden="true"><div class="glass-blur"></div></div>
             <div class="window">
@@ -215,26 +268,11 @@ onBeforeUnmount(clearTimers)
         <!-- 两侧与底角的装饰层：空白在卡片外面，所以这一层只做加法、绝不进卡片内部。
              整层 pointer-events:none，不抢任何点击；尺寸全吃样式里的 --gap。 -->
         <div class="side-deco" aria-hidden="true">
-          <span class="orbit orbit-left"><i class="ring ring-a" /><i class="ring ring-b" /><i class="ring ring-c" /></span>
-          <span class="orbit orbit-right"><i class="ring ring-a" /><i class="ring ring-b" /><i class="ring ring-c" /></span>
-          <span class="corner-glow corner-glow-left"></span>
-          <span class="corner-glow corner-glow-right"></span>
-          <span class="halo halo-left"></span>
-          <span class="halo halo-right"></span>
-          <span class="veils veils-left"><i class="veil veil-a"></i><i class="veil veil-b"></i></span>
-          <span class="veils veils-right"><i class="veil veil-a"></i><i class="veil veil-b"></i></span>
-          <!-- 两侧只放光：同心光弧 + 沿轨运行的光点 + 缓缓上浮的微光尘。
-               这里是"空间站外的星轨与尘埃"，塞第二块字墙只会跟卡片抢戏 -->
-          <span class="orbit orbit-left">
-            <i class="arc arc-a"></i><i class="arc arc-b"></i><i class="arc arc-c"></i>
-            <i class="spark spark-a"></i><i class="spark spark-b"></i>
-          </span>
-          <span class="orbit orbit-right">
-            <i class="arc arc-a"></i><i class="arc arc-b"></i><i class="arc arc-c"></i>
-            <i class="spark spark-a"></i><i class="spark spark-b"></i>
-          </span>
-          <span class="dust dust-left"><i v-for="(d, i) in DUST" :key="i" :style="d"></i></span>
-          <span class="dust dust-right"><i v-for="(d, i) in DUST" :key="i" :style="d"></i></span>
+          <!-- 这一层现在只剩底角的两行小字。
+               两侧的光点已搬进 .background（那儿有弧线裁切，灰色区自动被吃掉）；
+               光带（.veils）、呼吸光晕（.halo）、底角补光（.corner-glow）、
+               同心光弧（.orbit）都属于"背景式打光"，已按要求取下，
+               样式原封留在 <style> 里，要让哪一层回来，在这里补回对应节点即可 -->
           <p class="deco-note deco-note-left">
             <span class="note-strong">NATB</span>
             <span class="note-dim">小天才手表 ADB 工具箱</span>
@@ -290,6 +328,9 @@ onBeforeUnmount(clearTimers)
 
 <style scoped>
 .home {
+  /* 卡片两侧的实际空隙：光点层与装饰层都吃它，只在这里定义一次 */
+  --gap: max(0px, calc((100vw - 860px) / 2));
+
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -457,11 +498,16 @@ onBeforeUnmount(clearTimers)
 
   clip-path: circle(var(--l) at 50% calc(100% - var(--l))); /* 弧线裁在内容层 */
 
-  background-image: url('/images/home-page-bg.webp');
+  /* 背景整体压淡一档：极光原图太抢。
+     用叠在第一层的暗罩，而不是 filter/opacity——窗口是它的子元素，
+     滤镜会把卡片一起暗掉，多层背景只作用于底图本身 */
+  background-image:
+    linear-gradient(rgba(6, 10, 20, 0.32), rgba(6, 10, 20, 0.32)),
+    url('/images/home-page-bg.webp');
   background-color: #dfe3ea; /* 图片未加载时的兜底色 */
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
 
   display: flex;
   align-items: center;
@@ -713,12 +759,12 @@ onBeforeUnmount(clearTimers)
 
 /* ===== 两侧与底角的装饰层 =====
  * 空白在卡片外面：左右两侧各约 530px（1920 下），以及底部弧线裁出来的左下、右下两个暗角。
- * 这里只做"画面不再空"的加法——两侧各一组同心轨道环 + 竖排鬼影标语，左下/右下各一行小字。
- * --gap 就是卡片两侧的实际空隙，本层所有横向尺寸都吃它，
- * 于是环再大也只在自己的那半侧里长，永远压不到卡片上。 */
+ * 当前只有光点（.dust）在用：光由光点自己发出，每颗自带一圈光斑，不是一层背景打光。
+ * --gap 就是卡片两侧的实际空隙，本层所有横向尺寸都吃它，于是再大的光斑也只长在自己那半侧里。
+ *
+ * ⚠️ 下面这几组样式保留但已从模板取下，要哪一层回来，在 .side-deco 里补回对应节点即可：
+ *    .veils 极光光带 / .halo 呼吸光晕 / .corner-glow 底角补光 / .orbit 同心光弧与沿轨光点。 */
 .side-deco {
-  --gap: max(0px, calc((100vw - 860px) / 2));
-
   position: absolute;
   inset: 0;
   z-index: 3; /* 压在 .cover(2) 与网格(1) 之上；本层只出现在卡片之外 */
@@ -835,56 +881,64 @@ onBeforeUnmount(clearTimers)
   mask: linear-gradient(to right, #0000 0%, #000 28%);
 }
 
+/* 光带不做椭圆：去掉圆角就是一条等宽的带子，四边全靠 blur 化开，
+   从屏幕顶上一直通到底，顶部最亮、往下渐隐 */
 .veil {
   position: absolute;
-  border-radius: 50%;
   filter: blur(48px);
   opacity: 0.85;
 }
+/* 首尾各留一段 0 透明：带子顶边压在屏幕上沿，不收口就会露出一条硬直线。
+   高度只到上方一半——弧线以下那片灰色不属于画面主体，光带不进去 */
 .veil-a {
-  left: -24%;
-  top: -7%;
-  width: 132%;
-  height: 30%;
+  left: -22%;
+  top: -2%;
+  width: 128%;
+  height: 54%;
   background: linear-gradient(
-    104deg,
-    rgba(132, 94, 255, 0.5),
-    rgba(56, 132, 255, 0.34) 58%,
-    rgba(56, 132, 255, 0)
+    180deg,
+    rgba(132, 94, 255, 0) 0%,
+    rgba(132, 94, 255, 0.46) 14%,
+    rgba(96, 118, 255, 0.4) 42%,
+    rgba(56, 132, 255, 0.16) 74%,
+    rgba(56, 132, 255, 0) 96%
   );
   animation: veil-drift-a 23s ease-in-out infinite alternate;
 }
 .veil-b {
-  left: -32%;
-  top: 3%;
-  width: 142%;
-  height: 26%;
+  left: -30%;
+  top: -2%;
+  width: 138%;
+  height: 48%;
   background: linear-gradient(
-    88deg,
-    rgba(52, 190, 235, 0.34),
-    rgba(74, 120, 255, 0.4) 60%,
-    rgba(74, 120, 255, 0)
+    182deg,
+    rgba(52, 190, 235, 0) 0%,
+    rgba(52, 190, 235, 0.28) 16%,
+    rgba(74, 120, 255, 0.36) 48%,
+    rgba(74, 120, 255, 0.14) 78%,
+    rgba(74, 120, 255, 0) 96%
   );
   animation: veil-drift-b 31s ease-in-out infinite alternate;
 }
+/* 带子拉长之后，同样的倾角会把底端甩出去很远，摆幅收到 1 度出头 */
 @keyframes veil-drift-a {
   from {
-    translate: 0 -6%;
-    rotate: -5deg;
+    translate: 0 -1.5%;
+    rotate: -1.2deg;
   }
   to {
-    translate: 0 8%;
-    rotate: 4deg;
+    translate: 0 1.5%;
+    rotate: 1deg;
   }
 }
 @keyframes veil-drift-b {
   from {
-    translate: 0 6%;
-    rotate: 5deg;
+    translate: 0 1.5%;
+    rotate: 1.2deg;
   }
   to {
-    translate: 0 -7%;
-    rotate: -4deg;
+    translate: 0 -1.5%;
+    rotate: -1deg;
   }
 }
 
@@ -923,8 +977,9 @@ onBeforeUnmount(clearTimers)
 }
 
 /* 同心光弧：圆心落在屏幕外沿，画面里只留半圈。
-   conic-gradient 铺色、mask 掏空成发丝环，弧的两端由渐变自己收干净；
-   再让每道弧以不同速度、不同方向慢转，光就会沿着弧面来回走 */
+   conic-gradient 铺色、mask 掏成一段有厚度的软带，弧的两端由渐变自己收干净。
+   ⚠️ 当前未启用：用户要求先看"只有光带"的效果，模板里的 .orbit 节点已移除；
+   要把圆环加回来，在 .side-deco 里补两个 .orbit 节点即可，样式不用动 */
 .orbit {
   position: absolute;
   top: 52%;
@@ -1020,8 +1075,8 @@ onBeforeUnmount(clearTimers)
     0 0 38px 14px rgba(64, 126, 255, 0.5);
 }
 
-/* 浮尘：只在属于自己那半侧里飘，靠 overflow 把越界的一粒直接裁掉，
-   于是无论视口多窄都不会有一粒飘到卡片上 */
+/* 光点层：横向靠 width:var(--gap) 加 overflow 关在自己那半侧，一粒也飘不到卡片上；
+   纵向不设界，落进灰色区的那颗交给 .background 的弧线裁切直接吃掉 */
 .dust {
   position: absolute;
   top: 0;
@@ -1035,34 +1090,63 @@ onBeforeUnmount(clearTimers)
 .dust-right {
   right: 0;
 }
+/* 光点即光源：元素本身就是它洒出来的那圈光，真正那颗芯是 ::after。
+   尺寸吃 --gap，与两侧空隙同比例伸缩；柔边用径向渐变做，
+   不用 blur 滤镜——同样的效果，几十个点一起走时便宜得多 */
 .dust i {
   position: absolute;
   left: var(--x);
   top: var(--y);
-  width: 4px;
-  height: 4px;
+  width: calc(var(--gap) * 0.26);
+  height: calc(var(--gap) * 0.26);
+  /* 让光斑以坐标点为圆心，而不是以左上角对齐 */
+  margin: calc(var(--gap) * -0.13) 0 0 calc(var(--gap) * -0.13);
   border-radius: 50%;
-  background: #e4f0ff;
-  box-shadow:
-    0 0 6px 1px rgba(190, 220, 255, 0.8),
-    0 0 16px 4px rgba(110, 170, 255, 0.5);
-  opacity: 0;
+  background: radial-gradient(
+    closest-side,
+    rgba(198, 228, 255, 0.42),
+    rgba(112, 172, 255, 0.17) 42%,
+    rgba(60, 112, 255, 0) 100%
+  );
+  opacity: 0; /* 黑幕没退之前，一颗都不亮 */
+}
+
+/* 等黑幕开始退（.home 挂上 is-revealing）那条循环才启动：
+   每颗都从自己周期的起点淡入，加上各自不同的入场延迟，
+   光是"一片片亮起来"的，而不是一进场就齐刷刷亮在半途 */
+.home.is-revealing .dust i {
   animation: dust-drift var(--dur) linear var(--delay) infinite;
 }
+/* 灯芯：亮而小，光斑只是它洒出来的 */
+.dust i::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #f4f9ff;
+  box-shadow:
+    0 0 6px 2px rgba(205, 230, 255, 0.9),
+    0 0 18px 6px rgba(120, 175, 255, 0.5);
+}
+/* 只在原地小幅上浮：幅度一大，点就会一路飘出顶部，下半段反而永远空着 */
 @keyframes dust-drift {
   0% {
     opacity: 0;
-    translate: 0 10vh;
+    translate: 0 4vh;
   }
-  15% {
-    opacity: 0.85;
+  18% {
+    opacity: 0.8;
   }
-  70% {
+  72% {
     opacity: 0.5;
   }
   100% {
     opacity: 0;
-    translate: 0 -32vh;
+    translate: 0 -12vh;
   }
 }
 

@@ -8,8 +8,8 @@ import ProjectInfo from "./pages/ProjectInfo.vue";
 
 <template>
   <NavBar />
-  <HomePage />
-<!--  <Features/>-->
+<!--  <HomePage />-->
+  <Features/>
 <!--  <UpdateLog/>-->
 <!--  <ProjectInfo/>-->
 </template>
