@@ -28,13 +28,13 @@ const scrimEl = ref(null)
 const rootEl = ref(null)
 const frameEl = ref(null)
 const auraEl = ref(null)
-const glowEl = ref(null)
-const sweepEl = ref(null)
 const detailEl = ref(null)
 const leftEl = ref(null)
 const shotEl = ref(null)
 const closeEl = ref(null)
 
+// 大窗右侧放的是产品的真实界面截图（features/screenshot 下），
+// 卡片上那张封面是另一回事 —— 两者各司其职，不是同一张图
 const shot = computed(() => props.item.shot)
 
 // 一条缓动贯到底，只靠错开的微延迟分出层次，这才是一口气
@@ -52,6 +52,17 @@ const AURA_MIN = 0.003
 
 let anims = []
 let closing = false
+
+/**
+ * Esc 关闭：焦点进了展开层，键盘用户必须能原路退出去。
+ * 监听挂在组件生命周期上 —— 本层是 v-if 渲染的，收起时监听一并撤掉，
+ * 不会留给后面的页面。
+ */
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  store.requestClose()
+}
 
 /** 元素自然矩形在视口里的中心，覆盖层是 fixed inset:0，视口坐标即它的局部坐标 */
 function mid(el) {
@@ -86,6 +97,7 @@ function mirroredEasing(easing) {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
   await nextTick()
   const frame = frameEl.value
   const detail = detailEl.value
@@ -98,9 +110,6 @@ onMounted(async () => {
   const f = mid(frame)
   const shell = mid(detail.shell)
   const s = mid(image)
-  // 水印在壳里面：壳的动画一建，它的 rect 立刻就被那层变换带走了，
-  // 所以布局位置必须赶在起动画之前量
-  const noBox = detail.no ? mid(detail.no) : null
 
   // 先让整块玻璃按最终尺寸光栅化一帧再起动画：这块面板的首次光栅化要几十毫秒，
   // 落在动画最吃重的前两帧上就是一次明显的顿挫。这里把整层压到千分之一（等于看不见，
@@ -163,26 +172,6 @@ onMounted(async () => {
   // 圆角是绘制属性，跟着 transform 同一条动画会把它一起踢出合成层，所以分开两条
   const cornerOpt = { ...base, duration: reduce ? 1 : D_CORNER }
   play(detail.shell, corner, cornerOpt)
-
-  // 水印得飞：它压在原卡右上角、还出血到卡外，只有搬回原卡那一处才对得上。
-  // 它在壳里面，所以自身要抵掉壳这一层：位移先把目标偏移转回未旋转坐标再除壳的缩放，
-  // 缩放按字号比除壳的缩放；旋转两边都是 15°，正好抵消，自身不必转
-  if (detail.no && parts.no && noBox) {
-    const kn = fonts.no
-      ? fonts.no / parseFloat(getComputedStyle(detail.no).fontSize)
-      : parts.no.w / noBox.w
-    const rad = (o.rot * Math.PI) / 180
-    const dxs = parts.no.cx - o.cx
-    const dys = parts.no.cy - o.cy
-    const ux = dxs * Math.cos(rad) + dys * Math.sin(rad)
-    const uy = -dxs * Math.sin(rad) + dys * Math.cos(rad)
-    play(detail.no, [
-      {
-        transform: `translateZ(0) translate(${(shell.x + ux / shellSx - noBox.x).toFixed(2)}px, ${(shell.y + uy / shellSy - noBox.y).toFixed(2)}px) scale(${(kn / shellSx).toFixed(4)}, ${(kn / shellSy).toFixed(4)})`,
-      },
-      { transform: 'translateZ(0)' },
-    ], base)
-  }
 
   // 边与影跟着壳走同一组变换，顶上原卡那一圈；贴回原位后自己淡掉，
   // 大卡停在那时已经是不留边框阴影的样子。
@@ -252,21 +241,6 @@ onMounted(async () => {
     duration: reduce ? 1 : 300,
     delay: at(D_ALL - 300),
   })
-  play(glowEl.value, [{ opacity: 0 }, { opacity: 1 }], {
-    ...base,
-    duration: reduce ? 1 : D_ALL - 120,
-    delay: at(120),
-  })
-  play(sweepEl.value, [
-    { transform: 'translateX(-140%)', opacity: 0 },
-    { transform: 'translateX(40%)', opacity: 0.9, offset: 0.34 },
-    { transform: 'translateX(320%)', opacity: 0 },
-  ], {
-    ...base,
-    duration: reduce ? 1 : D_ALL - 240,
-    delay: at(240),
-    easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
-  })
   play(closeEl.value, [
     { transform: 'scale(0.7)', opacity: 0 },
     { transform: 'scale(1)', opacity: 1 },
@@ -320,6 +294,7 @@ watch(() => store.closing, (value) => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
   anims.forEach((anim) => anim.cancel())
   anims = []
 })
@@ -336,18 +311,18 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 只提供最终矩形，永不参与动画、永不裁剪：里面的层各自飞各自的 -->
-      <div class="viewer__panel" :style="{ '--accent': item.theme.base }">
+      <!-- 面板底色跟着被点开的那一格走（--tint）：展开时是"这张卡长大了"，
+           颜色一路接得上，而不是"跳出来一个别的窗口" -->
+      <div class="viewer__panel" :style="{ '--tint': item.tint }">
         <!-- 大玻璃的两道外投影：搬出玻璃自己那一层。
             它们占了玻璃大半的重绘面积，又跟着非等比缩放每帧重光栅；
             单开一层静止不动、只淡入，观感一模一样，代价却只剩一次 -->
         <span ref="auraEl" class="viewer__aura" aria-hidden="true"></span>
 
-        <!-- 玻璃层：唯一做非等比缩放的元素 -->
+        <!-- 玻璃层：唯一做非等比缩放的元素。里面是空的 ——
+             光扫与网格暗纹都撤了，落位后它就是一块干净的墨底 -->
         <div ref="frameEl" class="viewer__frame">
-          <div class="viewer__clip">
-            <span ref="glowEl" class="viewer__glow" aria-hidden="true"></span>
-            <span ref="sweepEl" class="viewer__sweep" aria-hidden="true"></span>
-          </div>
+          <div class="viewer__clip"></div>
         </div>
 
         <!-- 大图铺满右半边，左缘化进玻璃，右缘裁掉窗口自带的标题栏按钮 -->
@@ -383,6 +358,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .viewer {
+  /* 强调色只剩两处用途：焦点环与关闭按钮。不再按每项品牌色换肤 ——
+     八种品牌色轮番出现，正是"模板感"最省事的来源 */
+  --accent: #6ea8ff;
+
   position: fixed;
   inset: 0;
   /* 压住顶栏：展开时全场只有一个焦点 */
@@ -409,7 +388,7 @@ onBeforeUnmount(() => {
   --panel-w: min(92vw, 1680px);
   /* 高宽挂钩：截图是横的，窗口越宽越该扁，上下才不留大片空玻璃 */
   --panel-h: min(84vh, 900px, calc(var(--panel-w) * 0.45));
-  --radius: 100px;
+  --radius: 20px;
   --pad: clamp(16px, 2.6vh, 38px);
   --gap: clamp(18px, 2.4vw, 52px);
   /* 比例尺：大卡顶满左列内高，宽按同比例跟着涨，正文列宽才跟着同一倍率走 */
@@ -430,11 +409,11 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   border-radius: var(--radius);
-  corner-shape: superellipse(3);
+  /* 克制阴影：一层贴边 + 一层扩散，够把面板从背景上托起来即可。
+     原来那道 88px 的品牌色外发光整块撤掉 —— 编辑版式不靠光晕造气氛 */
   box-shadow:
-    0 22px 52px rgba(3, 6, 14, 0.6),
-    /* 品牌色外发光原来给到 130px 半径，光栅化它一次要几十毫秒，收一半看不出差别 */
-    0 44px 88px color-mix(in srgb, var(--accent) 16%, transparent);
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    0 24px 64px rgba(0, 0, 0, 0.46);
   pointer-events: none;
   /* 不从 0 起手：透明度归零的层会被合成器判成不可见、跳过光栅，
      等它真要出场时才光栅，那一帧的卡顿就又回来了。千分之三肉眼等于没有 */
@@ -447,23 +426,12 @@ onBeforeUnmount(() => {
   inset: 0;
   /* 重绘范围锁在自己身上，别往外扩散 */
   contain: paint;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(22, 21, 15, 0.1);
   border-radius: var(--radius);
-  corner-shape: superellipse(3);
-  background:
-    radial-gradient(
-      120% 92% at 6% -10%,
-      color-mix(in srgb, var(--accent) 30%, transparent),
-      transparent 58%
-    ),
-    radial-gradient(
-      88% 72% at 104% 112%,
-      color-mix(in srgb, var(--accent) 24%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(158deg, #2b313b 0%, #1d2129 52%, #14171d 100%);
+  /* 与墙里的格子同一种色板：大窗是从那张卡长出来的，不该在半路换一层材质 */
+  background: var(--tint, #f8f6f2);
   /* 外投影在 .viewer__aura 上：它不进这一层，非等比缩放期间就不必陪着重光栅 */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
   will-change: transform;
 }
 
@@ -472,48 +440,13 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  /* 网格暗纹与光晕都圈在这一层里重绘 */
   contain: paint;
   border-radius: inherit;
-  corner-shape: superellipse(3);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+  /* 原来这里铺了一层网格暗纹去接页面背景。编辑版式里，那层暗纹正是
+     "模板味"最明显的来源之一 —— 撤掉，让墨底就是墨底 */
 }
 
-/* 左半边的细网格接上页面背景，右边有截图台，不必再铺 */
-.viewer__clip::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: clamp(30px, 4.2vh, 52px) clamp(30px, 4.2vh, 52px);
-  mask-image: radial-gradient(96% 100% at 0% 50%, #000 4%, transparent 62%);
-  -webkit-mask-image: radial-gradient(96% 100% at 0% 50%, #000 4%, transparent 62%);
-  opacity: 0.62;
-}
-
-.viewer__glow {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(
-      46% 62% at 16% 26%,
-      color-mix(in srgb, var(--accent) 26%, transparent),
-      transparent 68%
-    ),
-    radial-gradient(60% 50% at 88% 82%, rgba(255, 255, 255, 0.07), transparent 66%);
-}
-
-/* 一道斜向光扫，擦过整块玻璃，只在留白处看得见 */
-.viewer__sweep {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -30%;
-  width: 50%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.16), transparent);
-}
+/* 光斑与光扫整块撤掉：大窗的光来自右侧那张截图，不靠自己发光 */
 
 /* ===== 左：大卡，按编辑式重排 ===== */
 .viewer__left {
@@ -526,25 +459,8 @@ onBeforeUnmount(() => {
   width: var(--card-w);
 }
 
-/* 卡后的品牌色灯：卡片从玻璃上浮起来，不再贴在深底上 */
-.viewer__left::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: calc(var(--card-w) * 1.9);
-  height: calc(var(--card-w) * 1.9);
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent), transparent 66%);
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-/* 大窗里的卡壳不再补边光与外投影：落位后它是一块干净的深底，
-   只有过渡期间那圈边影还顶着原卡 */
-.viewer__detail :deep(.detail-halo) {
-  opacity: 0.42;
-}
+/* 卡后的品牌色灯与卡上的水印都撤掉：左列现在只有字，
+   光来自右边那张图 —— 一处光源就够，两处就开始互相打架 */
 
 /* ===== 右：大图顶满，从左往右渐显 ===== */
 .viewer__right {
@@ -554,24 +470,35 @@ onBeforeUnmount(() => {
   top: 0;
   right: 0;
   bottom: 0;
+  /* 大图上下各溢出一截，多出来的部分在这里被收掉 */
+  overflow: hidden;
+  /* 圆角得画在这一层：截图层是 .viewer__frame 的兄弟节点，
+     不在那个 border-radius: inherit 的 .viewer__clip 里，裁不到它；
+     而 .viewer__shot 自己上下各溢出 3%，它的角也在框外。
+     只圆右侧两角 —— 左缘是化进玻璃的渐隐边，不该有角 */
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .viewer__shot {
   display: block;
   box-sizing: border-box;
-  position: relative; /* 只求压住玻璃层那层背景，不能再抬 z-index：它得留在卡片分身底下 */
+  position: absolute;
+  left: 0;
+  right: 0;
   width: 100%;
-  height: 100%;
+  /* 上下各溢出一小截：cover 之下纵向本来正好贴合，object-position 的纵向分量
+     根本不起作用 —— 截图顶上那条系统标题栏就永远赖在画面里。留 6% 的余量、
+     上移 3%，刚好把标题栏裁掉，又不至于把界面放大到失真 */
+  top: -3.2%;
+  height: 106%;
   object-fit: cover;
-  /* 宽了裁右边（顺手裁掉窗口自带的标题栏按钮），矮了裁下边，标题栏永远留住 */
-  object-position: left top;
+  object-position: left center;
   /* 左缘透明、右缘满显，图从卡片那侧化出来 */
   mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.5) 4%, #000 13%);
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.5) 4%, #000 13%);
-  /* 右侧两角跟着窗的圆角走，顶满也不出框 */
-  border-radius: 0 var(--radius) var(--radius) 0;
-  corner-shape: superellipse(3);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  /* 圆角交给 .viewer__right 裁 —— 这里自己画没用，角在容器外 */
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   will-change: transform, opacity;
 }
 
@@ -587,9 +514,9 @@ onBeforeUnmount(() => {
   height: clamp(44px, 4.4vh, 52px);
   padding: 0;
   pointer-events: auto;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 50%;
-  background: rgba(18, 22, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 120px;
+  background: rgba(18, 19, 22, 0.76);
   color: rgba(255, 255, 255, 0.82);
   cursor: pointer;
   backdrop-filter: blur(8px);
@@ -597,9 +524,11 @@ onBeforeUnmount(() => {
   transition: background 0.2s ease, color 0.2s ease, scale 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* 悬停直接反色到墨黑：在亮面板上最干脆的一种"我按得动" */
 .viewer__close:hover {
-  background: color-mix(in srgb, var(--accent) 40%, rgba(18, 22, 28, 0.9));
-  color: #fff;
+  background: #16150f;
+  border-color: #16150f;
+  color: #f8f6f2;
 }
 
 .viewer__close:active {
@@ -641,9 +570,9 @@ onBeforeUnmount(() => {
     bottom: var(--pad);
   }
 
-  /* 两段式排版里图是浮着的，四角都要圆 */
+  /* 两段式排版里图是浮着的，四角同样只留 4px */
   .viewer__shot {
-    border-radius: clamp(10px, 1.4vh, 18px);
+    border-radius: var(--radius);
   }
 }
 </style>

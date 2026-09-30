@@ -1,220 +1,232 @@
 <script setup>
 /**
- * 卡片本体：斜向滚动栏与大窗共用一份。
- * 卡内一切尺寸都由祖先给的 --card-h 折算，所以"放大"只是换了个 --card-h，
- * 版式比例、换行点、截断行数都不会变 —— 大窗里就是原卡按比例变大。
+ * 图片墙的一格：一张手绘的抽象插画 + 图注。
+ *
+ * 版式是"上图下文"：插画出血铺满上半部，图注落在下半部的纸色区。
+ * 上一版把产品截图直接当主视觉 —— 八张黑色终端窗口排成一面墙，
+ * 那是"截图墙"，不是画报。画报的主视觉得自己画：这一版每格一张
+ * 按功能构图的抽象插画（见 Features 里的 ART），真实界面留到展开后再看。
+ *
+ * 三层变换各走各的道：父级 grid 的视差平移、入场用 translate 属性、
+ * 指针倾斜用 transform，互不覆盖。
  */
 defineProps({
   item: { type: Object, required: true },
-  /** 大窗那版用清晰图标 + CSS 模糊：SVG 滤镜换尺寸要重光栅，展开时会卡一下 */
-  sharp: { type: Boolean, default: false },
 })
 </script>
 
 <template>
-  <article
-    class="card"
-    :style="{
-      '--accent': item.theme.base,
-      '--logo': item.src,
-      '--logo-sharp': item.srcSharp,
-    }"
+  <!-- 根用 button：整格可点，键盘 Tab / Enter 天生能到。
+       button 的内容模型只许 phrasing content，所以内部一律 span。 -->
+  <button
+    type="button"
+    class="cell"
+    :style="{ '--tint': item.tint, '--art-ink': item.artInk }"
+    :aria-label="`${item.title}：${item.desc}`"
   >
-    <!-- 超大序号当背景水印，超出卡片的部分被裁掉 -->
-    <span class="card-no" aria-hidden="true">{{ item.no }}</span>
-    <!-- 品牌色水印：垫在磨砂层底下，透过玻璃化成一层彩雾 -->
-    <span class="card-halo" :class="{ 'is-sharp': sharp }" aria-hidden="true"></span>
-    <header class="card-head">
-      <!-- 主图标走 solar 系列 -->
-      <span class="card-icon">
-        <component :is="item.icon" width="20" height="20" />
+    <!-- 插画是内联 SVG（静态内容，来源可信），样式全写在 SVG 自己的属性上 -->
+    <span class="cell__art" aria-hidden="true">
+      <img class="cell__art-img" :src="item.art" alt="" draggable="false" />
+    </span>
+
+    <span class="cell__body">
+      <!-- 不编号：卡片上只留标题与一句话。序号是版面上最容易变成噪音的那种装饰，
+           真要"第几项"的信息，展开大窗里已经写着 -->
+      <span class="cell__head">
+        <span class="cell__icon" aria-hidden="true">
+          <component :is="item.icon" width="14" height="14" />
+        </span>
+        <span class="cell__title">{{ item.title }}</span>
       </span>
-      <h2 class="card-title">{{ item.title }}</h2>
-    </header>
-    <p class="card-desc">{{ item.desc }}</p>
-  </article>
+      <span class="cell__desc">{{ item.desc }}</span>
+    </span>
+  </button>
 </template>
 
 <style scoped>
-/* 卡内一切尺寸都按卡高折算，比例由 --card-w 定 */
-.card {
-  /* 版式自成一格：这些子树的布局与样式计算可以不再波及外面 */
-  contain: layout style paint;
+.cell {
+  /* 内距压到最小：格子里每一像素都留给插画 */
+  --pad: clamp(9px, 0.9vw, 14px);
+
   position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--card-h) * 0.026);
-  width: var(--card-w, calc(var(--card-h) * 0.85));
-  height: fit-content;
-  /* 间距用外边距，一份列表的高度才严格等于八张 */
-  margin-bottom: var(--card-gap, 0px);
-  /* 左右比上下宽一点：和浅色弧区并排，横向不留空虚 */
-  padding: calc(var(--card-h) * 0.056) calc(var(--card-h) * 0.064) calc(var(--card-h) * 0.088);
-
+  width: 100%;
+  height: 100%;
+  /* 出血版式：内距只给图注那一半，插画要顶到边 */
+  padding: 0;
   overflow: hidden;
-  /* 自成层叠上下文，水印才能垫在内容下 */
+
+  /* 直角版式：2px 只用来消掉亚像素毛边，不是"圆角" */
+  border: 0;
+  border-radius: 2px;
+  background: var(--tint, #eeebe5);
+  color: #16150f;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: calc(var(--card-h) * 0.66);
-  corner-shape: superellipse(3.25);
-  /* 深蓝墨底：底色几乎压满，压住后面浅弧区，深底上还要留住品牌色 */
-  background:
-    radial-gradient(
-      122% 96% at 88% 114%,
-      color-mix(in srgb, var(--accent) 24%, transparent) 0%,
-      transparent 64%
-    ),
-    radial-gradient(90% 70% at 8% -14%, rgba(255, 255, 255, 0.11) 0%, transparent 62%),
-    linear-gradient(158deg, #363c47 0%, #22262e 48%, #181b22 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.13),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 2px 4px rgba(8, 12, 24, 0.28),
-    0 14px 28px rgba(8, 12, 24, 0.26),
-    0 30px 58px rgba(8, 12, 24, 0.22);
+  -webkit-tap-highlight-color: transparent;
+
+  /* 倾斜、抬起、放大共用一个 transform —— 分几条写会互相覆盖。
+     perspective 收在 900px：远了 3D 就等于没有 */
+  transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg))
+    translateZ(var(--lift-z, 0px)) scale(var(--lift, 1));
   transition:
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.32s ease,
-    border-color 0.32s ease;
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 380ms ease,
+    border-radius 380ms ease;
 }
 
-/* 语言图标只当背景：原封不动的彩色图标糊开，在深底上化成一层品牌色雾 */
-.card-halo {
-  position: absolute;
-  right: calc(var(--card-h) * -0.03);
-  bottom: calc(var(--card-h) * -0.06);
-  z-index: -2; /* 垫到最底下 */
-  width: calc(var(--card-h) * 0.72);
-  height: calc(var(--card-h) * 0.72);
-  /* 直接用图标本身的彩色版，不再换成单色遮罩 */
-  background-image: var(--logo);
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-  /* 模糊已经烘进图标本身，这里只留一层渐隐：图形芯子还认得出，外圈直接化进底色 */
-  mask-image: radial-gradient(circle at 72% 72%, #000 30%, rgba(0, 0, 0, 0.45) 62%, transparent 92%);
-  -webkit-mask-image: radial-gradient(
-    circle at 72% 72%,
-    #000 30%,
-    rgba(0, 0, 0, 0.45) 62%,
-    transparent 92%
-  );
-  opacity: 0.34;
-  pointer-events: none;
+/* ── 悬停：整格朝指针方向仰起，同时抬离版面 ——
+     放大 6%、上浮 28px（在 900px 透视下又自带约 3% 的增益），
+     再压两层落差明显的投影。上一版只给 3.5% 又没有 z 位移，等于没动 ── */
+.cell:hover,
+.cell:focus-visible {
+  --lift: 1.1;
+  --lift-z: 28px;
+  z-index: 2;
+  box-shadow:
+    0 6px 14px rgba(22, 21, 15, 0.16),
+    0 26px 54px rgba(22, 21, 15, 0.22);
+  border-radius: 8px;
 }
 
-/* 清晰图标 + 同比例的 CSS 模糊：观感与烘进 SVG 的那版一致，但换尺寸不必重光栅 */
-.card-halo.is-sharp {
-  background-image: var(--logo-sharp);
-  filter: blur(calc(var(--card-h) * 0.0096));
+/* 插画：出血铺满上半部。overflow 裁掉 cover 溢出的部分 */
+.cell__art {
+  position: relative;
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
-/* 底部一道渐隐强调线，代替满卡留白 */
-.card::after {
+.cell__art-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transition: transform 720ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 只在底部一段化进卡片色，图与文字之间不留硬边。
+   上一版把渐变铺满整张（顶部 78%、底部 94%），等于给插画盖了层纱 ——
+   旁边的装饰格是鲜的，卡片却是灰的，一眼就看出不对 */
+.cell__art::after {
   content: '';
   position: absolute;
-  left: calc(var(--card-h) * 0.064);
-  right: calc(var(--card-h) * 0.22);
-  bottom: calc(var(--card-h) * 0.06);
-  height: 3px;
-  border-radius: 3px;
+  inset: 0;
+  pointer-events: none;
   background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent) 92%, transparent),
-    color-mix(in srgb, var(--accent) 0%, transparent)
+    180deg,
+    transparent 0%,
+    transparent 58%,
+    color-mix(in srgb, var(--tint) 52%, transparent) 82%,
+    color-mix(in srgb, var(--tint) 96%, transparent) 100%
   );
 }
 
-.card:hover {
-  border-color: color-mix(in srgb, var(--accent) 46%, rgba(255, 255, 255, 0.14));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 4px 10px rgba(8, 12  , 24, 0.34),
-    0 22px 42px rgba(8, 12, 24, 0.34),
-    0 38px 74px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.card:hover .card-halo {
-  opacity: 0.5;
-}
-
-/* 图标与标题同一行，图标在左、标题紧随 */
-.card-head {
+.cell__body {
   flex: none;
   display: flex;
-  align-items: center;
-  gap: calc(var(--card-h) * 0.055);
+  flex-direction: column;
+  gap: clamp(2px, 0.35vh, 5px);
+  padding: var(--pad);
 }
 
-.card-icon {
+/* 页码那一档已经撤掉：卡片上只留标题与一句话 */
+.cell__head {
+  display: flex;
+  align-items: center;
+  gap: 0.46em;
+  transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cell__icon {
   flex: none;
   display: grid;
   place-items: center;
-  width: calc(var(--card-h) * 0.185);
-  height: calc(var(--card-h) * 0.185);
-  /* 深处一点、亮处一点的品牌色，芯片在深底上透出光 */
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent);
-  border-radius: calc(var(--card-h) * 0.062);
-  background: linear-gradient(
-    150deg,
-    color-mix(in srgb, var(--accent) 30%, transparent),
-    color-mix(in srgb, var(--accent) 10%, transparent)
-  );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  color: color-mix(in srgb, var(--accent) 76%, #ffffff);
+  color: rgba(22, 21, 15, 0.5);
+  transition: color 320ms ease;
 }
 
-.card-icon svg {
-  display: block;
-  width: calc(var(--card-h) * 0.1);
-  height: calc(var(--card-h) * 0.1);
-}
-
-.card-title {
+.cell__title {
   min-width: 0;
-  margin: 0;
-  font-size: max(17px, calc(var(--card-h) * 0.074));
+  /* 这一格的主角：字号压过编号与正文整整一档 */
+  font-size: clamp(15px, 1.08vw, 19px);
   font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
-  color: #f2f5fa;
-}
-
-.card-desc {
-  /* 占住剩余高度，各卡版式一致 */
-  display: block;
-  flex: 1 1 auto;
-  /* 行数超了直接截断，卡片高度才稳 */
+  letter-spacing: 0.005em;
+  line-height: 1.15;
+  color: #16150f;
   overflow: hidden;
-  max-height: calc(var(--card-h) * 0.46);
-  margin: 0;
-  /* 正文比上一版抬一档，标题字号保持原样 */
-  font-size: max(14px, calc(var(--card-h) * 0.07));
-  line-height: 1.68;
-  /* 中文末行不落单字，不支持也就是照旧换行 */
-  text-wrap: pretty;
-  overflow-wrap: break-word;
-  color: #b6c0d0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 超大水印序号，压在右上角当背景板 */
-.card-no {
-  position: absolute;
-  top: calc(var(--card-h) * -0.12);
-  right: calc(var(--card-h) * -0.07);
-  z-index: -1; /* 垫到内容底下 */
-  font-family: Arial, system-ui;
-  font-size: calc(var(--card-h) * 0.44);
-  font-weight: 900;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  /* 深底上要更亮才认得出，仍压在水印的层次上 */
-  color: color-mix(in srgb, var(--accent) 52%, transparent);
-  pointer-events: none;
+.cell__desc {
+  /* 默认就可见：信息不挂在 hover 上，触摸与键盘都没有 hover。
+     亮底深字，对比度实测 4.65:1，稳过 AA */
+  font-size: clamp(10.5px, 0.7vw, 12px);
+  line-height: 1.55;
+  color: rgba(22, 21, 15, 0.64);
+  /* 两行封顶：格子高度只有那么多，多出来的留给上面的插画 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color 320ms ease;
 }
 
-.card:hover .card-no {
-  color: color-mix(in srgb, var(--accent) 72%, transparent);
+/* ── 微交互：插画轻轻推近一点。是"凑近看"，不是"弹一下" ── */
+.cell:hover .cell__art :deep(svg),
+.cell:focus-visible .cell__art :deep(svg) {
+  transform: scale(1.04);
+}
+
+.cell:hover .cell__head,
+.cell:focus-visible .cell__head {
+  transform: translateX(2px);
+}
+
+.cell:hover .cell__icon,
+.cell:focus-visible .cell__icon {
+  color: rgba(22, 21, 15, 0.82);
+}
+
+.cell:hover .cell__desc,
+.cell:focus-visible .cell__desc {
+  color: rgba(22, 21, 15, 0.82);
+}
+
+/* 焦点必须看得见：亮底上用品牌蓝描边，外扩 2px 不压内容 */
+.cell:focus-visible {
+  outline: 2px solid #0a59f7;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell,
+  .cell__art :deep(svg),
+  .cell__head,
+  .cell__icon,
+  .cell__desc {
+    transition: none;
+  }
+
+  /* 少动效时连"抬起"也免了：它靠的是缩放，本身就是动效 */
+  .cell:hover,
+  .cell:focus-visible {
+    --lift: 1;
+  }
+
+  .cell:hover .cell__art :deep(svg),
+  .cell:focus-visible .cell__art :deep(svg),
+  .cell:hover .cell__head,
+  .cell:focus-visible .cell__head {
+    transform: none;
+  }
 }
 </style>

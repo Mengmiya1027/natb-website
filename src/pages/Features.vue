@@ -1,12 +1,11 @@
 <script setup>
-import GridBackground from '@/components/GridBackground.vue'
 import FeatureCard from '@/components/FeatureCard.vue'
 import FeatureViewer from '@/components/FeatureViewer.vue'
 import { useViewerStore } from '@/stores/viewer'
 import { useAnimationStore } from '@/stores/animation'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { normalizeIcon, themeFromIcon } from '@/utils/themeColor'
-// 卡片主图标统一用 solar 的 bold-duotone，两层深浅自带层次
+
+// 图标沿用 solar 的 bold-duotone：两路同色不同明度，压成单色后层次还在
 import IconShieldKeyhole from '~icons/solar/shield-keyhole-bold-duotone'
 import IconCloudDownload from '~icons/solar/cloud-download-bold-duotone'
 import IconLayers from '~icons/solar/layers-minimalistic-bold-duotone'
@@ -15,238 +14,228 @@ import IconCpuBolt from '~icons/solar/cpu-bolt-bold-duotone'
 import IconMagicStick from '~icons/solar/magic-stick-bold-duotone'
 import IconFolderFiles from '~icons/solar/folder-with-files-bold-duotone'
 import IconScreenShare from '~icons/solar/screen-share-bold-duotone'
-// raw 方式导入：拿到源码本身，品牌色和背景形状都从里面取
-// 挑这八个是为了色相铺得开：红橙 / 琥珀 / 绿 / 青 / 靛 / 蓝 / 紫 / 品红
-import LogoVue from '~icons/logos/vue?raw'
-import LogoPython from '~icons/logos/python?raw'
-import LogoCPlusPlus from '~icons/logos/c-plusplus?raw'
-import LogoJava from '~icons/logos/java?raw'
-import LogoGo from '~icons/logos/go?raw'
-import LogoKotlin from '~icons/logos/kotlin?raw'
-import LogoAndroid from '~icons/logos/android?raw'
-import LogoSwift from '~icons/logos/swift?raw'
 
-/** 取出 svg 起止标签之间的图形内容，并一并认出原始视框 */
-function readSvg(source) {
-  const head = /<svg([^>]*)>/i.exec(source)
-  const end = source.toLowerCase().lastIndexOf('</svg>')
-  if (!head || end < 0) return null
-  const box = /viewBox\s*=\s*"([^"]+)"/i.exec(head[1])
-  const [, , w, h] = box ? box[1].trim().split(/[\s,]+/).map(Number) : []
-  return { body: source.slice(head.index + head[0].length, end).trim(), w, h }
-}
-
-/**
- * 语言图标只当背景：取它原本的彩色内联图，外加按品牌色算出的主题色
- * 取不到色相时退回页面主色，卡片也不至于没色
+/* ===== 色板 =====
+ * 每格一块明亮色板，深色窗口截图浮在上面 —— 一屏之内就是一篇彩色画报。
+ * 全部是低饱和的纸感色：深色截图压上去对比自然，彼此之间又不打架。
+ * 八块都按"墨黑压在它上面"验过对比度，最低一块也有 13:1，远超 AA。
  */
+const TINTS = [
+  '#f0dfd0', // 陶土米
+  '#dce6da', // 鼠尾草
+  '#e2deee', // 紫藤
+  '#f2e6c8', // 麦
+  '#d6e3ec', // 天青
+  '#efdcdc', // 玫瑰
+  '#e0e6d2', // 橄榄
+  '#e9e2d6', // 亚麻
+]
 
-// 云母斑的模糊：视框 24，卡片上放大约九倍，0.32 就是屏幕上的 3px
-// 烘进 SVG 里，卡片上就不必各挂一个实时滤镜层
-const BLUR_FILTER =
-  '<filter id="halo-blur" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="0.32"/></filter>'
+/* ===== 插画资源 =====
+ * 画报插图在 public/images/art（art-04 单张 639KB，已移除）。
+ * 这里不走 import.meta.glob：public 下的文件不该再经打包器，
+ * 否则同一张图会被"public 原样拷贝 + 打包器再产出一份"，白白翻倍。
+ * 直接用 base 前缀取，剩下交给浏览器缓存。
+ * features/cover 下是按功能定制的封面：有封面用封面，没有才回落到画报。
+ */
+const ART_DIR = import.meta.env.BASE_URL + 'images/art/'
+const ART_FILES = ['art-01', 'art-02', 'art-03', 'art-05', 'art-06', 'art-07', 'art-08', 'art-09', 'art-10'].map(
+  (n) => ART_DIR + n + '.svg',
+)
+const COVER_DIR = import.meta.env.BASE_URL + 'images/features/cover/'
+// 产品界面截图：只在大窗右侧出现，卡片上用的是 cover
+const SHOT_DIR = import.meta.env.BASE_URL + 'images/features/screenshot/'
 
-function prepareLogo(source) {
-  const parsed = readSvg(source)
-  if (!parsed) return null
-  const boxed = normalizeIcon(parsed.body, parsed.w, parsed.h)
-  const wrap = (inner) =>
-    `url("data:image/svg+xml,${encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${inner}</svg>`,
-    )}")`
-  return {
-    // 保留图标自己的配色，糊开后才是一块有细节的云母斑
-    src: wrap(`${BLUR_FILTER}<g filter="url(#halo-blur)">${boxed}</g>`),
-    // 大窗那版用清晰图标加 CSS 模糊：SVG 自带的滤镜每换一个尺寸都要重光栅一次，
-    // 正好撞在展开的头两帧上，实测一次三十多毫秒；CSS 模糊走合成，量级完全不同
-    srcSharp: wrap(boxed),
-    theme: themeFromIcon(parsed.body, '#0a59f7'),
-  }
-}
 
-// 八项特色功能，一条一张卡；shot 是大窗右侧的实拍截图
 const FEATURES = [
   {
     icon: IconShieldKeyhole,
-    logo: LogoCPlusPlus,
     shot: 'root.webp',
     title: '一键ROOT',
     desc: '支持Z2-Z11全系列机型一键ROOT，实时修补BOOT，安全稳定。',
   },
   {
     icon: IconCloudDownload,
-    logo: LogoSwift,
     shot: 'ota.webp',
     title: '离线OTA升级',
     desc: '支持离线OTA升级解决验证异常。',
   },
   {
     icon: IconLayers,
-    logo: LogoPython,
     shot: 'rtos.webp',
     title: 'RTOS支持',
     desc: '支持Z7Pro、Z9a等RTOS系统手表。',
   },
   {
     icon: IconWidget,
-    logo: LogoJava,
     shot: 'appmanager.webp',
     title: '应用管理',
     desc: '多种安装方式，支持install/data/第三方安装器/install-create，总有一种适合您。',
   },
   {
     icon: IconCpuBolt,
-    logo: LogoGo,
     shot: '9008.webp',
     title: '9008刷机',
     desc: '9008模式刷入Recovery/TWRP，备份与恢复。',
   },
   {
     icon: IconMagicStick,
-    logo: LogoKotlin,
     shot: 'magisk.webp',
     title: 'Magisk模块',
     desc: 'Magisk模块安装、卸载、列表管理，更方便地享受模块的乐趣。',
   },
   {
     icon: IconFolderFiles,
-    logo: LogoVue,
     shot: 'filemanager.webp',
     title: '文件管理',
     desc: '摒弃传统的ADB方案与文件管理器，直接在NATB内管理文件，省心省力。',
   },
   {
     icon: IconScreenShare,
-    logo: LogoAndroid,
     shot: 'scrcpy.webp',
     title: '投屏控制',
     desc: 'scrcpy投屏控制，手表屏幕实时投影到电脑。',
   },
-].map(({ logo, shot, ...item }) => ({
+].map((item, index) => ({
   ...item,
-  ...prepareLogo(logo),
-  // 走 base，子路径部署也能取到 public 下的截图
-  shot: import.meta.env.BASE_URL + 'images/' + shot,
-}))
-
-// 车道整条斜过来 20°，屏幕四角投到它的纵轴上有多长，卡片就按这个长度备
-const ROT = Math.PI / 9
-// 与原来 48 秒滚过一份八张的手感对齐
-const SPEED = 37.7
-// 入场收尾后的起步斜率：每秒抬这么多，约 0.4s 到满速 —— 滚动是"起步"不是"啪一下"
-const SPEED_RAMP = 2.6
-// 三条车道各错开三张
-const PHASE_STEP = 3
-// 一份八项循环铺开：八张就够盖住可见跨度，宽屏不够时再整份补，序号才连得住
-const LOOP = FEATURES.map((item, index) => ({
-  ...item,
+  // 原始下标：点击时靠它定位，和卡片排在第几格无关
+  idx: index,
   no: String(index + 1).padStart(2, '0'),
+  tint: TINTS[index % TINTS.length],
+  // 每个功能都配了自己那张封面，文件名与截图一致，所以直接按 shot 拼即可
+  art: COVER_DIR + item.shot,
+  // 截图挪到了 features/screenshot 下，走 base 前缀 —— 它只在大窗里出现
+  shot: SHOT_DIR + item.shot,
 }))
 
-// 三列车道
-const LANES = [0, 1, 2]
+/* ===== 装饰插画 =====
+ * 插画格四面围一圈：顶行六张、底行六张（复用顶行）、左右各两张。
+ * 卡片与装饰格共用同一批画报 —— 整面墙只有一套画报语言。
+ * 插画格不可点、不进 Tab 序、对读屏隐藏：它们是版面的呼吸，不是内容。
+ */
+const ART_AT = (i) => ART_FILES[i % ART_FILES.length]
+const DECOR_TOP = [0, 1, 2, 3, 4, 5].map(ART_AT)
+const DECOR_BOTTOM = DECOR_TOP
+const DECOR_SIDE = [6, 7, 8, 9].map(ART_AT)
 
-// 副标题占位：字数决定竖排字号，改文案不用动样式
-const SUBTITLE = '全方面支持小天才手表玩机需求'
+/* ===== 版式：八格一次看全 =====
+ * 桌面上是 4 列 × 4 行 —— 上下两行是装饰插画，中间两行是八张功能卡。
+ * 列数写死在断点里，不用 repeat(var(--cols))：变量放进 repeat() 的第一个参数，
+ * 有些浏览器会整条判成无效值，于是退化成单列 —— 一屏只顶一张卡，正是这个坑。
+ */
 
-// 车道倾角，与 .lanes 的 rotate 同源：量卡片几何时要靠它把外接矩形解回去
-const LANE_ROT = 15
-
-// 副标题拆成一字一格：入场时逐字亮起，十三个字不会挤在同一帧里
-const GHOST = [...SUBTITLE]
-
-/* ===== 入场动效的时间表 =====
- * 阶梯只写这一份：每个元素的起跑点与时长都从这里注入成 --enter-*，
- * 样式只负责姿态与曲线，时间轴不会在 CSS 与 JS 里各写一遍。
- * 顺序：网格底纹 → 左侧蓝雾 / 弧外蓝光 → 弧面与掠光 → 左列四块（主标题自上而下擦出）
- * → 卡片逐张落位、底线收势。
+/* ===== 入场时间表 =====
+ * 只有一份数字，注入成 --enter-* 交给 CSS，样式只管姿态与曲线。
  */
 const ENTER = {
-  grid: 0, // 网格底纹
-  bloom: 40, // 左上那层蓝雾
-  glow: 60, // 弧外蓝光
-  stage: 120, // 弧面
-  sweep: 240, // 弧上掠光
-  rule: 150, // 主次之间的分隔线
-  title: 210, // 主标题
-  ghost: 390, // 副标题首字
-  ghostStep: 40, // 副标题逐字间隔
-  mark: 540, // 列尾英文标记
-  cards: 600, // 首张卡
-  laneStep: 76, // 车道之间错开
-  cardStep: 46, // 同车道相邻两张错开
-  lineLag: 150, // 卡底线比卡本身晚一点
+  mark: 0,
+  kicker: 80,
+  title: 150,
+  rule: 230,
+  lede: 290,
+  meta: 370,
+  cards: 300,
+  cellStep: 44,
+  durHead: 780,
+  durCell: 720,
 }
-const ENTER_DUR = {
-  grid: 900,
-  bloom: 1000,
-  glow: 820,
-  stage: 520,
-  sweep: 880,
-  rule: 560,
-  title: 820,
-  ghost: 460,
-  mark: 560,
-  card: 580,
-  line: 480,
-}
-// 最后一张卡的底线抽完，再留一帧余量：到这一刻动画整批撤掉
-const ENTER_END =
-  ENTER.cards +
-  ENTER.laneStep * (LANES.length - 1) +
-  ENTER.cardStep * (LOOP.length - 1) +
-  ENTER.lineLag +
-  ENTER_DUR.line +
-  16
+const ENTER_END = ENTER.cards + ENTER.cellStep * (FEATURES.length - 1) + ENTER.durCell + 40
 
 const ms = (v) => `${v}ms`
-// 同一份数字交给 CSS：:style 挂在根节点上，var() 一路继承下去
 const enterVars = {
-  '--enter-grid': ms(ENTER.grid),
-  '--enter-bloom': ms(ENTER.bloom),
-  '--enter-glow': ms(ENTER.glow),
-  '--enter-stage': ms(ENTER.stage),
-  '--enter-sweep': ms(ENTER.sweep),
-  '--enter-rule': ms(ENTER.rule),
-  '--enter-title': ms(ENTER.title),
-  '--enter-ghost': ms(ENTER.ghost),
-  '--enter-ghost-step': ms(ENTER.ghostStep),
   '--enter-mark': ms(ENTER.mark),
+  '--enter-kicker': ms(ENTER.kicker),
+  '--enter-title': ms(ENTER.title),
+  '--enter-rule': ms(ENTER.rule),
+  '--enter-lede': ms(ENTER.lede),
+  '--enter-meta': ms(ENTER.meta),
   '--enter-cards': ms(ENTER.cards),
-  '--enter-lane-step': ms(ENTER.laneStep),
-  '--enter-card-step': ms(ENTER.cardStep),
-  '--enter-line-lag': ms(ENTER.lineLag),
-  '--enter-dur-grid': ms(ENTER_DUR.grid),
-  '--enter-dur-bloom': ms(ENTER_DUR.bloom),
-  '--enter-dur-glow': ms(ENTER_DUR.glow),
-  '--enter-dur-stage': ms(ENTER_DUR.stage),
-  '--enter-dur-sweep': ms(ENTER_DUR.sweep),
-  '--enter-dur-rule': ms(ENTER_DUR.rule),
-  '--enter-dur-title': ms(ENTER_DUR.title),
-  '--enter-dur-ghost': ms(ENTER_DUR.ghost),
-  '--enter-dur-mark': ms(ENTER_DUR.mark),
-  '--enter-dur-card': ms(ENTER_DUR.card),
-  '--enter-dur-line': ms(ENTER_DUR.line),
+  '--enter-cell-step': ms(ENTER.cellStep),
+  '--enter-dur-head': ms(ENTER.durHead),
+  '--enter-dur-cell': ms(ENTER.durCell),
 }
 
 const viewer = useViewerStore()
 // 开场那场粒子戏还没落位时，这里的入场要等着
 const anim = useAnimationStore()
-const activeItem = computed(() => (viewer.active >= 0 ? LOOP[viewer.active] : null))
-// 点开的那张卡在屏幕上的真实几何，充当覆盖层 FLIP 的起点
+const activeItem = computed(() => (viewer.active >= 0 ? FEATURES[viewer.active] : null))
+
+const gridEl = ref(null)
+const wallEl = ref(null)
+const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
+
+// 点开的那一格在屏幕上的真实几何，充当覆盖层 FLIP 的起点
 const originRect = ref(null)
-// 卡内各元素的同一份几何：大卡要逐元素飞，不能整卡一起放大
+// 格内各元素的同一份几何：大窗要逐元素飞，不能整格一起放大
 const originParts = ref(null)
-// 被分身顶替的源卡，收尾时还它可见
 let sourceEl = null
 
-/**
- * 元素躺在 15° 的车道里，拿到的是旋转后的外接矩形，
- * 用三角函数反解出未旋转的真实宽高，中心取外接矩形中心（旋转不改中心）。
+/* ===== 指针：视差与倾斜 =====
+ * 视差让整片网格跟着指针反向轻移（±14px），是"镜头在动"而不是"格子在做操"；
+ * 倾斜只作用在指针贴着的那一格。角度给到 ±9°：再小就只剩"动了动"，
+ * 看不出是朝着指针仰起。
  */
-function quadOrigin(el) {
+const pax = ref(0)
+const pay = ref(0)
+const TILT_MAX = 9
+let tiltCell = null
+
+function clearTilt() {
+  if (!tiltCell) return
+  tiltCell.style.removeProperty('--tilt-x')
+  tiltCell.style.removeProperty('--tilt-y')
+  tiltCell = null
+}
+
+function onPointerMove(event) {
+  if (reduceMotion || viewer.expanded) return
+  const wall = wallEl.value
+  if (wall) {
+    const r = wall.getBoundingClientRect()
+    pax.value = (0.5 - (event.clientX - r.left) / r.width) * 14
+    pay.value = (0.5 - (event.clientY - r.top) / r.height) * 10
+  }
+  const cell = event.target instanceof Element ? event.target.closest('.cell') : null
+  if (!cell) {
+    clearTilt()
+    return
+  }
+  if (cell !== tiltCell) clearTilt()
+  tiltCell = cell
+  const r = cell.getBoundingClientRect()
+  const nx = (event.clientX - r.left) / r.width - 0.5
+  const ny = (event.clientY - r.top) / r.height - 0.5
+  cell.style.setProperty('--tilt-y', `${(nx * TILT_MAX * 2).toFixed(2)}deg`)
+  cell.style.setProperty('--tilt-x', `${(-ny * TILT_MAX * 2).toFixed(2)}deg`)
+}
+
+function onPointerLeave() {
+  clearTilt()
+  pax.value = 0
+  pay.value = 0
+}
+
+// 倾斜角度由样式给，脚本要用时现读 —— 断点改了角度这里跟着变，不会两处写死
+function wallRotation() {
+  const el = wallEl.value?.querySelector('.wall__tilt')
+  if (!el) return 0
+  const t = getComputedStyle(el).transform
+  if (!t || t === 'none') return 0
+  try {
+    const m = new DOMMatrixReadOnly(t)
+    return (Math.atan2(m.b, m.a) * 180) / Math.PI
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * 元素躺在倾斜的墙里，拿到的是旋转后的外接矩形，
+ * 用三角函数反解出未旋转的真实宽高（旋转不改中心）。
+ */
+function quadOrigin(el, rot) {
   const r = el.getBoundingClientRect()
-  const rad = (LANE_ROT * Math.PI) / 180
+  const rad = (rot * Math.PI) / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
   const den = cos * cos - sin * sin
@@ -255,31 +244,33 @@ function quadOrigin(el) {
     cy: r.top + r.height / 2,
     w: (r.width * cos - r.height * sin) / den,
     h: (r.height * cos - r.width * sin) / den,
-    rot: LANE_ROT,
+    rot,
   }
 }
 
-/** 卡片会被 cloneNode 补齐，所以点击只能走委托，序号认 data-index */
 async function pickCard(event) {
   if (viewer.expanded) return
-  const el = event.target instanceof Element ? event.target.closest('.card') : null
-  if (!el || !lanesEl.value?.contains(el)) return
+  const el = event.target instanceof Element ? event.target.closest('.cell') : null
+  if (!el || !gridEl.value?.contains(el)) return
   const index = Number(el.dataset.index)
-  if (!Number.isInteger(index) || index < 0 || index >= LOOP.length) return
+  if (!Number.isInteger(index) || index < 0 || index >= FEATURES.length) return
+
+  // 倾斜态下量出来的矩形是歪的，量之前先让这一格回正
+  clearTilt()
 
   // 入场还没跑完就点：先把动画撤掉，等类真正落地再量，量到的才是落位后的几何
   if (entering.value) {
     finishEntrance()
     await nextTick()
   }
-  const origin = quadOrigin(el)
-  // 圆角也带上：大卡的圆角是固定值，压回源卡那一档时要靠它反推补偿量
+  const rot = wallRotation()
+  const origin = quadOrigin(el, rot)
   origin.radius = parseFloat(getComputedStyle(el).borderRadius) || 0
   originRect.value = origin
-  // 共享元素用现成 class 量，小卡模板一个属性都不用加
+
   const pick = (sel) => {
     const node = el.querySelector(sel)
-    return node ? quadOrigin(node) : null
+    return node ? quadOrigin(node, rot) : null
   }
   // 字号也带上：框宽未必等于文字宽，只按框宽缩放会把标题压扁
   const font = (sel) => {
@@ -287,28 +278,24 @@ async function pickCard(event) {
     return node ? parseFloat(getComputedStyle(node).fontSize) : null
   }
   originParts.value = {
-    no: pick('.card-no'),
-    icon: pick('.card-icon'),
-    title: pick('.card-title'),
-    desc: pick('.card-desc'),
-    // 字号用于等比缩放的比值，水印也一样
+    title: pick('.cell__head'),
+    desc: pick('.cell__desc'),
     fonts: {
-      no: font('.card-no'),
-      title: font('.card-title'),
-      desc: font('.card-desc'),
+      title: font('.cell__title'),
+      desc: font('.cell__desc'),
     },
   }
   sourceEl = el
   viewer.open(index)
 }
 
-/** 覆盖层预光栅完、动画即将起手，这一刻才把真卡藏掉，交接处不留空白 */
+/** 覆盖层预光栅完、动画即将起手，这一刻才把真格藏掉，交接处不留空白 */
 function onViewerReady() {
   if (sourceEl) sourceEl.style.visibility = 'hidden'
 }
 
 /**
- * 真卡归位。收起时大窗会在卡片淡出前先发 release 把它放出来，
+ * 真格归位。收起时大窗会在格子淡出前先发 release 把它放出来，
  * 此时它被覆盖层压着看不见，交接处就没有空白也没有突变。
  */
 function restoreSource() {
@@ -318,7 +305,6 @@ function restoreSource() {
   el.style.transition = 'none'
   el.style.visibility = ''
   void el.offsetWidth
-  // 等覆盖层卸载那一帧画完再放回过渡
   requestAnimationFrame(() => requestAnimationFrame(() => {
     el.style.transition = ''
   }))
@@ -328,21 +314,6 @@ function onViewerClosed() {
   restoreSource()
   viewer.finish()
 }
-
-// 轨道里只留盖得住可见窗口的卡，滚出去的那张挪到队首，卡数只剩原来的三分之一
-const lanesEl = ref(null)
-const laneList = []
-let rafId = 0
-let lastTs = 0
-let paused = false
-// 入场收尾后从 0 抬到 1：轨道起步有个加速，不是一上来就满速
-let speedK = 0
-let lanesWatch = null
-// 预解码的排队句柄与它的取消函数，卸载时要收干净
-let warmId = 0
-let warmCleanup = null
-
-const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 
 /* ===== 入场的开关 =====
  * 开场还在演就先把整页按住（visibility 连背景一起藏，不漏底），字一落位再从零起跑；
@@ -365,184 +336,16 @@ function finishEntrance() {
   if (!entering.value && !gated.value) return
   entering.value = false
   gated.value = false
-  syncPause()
 }
 
 /** 从"按住"切到"起跑"：同一帧里换类，各条时间轴都从 0% 开始 */
 function openEntrance() {
   gated.value = false
   entering.value = true
-  syncPause()
   enterTimer = window.setTimeout(finishEntrance, ENTER_END)
 }
 
-/** 量一遍每张卡的高度（含间距），之后轮转就不必再摸布局 */
-function readHeights(lane) {
-  lane.heights = [...lane.el.children].map((c) => c.offsetHeight + lane.gap)
-  lane.total = lane.heights.reduce((sum, h) => sum + h, 0)
-  lane.tallest = lane.heights.length ? Math.max(...lane.heights) : 0
-}
-
-/** 队尾挪到队首：高度数组同步旋转，位移减掉它的高度，屏幕上其余卡片原地不动 */
-function rotateLane(lane, shift = true) {
-  const last = lane.el.lastElementChild
-  if (!last || !lane.heights.length) return
-  const h = lane.heights.pop()
-  lane.heights.unshift(h)
-  lane.el.insertBefore(last, lane.el.firstElementChild)
-  if (shift) lane.d -= h
-}
-
-/** 可见窗口在车道局部坐标里的上下界：屏幕四角投到旋转后的纵轴上 */
-function boundsOf(lane) {
-  const box = lanesEl.value.getBoundingClientRect()
-  const cx = (box.left + box.right) / 2
-  const cy = (box.top + box.bottom) / 2
-  const s = Math.sin(ROT)
-  const c = Math.cos(ROT)
-  let lo = Infinity
-  let hi = -Infinity
-  for (const [x, y] of [[0, 0], [innerWidth, 0], [0, innerHeight], [innerWidth, innerHeight]]) {
-    const v = (y - cy) * c - (x - cx) * s
-    if (v < lo) lo = v
-    if (v > hi) hi = v
-  }
-  // 车道顶边与 lanes 顶边重合，所以局部纵轴的中点取 lanes 的一半
-  const mid = lanesEl.value.offsetHeight / 2
-  return { a: mid + lo, b: mid + hi }
-}
-
-/** 窗口比卡片总长还高时整份补卡：整份补序号循环才连得住 */
-function ensureCover(lane) {
-  const span = lane.b - lane.a
-  let guard = 0
-  while (lane.total < span + lane.tallest && guard++ < 4) {
-    for (const card of [...lane.el.children].slice(0, FEATURES.length)) {
-      lane.el.appendChild(card.cloneNode(true))
-    }
-    readHeights(lane)
-  }
-}
-
-function frame(ts) {
-  rafId = requestAnimationFrame(frame)
-  const dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0
-  lastTs = ts
-  if (paused || reduceMotion) return
-  // 停过之后接着跑：速度系数只在上限内慢慢抬，中途悬停打断也不会重置
-  speedK = Math.min(1, speedK + dt * SPEED_RAMP)
-  for (const lane of laneList) {
-    lane.d += SPEED * dt * speedK
-    // 内容顶边快要让出窗口时补上队尾那张，任何时刻窗口里都不该缺卡
-    let guard = 0
-    while (lane.d > lane.a && guard++ < 24) rotateLane(lane)
-    lane.el.style.transform = `translateY(${lane.d.toFixed(2)}px)`
-  }
-}
-
-function measureLanes() {
-  for (const lane of laneList) {
-    lane.gap = parseFloat(getComputedStyle(lane.el.firstElementChild).marginBottom) || 0
-    readHeights(lane)
-    const before = boundsOf(lane)
-    lane.a = before.a
-    lane.b = before.b
-    const was = lane.total
-    ensureCover(lane)
-    if (lane.total !== was) {
-      const grown = boundsOf(lane)
-      lane.a = grown.a
-      lane.b = grown.b
-    }
-    lane.d = lane.a - lane.tallest
-  }
-}
-
-// 悬停、入场未收干净、大窗展开都停滚：展开时指针被遮罩接管，只认悬停会把列表放跑
-let hovering = false
-function syncPause() {
-  paused = gated.value || entering.value || hovering || viewer.expanded
-}
-// 入场没跑完就把滚动扣住，等卡片落定再起步
-syncPause()
-
-const onEnter = () => {
-  hovering = true
-  syncPause()
-}
-const onLeave = () => {
-  hovering = false
-  syncPause()
-}
-
 onMounted(() => {
-  const box = lanesEl.value
-  if (!box) return
-  ;[...box.children].forEach((el, index) => {
-    const lane = { el, d: 0, a: 0, b: 0, gap: 0, heights: [], total: 0, tallest: 0 }
-    lane.gap = parseFloat(getComputedStyle(el.firstElementChild).marginBottom) || 0
-    readHeights(lane)
-    const first = boundsOf(lane)
-    lane.a = first.a
-    lane.b = first.b
-    const was = lane.total
-    ensureCover(lane)
-    // 补过卡以后总长变了，窗口上下界跟着平移，重量一次
-    if (lane.total !== was) {
-      const grown = boundsOf(lane)
-      lane.a = grown.a
-      lane.b = grown.b
-    }
-    // 相位错开只改排列，不动位移
-    for (let k = 0; k < index * PHASE_STEP; k++) rotateLane(lane, false)
-    // 顶部先压到窗口上界之外一张卡的位置，之后一路往下淌
-    lane.d = lane.a - lane.tallest
-    el.style.transform = `translateY(${lane.d}px)`
-    laneList.push(lane)
-  })
-
-  rafId = requestAnimationFrame(frame)
-  // 字体到位后换行可能变，窗口尺寸一变也要重算
-  document.fonts?.ready?.then(measureLanes)
-  if (typeof ResizeObserver !== 'undefined') {
-    lanesWatch = new ResizeObserver(measureLanes)
-    lanesWatch.observe(document.documentElement)
-  }
-  box.addEventListener('pointerenter', onEnter)
-  box.addEventListener('pointerleave', onLeave)
-
-  // 预取并逐个预解码八张截图：展开那一下是最贵的，不能再等解码。
-  // 但解码要抢主线程，刚进页面就点会被它拖住近一秒（实测 200ms 时点要等 904ms），
-  // 所以只在浏览器闲着的时候跑，而且大窗一开就让路
-  const idle = (fn) => (window.requestIdleCallback
-    ? window.requestIdleCallback(fn, { timeout: 600 })
-    : window.setTimeout(fn, 60))
-  const stopIdle = (id) => (window.cancelIdleCallback ? window.cancelIdleCallback(id) : clearTimeout(id))
-
-  const warm = (list) => {
-    const [item, ...rest] = list
-    if (!item) return
-    // 展开或收起动画期间不抢：等它忙完再来
-    if (viewer.expanded) {
-      warmId = window.setTimeout(() => warm(list), 400)
-      return
-    }
-    warmId = idle(() => {
-      const img = new Image()
-      img.src = item.shot
-      const next = () => { warmId = window.setTimeout(() => warm(rest), 120) }
-      if (img.decode) img.decode().then(next, next)
-      else img.onload = next
-    })
-  }
-  warm(LOOP)
-  // 排队句柄可能来自 idle，也可能来自让路时的 setTimeout，两种都撤一次
-  warmCleanup = () => {
-    if (!warmId) return
-    stopIdle(warmId)
-    clearTimeout(warmId)
-  }
-
   /* ===== 入场 =====
    * 首屏渲染时类就挂上了，动画此刻已在跑，这里只负责按时间表收尾；
    * 若开场还在演，则先等它落位（最多 GATE_MAX），门一开再从 0% 起跑。
@@ -567,15 +370,16 @@ onMounted(() => {
   }
 })
 
-watch(() => viewer.expanded, syncPause)
+watch(() => viewer.expanded, (open) => {
+  if (open) {
+    clearTilt()
+    pax.value = 0
+    pay.value = 0
+  }
+})
 
 onBeforeUnmount(() => {
-  if (rafId) cancelAnimationFrame(rafId)
-  lanesWatch?.disconnect()
-  lanesEl.value?.removeEventListener('pointerenter', onEnter)
-  lanesEl.value?.removeEventListener('pointerleave', onLeave)
-  warmCleanup?.()
-  // 入场的两个句柄与那条等待分支一起收干净
+  clearTilt()
   if (enterTimer) clearTimeout(enterTimer)
   if (enterGate) clearTimeout(enterGate)
   stopGate?.()
@@ -588,54 +392,106 @@ onBeforeUnmount(() => {
     class="feature"
     :class="{ 'is-entering': entering, 'is-gated': gated }"
     :style="enterVars"
+    :inert="viewer.expanded || undefined"
   >
-    <GridBackground :rotation="-30" :z-index="1" :paused="viewer.expanded" />
+    <!-- ── 刊头：编辑版式的页眉。左栏是刊名与刊题，右栏是导语加八项目录 ── -->
+    <header class="masthead">
+      <!-- 印刷套准标记：编辑版式最小的那个记号 -->
+      <span class="masthead__mark" aria-hidden="true"></span>
 
-    <div class="board">
-      <!-- 左列：竖排白字，字号顶满整屏高度 -->
-      <h1 class="board-title">随心所欲</h1>
-
-      <!-- 主次之间的分隔细线 -->
-      <span class="board-rule" aria-hidden="true"></span>
-
-      <!-- 副标题：竖排，独占一列，字数多也不许超过这列宽；一字一格，入场逐字亮 -->
-      <p class="board-ghost" :style="{ '--ghost-count': SUBTITLE.length }"><span v-for="(ch, i) in GHOST" :key="i" class="board-ghost__ch" :style="{ '--ch-i': i }">{{ ch }}</span></p>
-
-      <!-- 列尾英文标记，收住左侧重心 -->
-      <span class="board-mark" aria-hidden="true">FEATURES</span>
-
-      <!-- 右列：弧区负责造型，里面的滚动栏负责响应指针 -->
-      <section class="panel" aria-label="特色功能">
-        <!-- 弧外的蓝色侧光：独立一层，免得滤镜把整块弧区每帧重算一遍 -->
-        <span class="panel-glow" aria-hidden="true"></span>
-        <div class="stage">
-          <div class="rail">
-            <div
-              ref="lanesEl"
-              v-once
-              class="lanes"
-              :style="{ '--lane-rot': LANE_ROT + 'deg' }"
-              @click="pickCard"
-            >
-              <div
-                v-for="lane in LANES"
-                :key="lane"
-                class="track"
-                :style="{ '--lane-i': lane }"
-              >
-                <FeatureCard
-                  v-for="(item, index) in LOOP"
-                  :key="index"
-                  :item="item"
-                  :data-index="index"
-                  :style="{ '--card-i': index }"
-                />
-              </div>
-            </div>
-          </div>
+      <div class="masthead__grid">
+        <div class="masthead__lead">
+          <span class="masthead__kicker">NATB — 特色功能</span>
+          <!-- 双色调标题：后两字退成暖灰，一句四字就分出了主次 -->
+          <h1 class="masthead__title">
+            <span class="masthead__title-a">随心</span><span class="masthead__title-b">所欲</span>
+          </h1>
         </div>
-      </section>
-    </div>
+
+        <div class="masthead__note">
+          <p class="masthead__lede">全方面支持小天才手表玩机需求</p>
+          <p class="masthead__meta">
+            <span>08 FEATURES</span>
+            <span class="masthead__dot" aria-hidden="true"></span>
+            <span>SINCE 2026</span>
+          </p>
+        </div>
+      </div>
+
+      <span class="masthead__rule" aria-hidden="true"></span>
+    </header>
+
+    <!-- ── 图片墙：页面真正的主角 ── -->
+    <section
+      ref="wallEl"
+      class="wall"
+      aria-label="特色功能"
+      @pointermove="onPointerMove"
+      @pointerleave="onPointerLeave"
+    >
+      <!-- 内缩再旋转：旋转后四角仍落在墙内，一张卡都不会被裁 -->
+      <div class="wall__tilt">
+        <div
+          ref="gridEl"
+          class="grid"
+          :style="{ transform: `translate3d(${pax.toFixed(2)}px, ${pay.toFixed(2)}px, 0)` }"
+          @click="pickCard"
+        >
+          <!-- 顶行：六张插画 -->
+          <span
+            v-for="(src, i) in DECOR_TOP"
+            :key="`top-${i}`"
+            class="tile"
+            aria-hidden="true"
+            :style="{ '--i': i }"
+          >
+            <img class="tile__img" :src="src" alt="" draggable="false" />
+          </span>
+
+          <!-- 第二行：左插画 + 四张卡 + 右插画 -->
+          <span class="tile" aria-hidden="true" :style="{ '--i': 6 }">
+            <img class="tile__img" :src="DECOR_SIDE[0]" alt="" draggable="false" />
+          </span>
+          <FeatureCard
+            v-for="(item, i) in FEATURES.slice(0, 4)"
+            :key="item.idx"
+            :item="item"
+            :data-index="item.idx"
+            :style="{ '--i': 7 + i }"
+          />
+          <span class="tile" aria-hidden="true" :style="{ '--i': 11 }">
+            <img class="tile__img" :src="DECOR_SIDE[1]" alt="" draggable="false" />
+          </span>
+
+          <!-- 第三行：左插画 + 四张卡 + 右插画 -->
+          <span class="tile" aria-hidden="true" :style="{ '--i': 12 }">
+            <img class="tile__img" :src="DECOR_SIDE[2]" alt="" draggable="false" />
+          </span>
+          <FeatureCard
+            v-for="(item, i) in FEATURES.slice(4)"
+            :key="item.idx"
+            :item="item"
+            :data-index="item.idx"
+            :style="{ '--i': 13 + i }"
+          />
+          <span class="tile" aria-hidden="true" :style="{ '--i': 17 }">
+            <img class="tile__img" :src="DECOR_SIDE[3]" alt="" draggable="false" />
+          </span>
+
+          <!-- 底行：六张插画，把下沿也围上 -->
+          <span
+            v-for="(src, i) in DECOR_BOTTOM"
+            :key="`bot-${i}`"
+            class="tile"
+            aria-hidden="true"
+            :style="{ '--i': 18 + i }"
+          >
+            <img class="tile__img" :src="src" alt="" draggable="false" />
+          </span>
+        </div>
+      </div>
+
+    </section>
 
     <!-- 展开的大窗：Teleport 到 body，压在顶栏之上 -->
     <FeatureViewer
@@ -643,7 +499,7 @@ onBeforeUnmount(() => {
       :item="activeItem"
       :origin="originRect"
       :origin-parts="originParts"
-      :total="LOOP.length"
+      :total="FEATURES.length"
       @ready="onViewerReady"
       @release="restoreSource"
       @closed="onViewerClosed"
@@ -653,295 +509,401 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .feature {
-  /* 四字竖排，留出上下气口；窄屏再按宽度收 */
-  --title-size: min(20vh, 15vw);
-  /* 全页强调色，卡片另按自身图标算主题色 */
-  --accent: #0a59f7;
-  /* 入场共用一条缓动：只靠错峰分出层次，才像一口气 */
-  --enter-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* ── 纸感色板 ──
+     每一档都按 WCAG AA 反推过对比度，注释里是对纸色的实测值 */
+  --paper: #f8f6f2; /* 象牙白纸：刊头与页面底色 */
+  --stage: rgb(40, 50, 61); /* 展示区的墨蓝底（inkore 实测值）——图版从这块深色里浮出来 */
+  --ink: #16150f; /* 墨黑：刊题、卡题 —— 对纸 17.9:1 */
+  --ink-2: #4a4740; /* 次级墨：导语、目录 —— 8.6:1 */
+  --ink-3: #6b6559; /* 三级灰：小字 —— 5.6:1（小字需 ≥4.5） */
+  --ink-4: #857e72; /* 浅灰：双色调刊题、分隔点 —— 3.4:1（大字需 ≥3） */
+  --rule: rgba(22, 21, 15, 0.14);
 
+  --font-latin: ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  /* 刊头高度：左栏要站得住 66px 的刊题，右栏要放下导语、八项目录与期号 */
+  --masthead-h: clamp(124px, 16.5vh, 192px);
+
+  /* 页面锁死在视窗里，不滚动 */
   position: fixed;
   inset: 0;
   overflow: hidden;
-  /* 只留底色：左侧那层蓝雾挪进 ::before，入场时才有地方晕开 */
-  /* 深灰首帧兜底，别闪白 */
-  background: #2E3234;
+  background: var(--paper);
+  color: var(--ink);
   user-select: none;
 }
 
-/* 左侧一层蓝雾，和右边弧区接上，深灰才不硬切 */
-.feature::before {
-  content: '';
+/* ===== 刊头 ===== */
+.masthead {
+  /* 绝对定位在顶部，不参与网格的居中计算 ——
+     展示区的中心才是视窗的中心，刊头只是压在它上方的字 */
   position: absolute;
-  inset: 0;
-  /* 与原来挂在 background 上同层：垫在网格底下 */
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(
-    42% 58% at 13% 50%,
-    color-mix(in srgb, var(--accent) 26%, transparent),
-    transparent 72%
-  );
-}
-
-.board {
-  position: relative; /* 抬到网格之上 */
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 2;
+  /* 少了这一句，height 里的 clamp 只是内容高，加上下 padding 实际会高出 40px */
   box-sizing: border-box;
   display: flex;
-  align-items: stretch;
-  gap: 3vh; /* 竖排各列之间留出呼吸 */
-  height: 100%;
-  padding-left: 5vw;
-}
-
-/* ===== 左列：随心所欲 ===== */
-.board-title {
-  flex: none;
-  align-self: center; /* 高度收到文字上，渐变才贴住四字 */
-  margin: 0;
-  writing-mode: vertical-rl; /* 中文竖排，一字一行 */
-  font-size: var(--title-size);
-  letter-spacing: 0.05em; /* 竖排下就是字与字的间隙 */
-  font-weight: 700;
-  line-height: 1;
-  color: transparent;
-  /* 上白下蓝，压在深底上不刺眼 */
-  background-image: linear-gradient(180deg, #ffffff 2%, #dae7ff 60%, #7ea6f5 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  filter: drop-shadow(0 0 30px rgba(120, 170, 255, 0.32));
-}
-
-/* ===== 主次之间的分隔细线 ===== */
-.board-rule {
-  flex: none;
-  align-self: center;
-  width: 1px;
-  height: 46vh;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    rgba(158, 186, 240, 0.55) 26%,
-    rgba(158, 186, 240, 0.55) 74%,
-    transparent
-  );
-}
-
-/* ===== 次列：灰色副标题 ===== */
-.board-ghost {
-  flex: none;
-  align-self: center;
-  margin: 0;
-  writing-mode: vertical-rl;
-  /* 按字数平分剩余高度，再封顶，只当陪衬不抢主标题 */
-  font-size: min(calc((100dvh - 22vh) / var(--ghost-count)), clamp(15px, 2.1vh + 6px, 28px));
-  letter-spacing: 0.32em; /* 疏排，和粗标题分出主次 */
-  white-space: nowrap; /* 字再多也只排一列 */
-  overflow: hidden; /* 兜底：放不下就裁掉，不往旁边淌 */
-  font-weight: 500;
-  line-height: 1;
-  color: rgba(203, 216, 236, 0.72);
-}
-
-/* ===== 列尾英文标记 ===== */
-.board-mark {
-  flex: none;
-  align-self: center;
-  writing-mode: vertical-rl;
-  font-family: Arial, system-ui;
-  font-size: clamp(11px, 1.1vh, 14px);
-  font-weight: 700;
-  letter-spacing: 0.44em;
-  color: rgba(148, 174, 214, 0.42);
-}
-
-/* ===== 右列 ===== */
-.panel {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  margin-left: 3vw;
-}
-
-/* 弧外的蓝色侧光：形状照抄弧区，但不含滚动内容，光栅一次就能长期复用 */
-.panel-glow {
-  --l: 1400px;
-
-  position: absolute;
-  inset: 0;
-  /* 滤镜必须挂在裁剪层之外，同元素上加 clip-path 会把影子一起裁掉 */
-  filter: drop-shadow(-6px 0 18px rgba(10, 89, 247, 1));
+  flex-direction: column;
+  justify-content: flex-end;
+  height: var(--masthead-h);
+  padding: clamp(18px, 2.5vh, 34px) clamp(24px, 4.6vw, 72px) clamp(13px, 1.9vh, 24px);
+  /* 实底色：网格是斜着铺开的，不挡住就会从标题背后透出来 */
+  background: var(--paper);
+  /* 只是版面上的字，别挡住网格的指针操作 */
   pointer-events: none;
 }
 
-.panel-glow::before {
+/* 套准标记：两根发丝交叉，与 kicker 左对齐 ——
+   它不是角落里的小装饰，得落在版心那条线上 */
+.masthead__mark {
+  position: absolute;
+  top: clamp(17px, 2.4vh, 30px);
+  left: clamp(24px, 4.6vw, 72px);
+  width: 11px;
+  height: 11px;
+}
+
+.masthead__mark::before,
+.masthead__mark::after {
   content: '';
   position: absolute;
-  inset: 0;
-  clip-path: circle(var(--l) at var(--l) 50%);
-  /* 只借它的轮廓投影，圆内会被弧区的实心渐变盖住 */
-  background: var(--accent);
+  background: rgba(22, 21, 15, 0.3);
 }
 
-/* 弧线沿用首页写法，只是切边由底边换成左边 */
-.stage {
-  --l: 1400px; /* 半径要盖过区域右半边，右边才不被裁 */
-
-  position: absolute;
-  inset: 0;
-  clip-path: circle(var(--l) at var(--l) 50%);
-  background:
-    radial-gradient(120% 82% at 76% 22%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 62%),
-    linear-gradient(155deg, #f5f8fc 0%, #dde4ee 56%, #c8d3e3 100%);
+.masthead__mark::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
 }
 
-.rail {
-  position: absolute;
-  inset: 0;
-}
-
-/* 三条车道并成一条斜向滚动栏，整栏一起转 */
-.lanes {
-  --card-h: min(39vh, 21vw);
-  --card-w: calc(var(--card-h) * 0.85); /* 宽高比，偏竖但不至于挤成条 */
-  --card-gap: 3.4vh;
-
-  position: absolute;
+.masthead__mark::after {
+  left: 0;
+  right: 0;
   top: 50%;
-  left: 60.5%;
-  display: flex;
-  gap: calc(var(--card-h) * 0.13); /* 列间收紧，三列成一整块 */
-  /* 先摆到区域中线，再斜过来；角度由脚本给的 --lane-rot 定，量几何时才解得回去 */
-  transform: translate(-50%, -50%) rotate(var(--lane-rot, 15deg));
+  height: 1px;
 }
 
-/* 三条车道各滚各的，位移由脚本每帧写一个 translateY */
-.track {
+/* 左右各占一半：左栏贴左放刊名与刊题，右栏贴右放导语与期号 ——
+   编辑版式的页眉靠两端对拉，中间那片留白是留给版心的 */
+.masthead__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+  align-items: end;
+  gap: clamp(24px, 4vw, 84px);
+}
+
+.masthead__lead {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  /* 提前提层：位移只走合成，卡内内容不必每帧重算 */
-  will-change: transform;
+  gap: clamp(8px, 1.3vh, 17px);
+  min-width: 0;
 }
 
-@media (max-width: 900px) {
-  .board {
-    gap: 3.5vw;
-    padding-left: 5vw;
-  }
+.masthead__kicker {
+  font-family: var(--font-latin);
+  font-size: clamp(10px, 0.7vw, 11.5px);
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
 
-  .board-mark {
+/* 刊题：这一段版面的主角。上一版只有 39px，四个字撑不满左栏，
+   右半边又空着，整条页眉就没有落点 */
+.masthead__title {
+  margin: 0;
+  font-size: clamp(40px, 4.4vw, 66px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.masthead__title-b {
+  color: var(--ink-4);
+}
+
+.masthead__note {
+  display: flex;
+  flex-direction: column;
+  /* 右对齐：右栏整体贴住版心右侧，与左边的刊题形成两端对拉 */
+  align-items: flex-end;
+  justify-content: flex-end;
+  align-self: stretch;
+  text-align: right;
+  gap: clamp(9px, 1.4vh, 17px);
+  /* 竖线落在最右边：它是版心的右界，不是栏与栏之间的那道分隔 */
+  padding-right: clamp(20px, 2.6vw, 48px);
+  border-right: 1px solid var(--rule);
+  padding-bottom: clamp(2px, 0.5vh, 7px);
+  min-width: 0;
+}
+
+.masthead__lede {
+  margin: 0;
+  font-size: clamp(15px, 1.15vw, 19px);
+  line-height: 1.58;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.masthead__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  margin: 0;
+  font-family: var(--font-latin);
+  font-size: clamp(9.5px, 0.66vw, 10.5px);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--ink-3);
+}
+
+.masthead__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+/* 刊头收尾的一条发丝线：主次之间的分界只靠这一笔，不加投影 */
+.masthead__rule {
+  position: absolute;
+  left: clamp(20px, 4.4vw, 68px);
+  right: clamp(20px, 4.4vw, 68px);
+  bottom: 0;
+  height: 1px;
+  background: var(--rule);
+  transform-origin: left center;
+}
+
+/* ===== 图片墙 ===== */
+.wall {
+  /* 铺满视窗，网格居中于视窗中心；溢出的部分由这里裁掉 ——
+     裁切正是要的效果：图版伸出屏幕外，版面就没有边界 */
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  /* 墨蓝底：图版从深色里浮出来，格与格之间那道缝成了版面的网格线 */
+  background: var(--stage);
+}
+
+/*
+ * 比视窗大一圈：横竖都伸出屏幕外，边缘那一圈插画被裁在画外。
+ * 上一版把它内缩在视窗里、四边留白，看着就是"贴在纸上的一张图"，
+ * 边缘全是硬边 —— 出血才是编辑版式该有的样子。
+ */
+.wall__tilt {
+  position: relative;
+  width: 108vw;
+  /* 高度按"刊头 + 上下两行插画各露一截"反推：108vh 会把底行整条推出屏外，
+     100vh 才是卡片够高、上下又都透得出来的那一点 */
+  height: 100vh;
+  /* 整片墙往左下让一让：上方空出来给刊头，重心也压到版面偏下的位置 ——
+     正中对齐时顶行插画几乎全被标题压住，往下挪一档就透出来了 */
+  transform: translate(var(--wall-dx, -2.4vw), var(--wall-dy, 10vh))
+    rotate(var(--wall-rot, 2.5deg));
+}
+
+.grid {
+  display: grid;
+  /* 左右各一条窄插画列、上下各一行插画行 —— 八张卡被四面围住，
+     中间四列才是内容。窄列用 0.55fr：插画是配角，别跟卡抢宽度。
+     列数写死在断点里：repeat() 的第一个参数放 CSS 变量，有些浏览器会整条判成
+     无效值 → grid-template-columns 失效 → 退化成单列，一屏只顶一张卡 */
+  grid-template-columns: 0.55fr repeat(4, minmax(0, 1fr)) 0.55fr;
+  /* 插画行略矮、卡行高：按 1.6:1 的插画反推，卡里的图版才不挨裁。
+     行高由这块"比屏幕还大"的画布按比例分，所以视窗一变，整片墙等比跟着变 */
+  grid-template-rows: 0.9fr 1fr 1fr 0.9fr;
+  gap: var(--grid-gap, 8px);
+  width: 100%;
+  height: 100%;
+  /* 视差：整片网格跟着指针反向轻移。缓动给足，是"镜头在动"而不是"格子在做操" */
+  transition: transform 1100ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 装饰格：一张画报插画铺满，没有文字、不可点。
+   插画是 3:2 而格子更扁，用 cover 从中心裁 —— 有机图形裁掉上下依然成立 */
+.tile {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--paper);
+}
+
+.tile__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* ===== 响应式 =====
+ * 断点改两样：列数（八格怎么排）与倾斜角（斜得越厉害，边缘要的余量越多）。
+ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* 六列在这个宽度下只剩 209px 一格，卡太窄 —— 收掉左右两条插画列与上下两端
+     多出来的插画，只留上下各一行、四列四行，卡才保得住 270px。
+     nth-child 按下标点名：1-6 是顶行、7/12/13/18 是左右两条、19-24 是底行 */
+  .grid > *:nth-child(5),
+  .grid > *:nth-child(6),
+  .grid > *:nth-child(7),
+  .grid > *:nth-child(12),
+  .grid > *:nth-child(13),
+  .grid > *:nth-child(18),
+  .grid > *:nth-child(23),
+  .grid > *:nth-child(24) {
     display: none;
   }
+
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .wall__tilt {
+    --wall-rot: 2.2deg;
+  }
+
+  .masthead__grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
 }
 
-/* ===== 入场动效 =====
+@media (max-width: 767px) {
+  .feature {
+    --grid-gap: 6px;
+    /* 手机上刊头与网格要分掉 844px：刊头只留刊名、刊题、导语与期号 */
+    --masthead-h: clamp(110px, 15vh, 152px);
+  }
+
+  .masthead {
+    padding: clamp(12px, 1.8vh, 20px) clamp(16px, 5vw, 28px) clamp(8px, 1.4vh, 14px);
+  }
+
+  .masthead__mark {
+    top: clamp(14px, 2vh, 20px);
+    left: clamp(16px, 5vw, 28px);
+  }
+
+  .masthead__grid {
+    /* 窄屏改成上下两行：右栏顶到标题下面，导语不会被挤成一列窄条 */
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: clamp(8px, 1.4vh, 14px);
+  }
+
+  .masthead__note {
+    /* 窄屏改成上下两行：右对齐与右侧竖线在这里都失去意义 */
+    align-items: flex-start;
+    align-self: auto;
+    text-align: left;
+    padding-bottom: 0;
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .masthead__title {
+    font-size: clamp(30px, 9vw, 44px);
+  }
+
+  .masthead__rule {
+    left: clamp(16px, 5vw, 28px);
+    right: clamp(16px, 5vw, 28px);
+  }
+
+  /* 两列四行：八张卡一次看全。手机上再斜就只剩裁切了，角度收到 2° */
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(4, minmax(0, 1fr));
+  }
+
+  /* 窄屏收起装饰插画：给卡留出可读的宽度 */
+  .tile {
+    display: none;
+  }
+
+  /* 手机上四行都要落在屏内：网格从刊头下沿起算，只向左右出血，
+     所以纵向不再偏移、也不再溢出 */
+  .wall {
+    top: var(--masthead-h);
+  }
+
+  .wall__tilt {
+    --wall-rot: 2deg;
+    --wall-dy: 0vh;
+    --wall-dx: -2vw;
+    width: 112vw;
+    height: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .wall__tilt {
+    /* 再窄就完全不斜：斜出来的裁切会把格子里的字吃掉 */
+    --wall-rot: 0deg;
+    padding: 0.6%;
+  }
+}
+
+/* ===== 入场 =====
  * 这里只管姿态与曲线，起跑点与时长全部来自脚本注入的 --enter-*。
  * 整套都挂在 .is-entering 下：撤掉这个类，动画连同蒙版一起消失，
  * 元素回落到的静态样式就是动画的终态，交接处不跳变。
- * 少动效时脚本根本不会加这个类，此处无须再挡一层。
  */
+.feature {
+  /* 入场共用一条缓动：只靠错峰分出层次，才像一口气 */
+  --enter-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .feature.is-gated {
   /* 开场还没落位：整页先按住。visibility 连背景一起藏，不会漏出底色 */
   visibility: hidden;
 }
 
-/* ── 背景与弧区 ── */
-.feature.is-entering::before {
-  animation: enter-bloom var(--enter-dur-bloom) var(--enter-ease) both;
-  animation-delay: var(--enter-bloom);
-}
-
-.feature.is-entering .grid-background {
-  animation: enter-fade var(--enter-dur-grid) ease both;
-  animation-delay: var(--enter-grid);
-}
-
-/* 蓝光先到、弧面后到：光扫进来，面才跟着亮 */
-.feature.is-entering .panel-glow {
-  animation: enter-glow var(--enter-dur-glow) var(--enter-ease) both;
-  animation-delay: var(--enter-glow);
-}
-
-/* 弧面只淡入：它裹着全部卡片，动 transform 会把车道几何量歪 */
-.feature.is-entering .stage {
-  animation: enter-fade var(--enter-dur-stage) ease both;
-  animation-delay: var(--enter-stage);
-}
-
-/* 掠光：一道软光沿弧面从左扫到右，正好压在卡片入场的前半段上 */
-.feature.is-entering .stage::after {
-  content: '';
-  position: absolute;
-  top: -14%;
-  bottom: -14%;
-  left: 0;
-  width: 34%;
-  pointer-events: none;
-  background: linear-gradient(
-    97deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.52) 44%,
-    rgba(186, 214, 255, 0.34) 60%,
-    transparent 100%
-  );
-  animation: enter-sweep var(--enter-dur-sweep) var(--enter-ease) both;
-  animation-delay: var(--enter-sweep);
-}
-
-/* ── 左列 ── */
-.feature.is-entering .board-rule {
-  animation: enter-rule var(--enter-dur-rule) var(--enter-ease) both;
-  animation-delay: var(--enter-rule);
-}
-
-/* 主标题自上而下"淌"出来：蒙版比字高三倍，一条软边从顶上一路走到底。
-   用蒙版而不是逐字包 span —— 这行是 background-clip:text 的渐变字，
-   一个字一层 transform 会把裁切路径和实际字形错开 */
-.feature.is-entering .board-title {
-  --wipe-mask: linear-gradient(180deg, #000 0%, #000 40%, transparent 52%, transparent 100%);
-
-  mask-image: var(--wipe-mask);
-  -webkit-mask-image: var(--wipe-mask);
-  mask-size: 100% 300%;
-  -webkit-mask-size: 100% 300%;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-position: 0 100%;
-  -webkit-mask-position: 0 100%;
-  animation: enter-title var(--enter-dur-title) var(--enter-ease) both;
-  animation-delay: var(--enter-title);
-}
-
-/* 副标题逐字亮：字多，间隔小，连起来是一道往下淌的波 */
-.feature.is-entering .board-ghost__ch {
-  animation: enter-fade var(--enter-dur-ghost) ease both;
-  animation-delay: calc(var(--enter-ghost) + var(--ch-i, 0) * var(--enter-ghost-step));
-}
-
-.feature.is-entering .board-mark {
-  animation: enter-mark var(--enter-dur-mark) var(--enter-ease) both;
+.feature.is-entering .masthead__mark {
+  animation: enter-fade var(--enter-dur-head) ease both;
   animation-delay: var(--enter-mark);
 }
 
-/* ── 卡片：先按车道错开，再按卡序错开，一张接一张落位 ── */
-.feature.is-entering .card {
-  animation: enter-card var(--enter-dur-card) var(--enter-ease) both;
-  animation-delay: calc(
-    var(--enter-cards) + var(--lane-i, 0) * var(--enter-lane-step) + var(--card-i, 0) *
-      var(--enter-card-step)
-  );
+.feature.is-entering .masthead__kicker {
+  animation: enter-rise var(--enter-dur-head) var(--enter-ease) both;
+  animation-delay: var(--enter-kicker);
 }
 
-/* 卡底线比卡本身晚一点抽出来，落位就有个收势 */
-.feature.is-entering .card::after {
-  transform-origin: left center;
-  animation: enter-line var(--enter-dur-line) var(--enter-ease) both;
-  animation-delay: calc(
-    var(--enter-cards) + var(--lane-i, 0) * var(--enter-lane-step) + var(--card-i, 0) *
-      var(--enter-card-step) + var(--enter-line-lag)
-  );
+.feature.is-entering .masthead__title {
+  animation: enter-rise var(--enter-dur-head) var(--enter-ease) both;
+  animation-delay: var(--enter-title);
+}
+
+.feature.is-entering .masthead__rule {
+  animation: enter-rule var(--enter-dur-head) var(--enter-ease) both;
+  animation-delay: var(--enter-rule);
+}
+
+.feature.is-entering .masthead__lede {
+  animation: enter-rise var(--enter-dur-head) var(--enter-ease) both;
+  animation-delay: var(--enter-lede);
+}
+
+.feature.is-entering .masthead__meta {
+  animation: enter-fade var(--enter-dur-head) ease both;
+  animation-delay: var(--enter-meta);
+}
+
+/* 十六格一起按序号错峰浮现。位移走 translate 属性 —— transform 留给指针倾斜 */
+.feature.is-entering .cell,
+.feature.is-entering .tile {
+  animation: enter-cell var(--enter-dur-cell) var(--enter-ease) both;
+  animation-delay: calc(var(--enter-cards) + var(--i, 0) * var(--enter-cell-step));
 }
 
 @keyframes enter-fade {
@@ -953,89 +915,10 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes enter-bloom {
+@keyframes enter-rise {
   from {
     opacity: 0;
-    transform: scale(0.94);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes enter-glow {
-  from {
-    opacity: 0;
-    transform: translateX(72px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes enter-sweep {
-  from {
-    opacity: 0;
-    transform: translateX(-125%) skewX(-14deg);
-  }
-  20% {
-    opacity: 0.85;
-  }
-  70% {
-    opacity: 0.32;
-  }
-  to {
-    opacity: 0;
-    transform: translateX(340%) skewX(-14deg);
-  }
-}
-
-@keyframes enter-rule {
-  from {
-    opacity: 0;
-    transform: scaleY(0.06);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* 蒙版从上往下走：起点整条藏在字上方，终点把四字连同外圈光晕一起放出来。
-   终点不取 0%：留一点负偏移，标题那圈 drop-shadow 才不会被蒙版裁掉 */
-@keyframes enter-title {
-  from {
-    opacity: 0;
-    transform: translateY(-0.12em);
-    mask-position: 0 100%;
-    -webkit-mask-position: 0 100%;
-  }
-  to {
-    opacity: 1;
-    transform: none;
-    mask-position: 0 6%;
-    -webkit-mask-position: 0 6%;
-  }
-}
-
-@keyframes enter-mark {
-  from {
-    opacity: 0;
-    transform: translateY(-0.55em);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* 卡片从车道下方浮起来：位移沿车道自己的纵轴，与滚动方向同源 */
-@keyframes enter-card {
-  from {
-    opacity: 0;
-    translate: 0 calc(var(--card-h) * 0.09);
+    translate: 0 0.5em;
   }
   to {
     opacity: 1;
@@ -1043,7 +926,7 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes enter-line {
+@keyframes enter-rule {
   from {
     opacity: 0;
     transform: scaleX(0);
@@ -1051,6 +934,35 @@ onBeforeUnmount(() => {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* 格子从下方浮上来，并顺带把"窗口浮起"那点位移预演一遍 */
+@keyframes enter-cell {
+  from {
+    opacity: 0;
+    translate: 0 22px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* 少动效：类压根不会挂上，这里只做兜底，保证元素停在终态 */
+@media (prefers-reduced-motion: reduce) {
+  .grid {
+    transition: none;
+  }
+
+  .feature.is-entering .cell,
+  .feature.is-entering .masthead__mark,
+  .feature.is-entering .masthead__kicker,
+  .feature.is-entering .masthead__title,
+  .feature.is-entering .masthead__rule,
+  .feature.is-entering .masthead__lede,
+  .feature.is-entering .masthead__meta {
+    animation: none;
   }
 }
 </style>
