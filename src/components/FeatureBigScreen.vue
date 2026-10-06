@@ -4,8 +4,34 @@
  *
  * 八张功能卡在 3D 空间里各自竖直立着，围成一圈底面为正八边形的柱体；
  * 左右切换把整圈转 45°，让另一面正对镜头。版式语言沿用 features 基本页
- * （纸感八色 + 墨字 + 深墨蓝舞台 + 刊头两端对拉），卡片解剖借 updatelog
+ * （纸感八色 + 墨字 + 深墨蓝舞台），卡片解剖借 updatelog
  * （eyebrow / 大标题 / 状态行 / 出血底纹 / 大圆角）。
+ *
+ * 页面上只留两样东西：卡片，和底部那条八段进度条。刊头、背景巨号、页脚序号与落款
+ * 都已经去掉；卡片自己也完全不接指针 —— 翻面只有左右箭头 / 滚轮 / 方向键三条路
+ * （进度条也可以点）。退出走顶栏右侧那枚「退出」控件或 Esc。
+ *
+ * ── 顶部一条（v3 新增）────────────────────────────────────────────────
+ * 退出钮原来是一枚 64px 的深色圆钮 + 1px 白描边，独自浮在右上角：与全页
+ * 「纸感 + 发丝线」的编辑语言是两套东西（圆 vs 方、白描边 vs 墨发丝、
+ * 悬浮整枚放大 1.18 倍 vs 只改明度），而且它与版心的对齐纯属巧合。
+ *
+ * 现在顶上是一条真正的版心行 .screen__top，与 .screen__inner 共用同一档左右
+ * padding 与同一条顶端基线 —— 左端是刊头式小字，右端是退出控件，两端对拉扯出
+ * 版心宽度。三枚控件（退出 / 上一面 / 下一面）共用同一套语言：
+ *   尺寸  --ctrl 见方，与顶栏同高；形状 8px 方角，不再有圆；描边 1px 墨发丝；
+ *   底色是舞台上的淡淡一层玻璃；悬浮只把明度与底色翻过来（退出钮落成实纸底 +
+ *   墨字，像按下一枚白键），不做任何缩放 —— 放大是"贴纸"的动作，不是版面的动作；
+ *   焦点环统一用 --accent。
+ * 退出钮还多一枚等宽小字标签「退出」：只靠一枚 X 图标，没人知道它是关闭还是全屏；
+ * 窄到 600px 以下再退回纯图标（aria-label 与 title 一直都在，读屏与悬浮提示不受影响）。
+ * 这一条上刻意不画横贯的发丝线：它的 y 与站点顶栏胶囊同处一条带上（顶栏是全局 fixed
+ * 槽位，压在所有页面之上），横线会正好从胶囊底下穿过去、像一道划痕 ——
+ * 版心关系改由两端对齐与同一档基线承担。
+ *
+ * 几何上顶栏进了流，卡片让出这一条 —— --face-h 的兜底值跟着加高，
+ * 版心下 padding 补回 (--top-h + --top-gap)，保证上下都在屏内、且卡片依旧严格居中
+ * （柱体挂在整个舞台的中心，实测偏差 0px）。
  *
  * 两条几何上的硬约束，改这个文件前务必先读：
  *
@@ -17,6 +43,29 @@
  * 2) 入场动画不许碰 `.prism` 的 transform（会覆盖掉 `--step` 的堆叠姿态），
  *    只动独立的 rotate / scale 属性 —— 它们与 transform 复合，绕的是同一根
  *    中心轴，所以看起来正是"整圈从 30° 外摆进来"。
+ *
+ * ── 设计系统（v2 · 现代极简 + 编辑杂志感）─────────────────────────────
+ * 方向：Apple 的留白与层级 / Linear 的克制与精确 / Kinfolk 的纸感与网格。
+ *
+ * D1 原则  层级只用三样：字号、字重、发丝线（1px，墨色 9%–22%）。
+ *          阴影只两级且收紧：静止一层浅影，正对镜头才给一层柔影；侧面板零阴影。
+ *          一卡一纸色（沿用八色纸感色），墨字四档全部按 WCAG AA 反推。
+ *          微交互只做"状态确认"，从不遮蔽内容（要点与参数在八面上都看得见）。
+ *          控件（顶栏与三枚）是同一套方角语言：等尺寸、1px 发丝、只翻明度不缩放。
+ * D2 网格  横版刊页：卡片 ≥ 80vw × 70vh。左「正文栏」/ 右「图版栏」，中间一道竖发丝；
+ *          正文栏自上而下四段：眉标行 → 标题块 → 要点表 → 参数行。
+ * D3 字阶  全部随卡片宽度走（vw）：标题 clamp(36,4vw,76) / 导语 clamp(15,1.2vw,22)
+ *          / 要点 clamp(14,1.12vw,19) / 编号 mono clamp(17,1.5vw,26)
+ *          / 栏目名·参数片 mono clamp(11.5,0.8vw,14) / 图注·状态 mono clamp(11.5,0.78vw,13)。
+ * D4 颜色  纸：八色纸感色，每面一块。墨：--ink / --ink-soft / --ink-mute（三档全过 AA）。
+ *          舞台：深墨蓝渐变 + 一团冷光。强调色只用在"正在展示"的信号点与标题线。
+ * D5 图版  实机截图裁掉自带窗框（Windows 标题栏 + 右侧滚动条），正文留在顶部，
+ *          黑底一路铺到卡底，配一枚等宽图注 —— 它是证据，不是配图。
+ * D6 动效  曲线 cubic-bezier(.22,1,.36,1)；换面 720ms（连击 ×0.5）；
+ *          微交互 180–520ms；prefers-reduced-motion 下整批退化为静态。
+ * D7 无障碍  正文对比度 ≥ 4.5:1、大字 ≥ 3:1；焦点环 2px（--accent 混白）+ 3px 外扩；
+ *          八面皆不接指针与点击，翻面控件只有箭头、进度条与键盘；换面时 aria-live 播报
+ *          导语 + 要点 + 参数。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -61,77 +110,111 @@ const TINTS = [
 ]
 
 /* ===== 卡片素材 =====
- * 封面在 public/images/features/cover（16:9，与截图同名）。
- * 不走 import.meta.glob：public 下的文件不该再经打包器，否则同一张图会被
- * "public 原样拷贝 + 打包器再产出一份"，白白翻倍；直接用 base 前缀取。
- * screenshot 那八张深色界面截图不进卡片 —— 小尺寸下不可读，八张排成一圈
- * 又正是被废弃的"截图墙"，真实界面留给大窗/详情那一层。
+ * 图版用实机界面截图（public/images/features/screenshot，1958×1050 的控制台窗口，
+ * 9008 那张是 1499×815）。不走 import.meta.glob：public 下的文件不该再经打包器，
+ * 直接用 base 前缀取。
+ * 截图自带的 Windows 窗框与右侧滚动条不进卡面 —— 那是"截屏"的味道，不是版面的味道；
+ * 裁切参数（--shot-keep / --shot-skip / --shot-band）在下面的样式里，一处定义。
  */
-const COVER_DIR = import.meta.env.BASE_URL + 'images/features/cover/'
+const SHOT_DIR = import.meta.env.BASE_URL + 'images/features/screenshot/'
+/* 截图里窗口标题栏写着版本号，图注照抄 —— 9008 那张是 fix1 版 */
+const WIN = 'NewAndroidToolBox 1.0.3'
+const WIN_FIX1 = 'NewAndroidToolBox 1.0.3fix1'
 
+/* 每一面四样东西：
+ *   desc   —— 沿用 features 基本页那句话，口径一致；
+ *   points —— 三条一行读得完的要点，是这一面的"详细内容"；
+ *   specs  —— 三枚关键参数，只放最硬的事实；
+ *   shot   —— 实机界面截图，图版栏那块。
+ * 要点与参数都从 desc 长出来，不新增没有依据的指标；改文案只动这一处数据。 */
 const FEATURES = [
   {
     icon: IconShieldKeyhole,
     tag: 'ROOT',
     shot: 'root.webp',
+    win: WIN,
     title: '一键ROOT',
     desc: '支持Z2-Z11全系列机型一键ROOT，实时修补BOOT，安全稳定。',
+    points: ['覆盖 Z2–Z11 全系列机型', '实时修补 BOOT，开机即生效', '一键全自动，不必手敲命令'],
+    specs: ['Z2–Z11', 'BOOT 修补', '全自动'],
   },
   {
     icon: IconCloudDownload,
     tag: 'OTA',
     shot: 'ota.webp',
+    win: WIN,
     title: '离线OTA升级',
     desc: '支持离线OTA升级解决验证异常。',
+    points: ['离线包升级，不挑网络环境', '解决验证异常，升级可正常完成', '无需第三方工具，NATB 内完成'],
+    specs: ['离线包', '免网络', '验证修复'],
   },
   {
     icon: IconLayers,
     tag: 'RTOS',
     shot: 'rtos.webp',
+    win: WIN,
     title: 'RTOS支持',
     desc: '支持Z7Pro、Z9a等RTOS系统手表。',
+    points: ['Z7Pro、Z9a 等 RTOS 机型', '与 Android 机型同一套界面', '连接即识别，不必额外装驱动'],
+    specs: ['Z7Pro', 'Z9a', 'RTOS'],
   },
   {
     icon: IconWidget,
     tag: 'APP',
     shot: 'appmanager.webp',
+    win: WIN,
     title: '应用管理',
-    desc: '多种安装方式，支持install/data/第三方安装器/install-create，总有一种适合您。',
+    desc: '多种安装方式，总有一种适合您。',
+    points: ['install / data 两条直装通道', '第三方安装器与 install-create', '列表内直接卸载与清理'],
+    specs: ['install', 'data', 'install-create'],
   },
   {
     icon: IconCpuBolt,
     tag: 'EDL',
     shot: '9008.webp',
+    win: WIN_FIX1,
     title: '9008刷机',
     desc: '9008模式刷入Recovery/TWRP，备份与恢复。',
+    points: ['9008 通道刷入 Recovery / TWRP', '分区备份与恢复并排管理', '不进系统也能救回变砖设备'],
+    specs: ['9008', 'Recovery', 'TWRP'],
   },
   {
     icon: IconMagicStick,
     tag: 'MODULE',
     shot: 'magisk.webp',
+    win: WIN,
     title: 'Magisk模块',
     desc: 'Magisk模块安装、卸载、列表管理，更方便地享受模块的乐趣。',
+    points: ['本地模块一键安装与卸载', '模块清单随时查看与开关', '不必反复重刷，玩得更安心'],
+    specs: ['安装', '卸载', '列表管理'],
   },
   {
     icon: IconFolderFiles,
     tag: 'FILES',
     shot: 'filemanager.webp',
+    win: WIN,
     title: '文件管理',
     desc: '摒弃传统的ADB方案与文件管理器，直接在NATB内管理文件，省心省力。',
+    points: ['内置文件树，直读手表存储', '上传、下载、删除同在一处', '告别命令行与第三方管理器'],
+    specs: ['免 ADB', '内置文件树', '上传下载'],
   },
   {
     icon: IconScreenShare,
     tag: 'MIRROR',
     shot: 'scrcpy.webp',
+    win: WIN,
     title: '投屏控制',
     desc: 'scrcpy投屏控制，手表屏幕实时投影到电脑。',
+    points: ['scrcpy 实时投屏，画面即时同步', '电脑端鼠标直接操作手表', '连线即可用，不必额外配置'],
+    specs: ['scrcpy', '实时投屏', '鼠标接管'],
   },
 ].map((item, index) => ({
   ...item,
   idx: index,
   no: String(index + 1).padStart(2, '0'),
   tint: TINTS[index % TINTS.length],
-  art: COVER_DIR + item.shot,
+  /* 图版地址：截图目录 + 与功能同名的文件 */
+  plate: SHOT_DIR + item.shot,
 }))
 
 /* ===== 八边形几何 =====
@@ -155,60 +238,43 @@ const ringVars = {
 /* ===== 入场时间表 =====
  * 与 Features / UpdateLog 同一套做法：阶梯只写这一份，注入成 --enter-*，
  * 样式只管姿态与曲线，时间轴不会在两边各写一遍。
- * 顺序：光池 → 巨型序号 → 页眉三段 → 关闭钮 → 舞台淡入 + 柱体摆入
- * → 两张切换钮 → 序号 → 指示器逐段展开 → 落款。
+ * 顺序：顶栏（发丝线跟着展开）→ 退出控件 → 舞台淡入 + 柱体摆入 → 两张切换钮
+ * → 进度条逐段展开。顶栏整条先落位，"这块版面从上面压下来"的顺序才读得出来。
  */
 const ENTER = {
-  folio: 100,
-  kicker: 130,
-  title: 210,
-  meta: 310,
-  close: 260,
+  top: 140,
+  exit: 250,
   stage: 200,
   prism: 330,
   navLeft: 470,
   navRight: 540,
-  ordinal: 660,
   meter: 700,
   meterStep: 55,
-  hint: 800,
 }
 const ENTER_DUR = {
-  kicker: 620,
-  title: 700,
-  meta: 620,
-  close: 520,
+  top: 560,
+  exit: 460,
   stage: 900,
   prism: 1000,
   nav: 520,
-  ordinal: 560,
   meter: 520,
-  hint: 560,
 }
 const ms = (v) => `${v}ms`
 const enterVars = {
-  '--enter-kicker': ms(ENTER.kicker),
-  '--enter-title': ms(ENTER.title),
-  '--enter-meta': ms(ENTER.meta),
-  '--enter-close': ms(ENTER.close),
+  '--enter-top': ms(ENTER.top),
+  '--enter-exit': ms(ENTER.exit),
   '--enter-stage': ms(ENTER.stage),
   '--enter-prism': ms(ENTER.prism),
   '--enter-nav': ms(ENTER.navLeft),
   '--enter-nav-step': ms(ENTER.navRight - ENTER.navLeft),
-  '--enter-ordinal': ms(ENTER.ordinal),
   '--enter-meter': ms(ENTER.meter),
   '--enter-meter-step': ms(ENTER.meterStep),
-  '--enter-hint': ms(ENTER.hint),
-  '--enter-dur-kicker': ms(ENTER_DUR.kicker),
-  '--enter-dur-title': ms(ENTER_DUR.title),
-  '--enter-dur-meta': ms(ENTER_DUR.meta),
-  '--enter-dur-close': ms(ENTER_DUR.close),
+  '--enter-dur-top': ms(ENTER_DUR.top),
+  '--enter-dur-exit': ms(ENTER_DUR.exit),
   '--enter-dur-stage': ms(ENTER_DUR.stage),
   '--enter-dur-prism': ms(ENTER_DUR.prism),
   '--enter-dur-nav': ms(ENTER_DUR.nav),
-  '--enter-dur-ordinal': ms(ENTER_DUR.ordinal),
   '--enter-dur-meter': ms(ENTER_DUR.meter),
-  '--enter-dur-hint': ms(ENTER_DUR.hint),
 }
 // 最晚落定的是指示器末段：它落定，这段入场就算走完
 const ENTER_END = ENTER.meter + ENTER.meterStep * (N - 1) + ENTER_DUR.meter + 40
@@ -254,87 +320,6 @@ function goToFace(k) {
   step(delta)
 }
 
-/* ===== 指针：拖拽转圈 =====
- * 拖拽就是"抓住这圈板子横向拉"，松手吸附到最近的 45°。
- * 角位移不设上限：一圈本就是闭合的，想拉多远拉多远，落位时按最近的 45° 吸附。
- */
-const SENS = 0.22 // 每像素转多少度
-
-const viewportEl = ref(null)
-const drag = ref(0)
-const dragging = ref(false)
-
-let pointerId = null
-let startPoint = { x: 0, y: 0 }
-let engaged = false
-let moved = false
-// 按下时指针压在哪一面上：指针捕获会吃掉卡片的 click，这一路要自己补
-let downFace = -1
-
-function onDown(event) {
-  if (reduceMotion || event.button !== 0 || pointerId !== null) return
-  pointerId = event.pointerId
-  startPoint = { x: event.clientX, y: event.clientY }
-  engaged = false
-  moved = false
-  downFace = event.target instanceof Element ? Number(event.target.closest('.face')?.dataset.face ?? -1) : -1
-  // 捕获指针：手指/鼠标移出元素也继续跟手
-  try {
-    event.currentTarget.setPointerCapture(pointerId)
-  } catch {
-    /* 元素已卸载或浏览器不支持，拖拽降级为"出界即断" */
-  }
-}
-
-function onMove(event) {
-  if (pointerId === null || event.pointerId !== pointerId) return
-  const dx = event.clientX - startPoint.x
-  const dy = event.clientY - startPoint.y
-  if (!engaged) {
-    if (Math.abs(dx) < 6) return
-    // 竖着手势交还给页面（触摸下就是滚动），只有明确的横向拖动才转圈
-    if (Math.abs(dy) > Math.abs(dx)) {
-      endDrag(event)
-      return
-    }
-    engaged = true
-    dragging.value = true
-    finishEntrance()
-  }
-  moved = true
-  drag.value = dx * SENS
-}
-
-function endDrag(event) {
-  if (pointerId === null || (event && event.pointerId !== pointerId)) return
-  const id = pointerId
-  pointerId = null
-  try {
-    viewportEl.value?.releasePointerCapture(id)
-  } catch {
-    /* 指针已经没了，不必再放 */
-  }
-  if (!engaged) {
-    /* 指针捕获会把 click 派发到捕获元素（视口）而不是卡片本身，
-     * 卡片上的 @click 于是永远收不到指针点击 —— 那一路在这里补：
-     * 按下的位置落在哪一面，就把它转到镜头正中（没拖动过才算数）。 */
-    if (!moved && downFace >= 0) pick(downFace)
-    downFace = -1
-    return
-  }
-  engaged = false
-  downFace = -1
-  // 吸附：先把"拖出来的角度"折成整数步，再在同一帧里把过渡与角度一起归位 ——
-  // 浏览器按改后样式起一条 720ms 的过渡，于是这最后一段是滑回去的，不是跳回去的。
-  const steps = Math.round(drag.value / STEP_DEG)
-  if (steps) {
-    noteSwitch(true)
-    index.value -= steps
-  }
-  drag.value = 0
-  dragging.value = false
-}
-
 /* ===== 滚轮换面 =====
  * 攒够一格走一面、余额留到下一次：连滚几格就连切几面，不再有冷却挡着。
  */
@@ -361,20 +346,6 @@ function onWheel(event) {
   if (steps <= 0) return
   wheelAcc -= dir * steps * WHEEL_STEP // 余额结转，下一格接着算
   step(dir * steps)
-}
-
-/* ===== 点面 =====
- * 点侧面板＝把它转到镜头正中。刚拖过的那一下会在 pointerup 之后补一个 click，
- * 用 moved 把它吞掉，免得"拖完顺手把某面也转了"。
- */
-function pick(i) {
-  if (moved) {
-    moved = false
-    return
-  }
-  // 正对镜头的那一面不可点：它已经在中间了，点它没有任何可换的对象
-  if (i === face.value) return
-  goToFace(i)
 }
 
 function close() {
@@ -420,7 +391,7 @@ function startEntrance() {
   enterTimer = window.setTimeout(finishEntrance, ENTER_END)
 }
 
-/** 每开一次都从 initial 那一面起跑，上一轮的拖拽角度也一并归零 */
+/** 每开一次都从 initial 那一面起跑 */
 watch(
   () => props.open,
   (on) => {
@@ -430,8 +401,6 @@ watch(
     }
     wheelAcc = 0
     index.value = props.initial || 0
-    drag.value = 0
-    dragging.value = false
     nextTick(startEntrance)
   },
 )
@@ -455,9 +424,10 @@ onBeforeUnmount(() => {
 
 const announce = computed(() => {
   const item = at(face.value)
-  return `正在展示 ${item.no} / ${TOTAL_NO} ${item.title}：${item.desc}`
+  /* 卡面上看得见的三段（导语 + 要点 + 参数）都念出来：侧面板对读屏是暗的，
+     转过来的这一面说了什么，得由这一行播报补全。 */
+  return `正在展示 ${item.no} / ${TOTAL_NO} ${item.title}：${item.desc}要点：${item.points.join('；')}。参数：${item.specs.join('、')}`
 })
-const folio = computed(() => at(face.value).no)
 </script>
 
 <template>
@@ -472,126 +442,114 @@ const folio = computed(() => at(face.value).no)
       aria-modal="true"
       aria-label="特色功能大屏模式"
     >
-      <!-- ── 背景：光池 + 巨型序号 ── -->
+      <!-- ── 背景：光池托底（巨号序号已去掉） ── -->
       <div class="screen__backdrop" aria-hidden="true">
         <div class="screen__glow"></div>
-        <!-- 换面时整块重挂一次，序号是"翻"上去的 -->
-        <p :key="face" class="screen__folio">{{ folio }}</p>
       </div>
 
       <div class="screen__inner">
-        <!-- ── 刊头：沿用 features 基本页的两端对拉 ── -->
-        <header class="screen__head">
-          <span class="screen__mark" aria-hidden="true"></span>
-
-          <div class="screen__headgrid">
-            <div class="screen__lead">
-              <p class="screen__kicker">NATB — 特色功能</p>
-              <h1 class="screen__title"><span>随心</span><span class="screen__title-b">所欲</span></h1>
-            </div>
-
-            <div class="screen__note">
-              <p class="screen__lede">全方面支持小天才手表玩机需求</p>
-              <p class="screen__meta">
-                <span>{{ TOTAL_NO }} FEATURES</span>
-                <span class="screen__dot" aria-hidden="true"></span>
-                <span>SINCE 2026</span>
-              </p>
-            </div>
-          </div>
-
-          <span class="screen__rule" aria-hidden="true"></span>
+        <!-- ── 顶部一条：与版心共用同一档左右 padding ──
+             左端是刊头式小字，右端是退出控件，两端对拉扯出版心宽度。
+             它是被舞台让出来的一条（flex 行），所以卡片一定在它下面，永不叠字 -->
+        <header class="screen__top">
+          <span class="screen__label">NATB — 特色功能 <i aria-hidden="true">/</i> {{ TOTAL_NO }} FEATURES</span>
         </header>
 
         <!-- ── 舞台：八边形柱体 ── -->
         <section class="screen__stage" aria-label="特色功能展示台">
-          <div
-            ref="viewportEl"
-            class="screen__viewport"
-            :class="{ 'is-dragging': dragging }"
-            @pointerdown="onDown"
-            @pointermove="onMove"
-            @pointerup="endDrag"
-            @pointercancel="endDrag"
-            @wheel="onWheel"
-          >
-            <div
-              class="prism"
-              :class="{ 'is-dragging': dragging }"
-              :style="{ '--step': index, '--drag': `${drag.toFixed(2)}deg` }"
-            >
-              <button
+          <!-- 视口只做两件事：给柱体提供透视、接滚轮。拖动与点面都已经去掉 -->
+          <div class="screen__viewport" @wheel="onWheel">
+            <div class="prism" :style="{ '--step': index }">
+              <div
                 v-for="(item, i) in FEATURES"
                 :key="item.idx"
-                type="button"
                 class="face"
                 :class="{ 'is-front': face === i }"
                 :data-face="i"
                 :style="{ '--i': i, '--tint': item.tint }"
-                :tabindex="face === i ? -1 : 0"
-                :aria-current="face === i ? 'true' : undefined"
-                :aria-label="`${item.no} ${item.title}`"
-                @click="pick(i)"
               >
                 <!-- 3D 倾斜壳套在「面里面」：壳写自己的 transform，这一面的 rotateY
                      由外层写着，两者互不覆盖，柱体因此毫发无损。
                      壳里的皮肤层才是"看得见的那张卡" —— 底色、描边、圆角、投影、
                      暗纱、出血序号全在它身上，所以指针一动是整张卡在仰，不是一个框
-                     兜着几张会晃的图。只有正对镜头的那一面接指针，其余各面 disabled。 -->
+                     兜着几张会晃的图。只有正对镜头的那一面接指针，其余各面 disabled。
+                     倾角只给 2.5°、跟随再放慢一档（smoothing 0.09）：悬浮是"轻轻侧一下"，
+                     不是把整面晃出去。 -->
                 <TiltCard
                   class="face__shell"
                   :disabled="face !== i"
-                  :max-tilt="6"
+                  :max-tilt="2.5"
                   :perspective="1500"
                   :scale="1"
+                  :smoothing="0.09"
                   :glare="face === i"
                   glare-color="#ffffff"
-                  :glare-opacity="0.26"
-                  :glare-size="140"
+                  :glare-opacity="0.16"
+                  :glare-size="120"
                 >
                   <span class="face__skin">
-                    <span class="face__shot">
-                      <img class="face__img" :src="item.art" alt="" draggable="false" decoding="async" />
-                      <span class="face__no" aria-hidden="true">{{ item.no }}</span>
-                      <span class="face__chip" aria-hidden="true">
-                        <component :is="item.icon" width="17" height="17" />
+                    <!-- ── 左：正文栏。编辑版式四段，自上而下：眉标 → 标题块 → 要点 → 参数 ── -->
+                    <span class="face__main">
+                      <span class="face__eyebrow">
+                        <span class="face__index"><b>{{ item.no }}</b><i>/{{ TOTAL_NO }}</i></span>
+                        <span class="face__icon" aria-hidden="true">
+                          <component :is="item.icon" width="19" height="19" />
+                        </span>
+                        <span class="face__tag">{{ item.tag }}</span>
+                        <span class="face__state">
+                          <span class="face__signal" aria-hidden="true"></span>
+                          <span>{{ face === i ? '正在展示' : '转到这一面' }}</span>
+                        </span>
+                      </span>
+
+                      <span class="face__lede">
+                        <span class="face__title">{{ item.title }}</span>
+                        <span class="face__desc">{{ item.desc }}</span>
+                      </span>
+
+                      <!-- 要点表：三条短句，靠左侧一枚小方点定位。一律用 span ——
+                           这一面整个是 <button>，只收 phrasing 内容 -->
+                      <span class="face__points">
+                        <span v-for="line in item.points" :key="line" class="face__point">{{ line }}</span>
+                      </span>
+
+                      <!-- 参数行：三枚等宽小片，只放最硬的三条事实 -->
+                      <span class="face__specs">
+                        <span v-for="spec in item.specs" :key="spec" class="face__spec">{{ spec }}</span>
                       </span>
                     </span>
 
-                    <span class="face__body">
-                      <span class="face__tag">{{ item.tag }}</span>
-                      <span class="face__title">{{ item.title }}</span>
-                      <span class="face__desc">{{ item.desc }}</span>
-                      <span class="face__foot">
-                        <span class="face__signal" aria-hidden="true"></span>
-                        <span>{{ face === i ? '正在展示' : '转到这一面' }}</span>
+                    <!-- ── 右：图版栏。实机界面截图，自带窗框在样式里裁掉 ── -->
+                    <span class="face__plate">
+                      <span class="face__frame">
+                        <img class="face__shot" :src="item.plate" alt="" draggable="false" decoding="async" />
+                      </span>
+                      <span class="face__caption">
+                        <span>实机界面</span>
+                        <span class="face__caption-app">{{ item.win }}</span>
                       </span>
                     </span>
 
-                    <!-- 出血巨型序号：压到皮肤最底层，只提供质感 -->
-                    <span class="face__mark" aria-hidden="true">{{ item.no }}</span>
                     <!-- 侧面板退到暗处，正对镜头的那一面才是亮的 -->
                     <span class="face__veil" aria-hidden="true"></span>
                   </span>
                 </TiltCard>
-              </button>
+              </div>
             </div>
           </div>
 
-          <button class="screen__nav screen__nav--prev" type="button" aria-label="上一面" @click="step(-1)">
-            <IconChevronLeft width="30" height="30" aria-hidden="true" />
+          <!-- 与退出控件同一套方角语言：等尺寸、同发丝描边、同底色，
+               悬浮只改明度不放大 —— 三枚控件并排看过去是一条线上的东西 -->
+          <button class="screen__nav screen__nav--prev" type="button" title="上一面（←）" aria-label="上一面" @click="step(-1)">
+            <IconChevronLeft width="20" height="20" aria-hidden="true" />
           </button>
-          <button class="screen__nav screen__nav--next" type="button" aria-label="下一面" @click="step(1)">
-            <IconChevronRight width="30" height="30" aria-hidden="true" />
+          <button class="screen__nav screen__nav--next" type="button" title="下一面（→）" aria-label="下一面" @click="step(1)">
+            <IconChevronRight width="20" height="20" aria-hidden="true" />
           </button>
         </section>
 
-        <!-- ── 页脚：序号 / 指示器 / 落款 ── -->
+        <!-- ── 页脚：只剩进度条 ── -->
         <footer class="screen__foot">
-          <p class="screen__ordinal">
-            <b>{{ folio }}</b> / {{ TOTAL_NO }}
-          </p>
-
           <ul class="meter" aria-label="功能导航">
             <li v-for="(item, i) in FEATURES" :key="item.idx" :style="{ '--m-i': i }">
               <button
@@ -605,14 +563,15 @@ const folio = computed(() => at(face.value).no)
               ></button>
             </li>
           </ul>
-
-          <p class="screen__hint">MADE BY NATB DEVELOPER GROUP</p>
         </footer>
       </div>
 
-      <button class="screen__close" type="button" aria-label="退出大屏模式" @click="close">
-        <IconX width="15" height="15" aria-hidden="true" />
-        <span class="screen__close-text">退出大屏</span>
+      <!-- ── 退出：版心右端的那枚控件 ──
+           绝对定位只为了与版心右缘严格对齐（它在 .screen__inner 的 padding 盒之外），
+           y 与顶栏同一档、尺寸与顶栏同高，所以看上去就是顶栏右端的那一格 -->
+      <button class="screen__exit" type="button" title="退出大屏（Esc）" aria-label="退出大屏模式" @click="close">
+        <IconX width="18" height="18" aria-hidden="true" />
+        <span class="screen__exit-text">退出</span>
       </button>
 
       <p class="screen__sr" aria-live="polite">{{ announce }}</p>
@@ -621,19 +580,12 @@ const folio = computed(() => at(face.value).no)
 </template>
 
 <style scoped>
-/* ===== 性能：两个只在柱体自己身上消费的变量，声明成不继承 =====
- * 拖拽时每帧写 --drag、换面时改 --step。自定义属性默认是继承的，浏览器改它时会把
- * 该元素**整棵子树**的样式重算一遍 —— 而这里的子树是八张卡的封面、文字、图标、暗纱。
- * 实测拖拽 150 帧里样式重算吃掉 1053ms，占了那 2.5s 主线程的 40%。
- * 声明 inherits: false 之后，改它只落在柱体自己身上，子树一根头发都不动。
+/* ===== 性能：只在柱体自己身上消费的变量，声明成不继承 =====
+ * 换面时改 --step。自定义属性默认是继承的，浏览器改它时会把该元素**整棵子树**的
+ * 样式重算一遍 —— 而这里的子树是八张卡的封面、文字、图标、暗纱。声明 inherits: false
+ * 之后，改它只落在柱体自己身上，子树一根头发都不动。
  * （--face-w / --radius / --step-deg 是真要被面消费的，保持继承不变。）
  */
-@property --drag {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
 @property --step {
   syntax: '<number>';
   inherits: false;
@@ -641,8 +593,7 @@ const folio = computed(() => at(face.value).no)
 }
 
 .screen {
-  /* ── 纸与墨：卡面这一套直接沿用 features 基本页 ── */
-  --paper: #f8f6f2;
+  /* ── 纸与墨：卡面这一套直接沿用 features 基本页的墨色 ── */
   --ink: #16150f;
   --rule-soft: rgba(22, 21, 15, 0.09);
 
@@ -653,8 +604,29 @@ const folio = computed(() => at(face.value).no)
   --on-stage-2: rgba(242, 245, 248, 0.74);
   --on-stage-3: rgba(242, 245, 248, 0.48);
   --line: rgba(255, 255, 255, 0.16);
-  --glass: rgba(10, 14, 20, 0.6);
   --accent: #0a59f7;
+
+  /* ── 顶栏与控件（v3）──
+     三枚控件共用同一档尺寸与同一套语言，顶栏自己也走同一档高度：
+     --ctrl 是控件边长、也是顶栏的行高，所以它们天然在同一条水平线上。
+     悬浮是"翻底色"，所以底色只有两级：rest 一层薄玻璃、hover 一层实纸。 */
+  --top-h: clamp(34px, 4vh, 40px);
+  --top-gap: clamp(12px, 1.7vh, 18px);
+  --ctrl: var(--top-h);
+  --ctrl-radius: 8px;
+  --ctrl-bg: rgba(255, 255, 255, 0.055);
+  --ctrl-bg-hover: var(--on-stage);
+  --ctrl-line: rgba(255, 255, 255, 0.22);
+  --ctrl-line-hover: var(--on-stage);
+  /* 悬浮翻成实纸底时的字色：与 features 页的墨黑同值 */
+  --on-accent: #16150f;
+
+  /* ── 纸与墨（卡面）：一卡一纸色，墨字三档 ──
+     三档都按"最深的那块纸色"（紫藤 #e2deee）反推过 WCAG AA，实测最低 5.3:1：
+     ink 正文标题 / ink-soft 导语、要点、参数 / ink-mute 栏目名、图注、状态。
+     小字不做第四档浅灰 —— 浅到 4.5:1 以下就不是"层级"，是读不清。 */
+  --ink-soft: #46433b;
+  --ink-mute: #5d574c;
 
   --font-latin: ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace;
@@ -669,13 +641,31 @@ const folio = computed(() => at(face.value).no)
      面宽 = 八边形的一条边；边心距 R = W / (2·tan(π/n))，--ring-k 在脚本里算，
      已经含了 3% 的缝。正视面停在 z=0（容器整体回推一个 R），所以下面这个
      面宽就是它在屏幕上的真实宽度。
-     宽高比压到接近 1：立牌太瘦就不像"围成柱体的板"，太胖又显不出环的弧。 */
-  --face-w: clamp(264px, 30vw, 540px);
-  --face-h: clamp(326px, 50vh, 520px);
+     这一版按"横版刊页"定尺寸：一张卡至少占满 80vw × 70vh，宽高比约 2:1。
+     高度用 min() 兜一道底：视窗矮到约 430px 以下时，上下留白 + 顶栏 + 页脚 + 70vh 会顶出
+     版心，宁可让卡矮一点，也不让它被裁掉（80vw 恒等，宽度不需要兜底）。
+     刊头去掉之后顶上只需要给页脚留 ~104px；v3 顶上多了一条版心顶栏（--top-h + --top-gap），
+     兜底值跟着加高到 168px —— 这一条进了流，卡片让出来的高度必须在这里补回去。 */
+  --face-w: 80vw;
+  --face-h: min(70vh, calc(100vh - 168px));
   --radius: calc(var(--face-w) * var(--ring-k));
   --push: calc(var(--face-w) * var(--ring-k) * -1);
-  /* 透视略缓：太近会把相邻那两面压得太小，"八块板围成一圈"的读感就散了 */
+  /* 透视略缓：太近会把相邻那两面压得太小，"八块板围成一圈"的读感就散了。
+     卡变成长边 1536px 的大板之后这个值照旧：相邻面板的缩放落在 0.99→0.61，
+     于是它们正好在卡的两侧各露一条窄边，环还在 */
   --persp: 1700px;
+
+  /* ── 刊页网格：一卡两栏 ── */
+  --card-pad: clamp(22px, 2.3vw, 44px);
+  --col-gap: clamp(22px, 2.4vw, 52px);
+  --plate-w: 56%;
+  /* 图版裁切三常数：只留左边 72%（控制台正文都在左侧）、跳过自带标题栏 5.52%；
+     --shot-ratio 是源图的高/宽，用来把"跳过的比例"换算成像素。
+     --shot-band 只在窄屏（一栏布局）里给图版一个固定高度，宽屏下图版吃满整栏 */
+  --shot-keep: 0.72;
+  --shot-skip: 0.0552;
+  --shot-band: 620;
+  --shot-ratio: 0.5363;
 
   position: fixed;
   inset: 0;
@@ -705,198 +695,85 @@ const folio = computed(() => at(face.value).no)
     linear-gradient(180deg, var(--stage) 0%, var(--stage-deep) 100%);
 }
 
-/* 巨型序号当底纹：只提供质感，不参与阅读 */
-.screen__folio {
-  position: absolute;
-  left: 50%;
-  bottom: -1.5vh;
-  translate: -50% 0;
+/* ===== 顶部一条（版心行）=====
+ * 与 .screen__inner 共用同一档左右 padding，所以它的两端就是版心的两端 ——
+ * 退出控件贴在右端、刊头小字贴在左端，两端对拉扯出版心宽度。
+ * 高度整条钉在 --ctrl：退出控件与它同高，两者就在同一条水平线上，不会各偏各的。
+ * 它是流内的第一行（不是绝对定位），舞台因此从它下面开始 —— 卡片永远不会压到这一条。
+ *
+ * 这里刻意不画横贯的发丝线：这一条的 y 与站点顶栏胶囊同处一条带上（顶栏是
+ * 全局 fixed 槽位，压在所有页面之上），横线会正好从胶囊底下穿过去，像一条划痕。
+ * 版心关系由两端对齐与同一档基线承担，不靠一根会被挡住的分隔线。
+ */
+.screen__top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(12px, 1.6vw, 22px);
+  height: var(--ctrl);
+}
+
+/* 刊头式小字：与卡面上的眉标同一套读法（等宽、加宽字距、全大写） */
+.screen__label {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
   margin: 0;
   font-family: var(--mono);
-  font-size: clamp(112px, 19vw, 268px);
-  font-weight: 700;
-  line-height: 0.78;
-  letter-spacing: -0.05em;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.075);
-  /* 换面时这一块会重挂，序号是翻上来的 */
-  animation: folio-swap 520ms var(--ease);
+  font-size: clamp(9.5px, 0.66vw, 11.5px);
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* 顶栏字是"版面上的记号"，不是要读的正文：--on-stage-2 一档刚好 */
+  color: var(--on-stage-2);
 }
 
-@keyframes folio-swap {
-  from {
-    opacity: 0;
-    translate: -50% 7%;
-  }
-  to {
-    opacity: 1;
-    translate: -50% 0;
-  }
+/* 斜杠分隔用三等档，别跟文字抢注意力 */
+.screen__label i {
+  font-style: normal;
+  color: var(--on-stage-3);
 }
 
-/* ===== 版心 ===== */
+/* ===== 版心 =====
+ * 卡片在视窗里正居中：页脚退成绝对定位（不进流），顶栏是流内第一行 →
+ * 版心的上下留白对称，舞台于是从顶栏下沿一路铺到版心底。
+ */
 .screen__inner {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
+  /* 顶栏与舞台之间那一口气：只作用在这两者之间（页脚是绝对定位，不在流里） */
+  gap: var(--top-gap);
   height: 100%;
   box-sizing: border-box;
-  padding: clamp(18px, 3.4vh, 40px) clamp(18px, 4vw, 64px) clamp(14px, 2.6vh, 28px);
+  /* 上下不对称，是为了把版面拉正：顶栏占掉一条高度，若上下留白一样，
+     整个舞台（连同卡片）会被顶低 (--top-h + --top-gap) / 2。下侧补回同量，
+     舞台的上下留白就重新相等 —— 卡片回到视窗正中的那 1px 以内。
+     左右仍是老规矩：版心两端就是这两档 padding。 */
+  padding: clamp(18px, 3.4vh, 40px) clamp(18px, 4vw, 64px)
+    calc(clamp(18px, 3.4vh, 40px) + var(--top-h) + var(--top-gap));
 }
 
-/* ===== 刊头 ===== */
-.screen__head {
-  position: relative;
-  flex: none;
-  padding-bottom: clamp(10px, 1.6vh, 18px);
-}
-
-/* 套准标记：印刷版式最小的那个记号，与 kicker 左对齐 */
-.screen__mark {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 11px;
-  height: 11px;
-}
-
-.screen__mark::before,
-.screen__mark::after {
-  content: '';
-  position: absolute;
-  background: rgba(242, 245, 248, 0.34);
-}
-
-.screen__mark::before {
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-}
-
-.screen__mark::after {
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-}
-
-/* 两端对拉：左栏刊名与刊题，右栏导语与期号 */
-.screen__headgrid {
-  display: grid;
-  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
-  align-items: end;
-  gap: clamp(24px, 4vw, 84px);
-}
-
-.screen__lead {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(8px, 1.3vh, 16px);
-  min-width: 0;
-}
-
-.screen__kicker {
-  margin: 0;
-  font-family: var(--font-latin);
-  font-size: clamp(10px, 0.7vw, 11.5px);
-  font-weight: 600;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-  color: var(--on-stage-3);
-  white-space: nowrap;
-}
-
-.screen__title {
-  margin: 0;
-  font-size: clamp(32px, 3.6vw, 56px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  color: var(--on-stage);
-  white-space: nowrap;
-}
-
-/* 双色调刊题：后两字退成冷灰，一句四字就分出了主次 */
-.screen__title-b {
-  color: rgba(242, 245, 248, 0.4);
-}
-
-.screen__note {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-end;
-  align-self: stretch;
-  gap: clamp(9px, 1.4vh, 16px);
-  text-align: right;
-  /* 竖线落在最右边：它是版心的右界 */
-  padding-right: clamp(20px, 2.6vw, 46px);
-  padding-bottom: clamp(2px, 0.5vh, 6px);
-  border-right: 1px solid var(--line);
-  min-width: 0;
-}
-
-.screen__lede {
-  margin: 0;
-  font-size: clamp(14px, 1.05vw, 18px);
-  line-height: 1.58;
-  color: var(--on-stage-2);
-  text-wrap: pretty;
-}
-
-.screen__meta {
-  display: flex;
-  align-items: center;
-  gap: 0.9em;
-  margin: 0;
-  font-family: var(--font-latin);
-  font-size: clamp(9.5px, 0.66vw, 10.5px);
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  color: var(--on-stage-3);
-}
-
-.screen__dot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--on-stage-3);
-}
-
-/* 刊头收尾的一条发丝线 */
-.screen__rule {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: var(--line);
-  transform-origin: left center;
-}
-
-/* ===== 舞台 ===== */
+/* ===== 舞台 =====
+ * 吃满版心（页脚不在流里，它撑得到版心底）：柱体因此严格居中，
+ * 也不会被页脚、被进度条那几像素的厚薄推上推下。 */
 .screen__stage {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  margin-top: clamp(10px, 1.6vh, 22px);
 }
 
-/* 透视挂在这里：.prism 是它的子元素。注意这一层不许有 transform 之外的分组属性 */
+/* 透视挂在这里：.prism 是它的子元素。注意这一层不许有 transform 之外的分组属性。
+   它自己不接指针（拖动已去掉），只是滚轮的落点：视口铺满整块舞台，
+   滚轮落在版心哪儿都算数。 */
 .screen__viewport {
   position: absolute;
   inset: 0;
   perspective: var(--persp);
   perspective-origin: 50% 50%;
-  cursor: grab;
-  /* 竖滑交还页面，横滑才是转圈 */
-  touch-action: pan-y;
-}
-
-.screen__viewport.is-dragging {
-  cursor: grabbing;
 }
 
 /* ===== 八边形柱体 ===== */
@@ -917,83 +794,42 @@ const folio = computed(() => at(face.value).no)
     /* 整体回推一个边心距：正视面因此停在 z=0，所见即所得。
        不回推的话正视面离镜头只剩一个 R，透视会把它放大到 1.76 倍 */
     translateZ(var(--push))
-    /* --step 是转过多少步，--drag 是拖拽中那一段自由角度 */
-    rotateY(calc(var(--step, 0) * var(--step-deg) * -1 + var(--drag, 0deg)));
+    /* --step 是转过多少步 */
+    rotateY(calc(var(--step, 0) * var(--step-deg) * -1));
   transition: transform var(--dur-run) var(--ease);
 }
 
-/* 拖拽过程中把八张卡的模糊阴影摘掉：阴影每帧都要跟着重画，是拖拽时最大的一笔绘制
-   开销。手一松就回来 —— 只有静止对照才看得出差别，运动中的画面看不出来。 */
-.prism.is-dragging .face__skin {
-  box-shadow: none;
-}
-
-.prism.is-dragging {
-  transition: none;
-}
-
 /* ===== 八边形的一面 =====
- * 这一层只剩"几何 + 语义"：它在环上的位置、背面剔除、指针与可访问性。
+ * 这一层只剩几何：它在环上的位置与背面剔除。它已经不是可点元素（点面已去掉），
+ * 只是一张贴在环上的板子；指针唯一的作用是让正对镜头的那一面轻微倾斜（见 TiltCard）。
  * 之所以不留任何视觉、也不留 overflow —— 在 preserve-3d 里带裁剪的面会让
- * Chrome 的 3D 命中测试整片失效（实测容器转到 ∓90° 时八张卡全部点不动，
- * 连正视面自己都命中不到），裁剪因此全部下沉给皮肤层。
+ * Chrome 的 3D 命中测试整片失效，裁剪因此全部下沉给皮肤层。
  */
 .face {
   position: absolute;
   inset: 0;
   display: block;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  appearance: none;
   color: inherit;
-  font: inherit;
-  cursor: pointer;
   /* 面朝外立在这一圈的切向上；背面（对侧那四面）由 backface 直接抹掉。
      正视面另外向前推一截并放大 —— updatelog 那张"正在看"的卡就是这么立起来的：
      换面时旧面缩回、新面浮出，与整环的转动同一条时长，
      看上去是"环转到位 + 这一面被抽出来"，而不是八块板整体平移 */
   transform: rotateY(calc(var(--i) * var(--step-deg))) translateZ(var(--radius));
-  /* 按下时的收缩走独立 scale 属性：160ms 的快节奏，不被 720ms 的换面拖着走 */
-  scale: 1;
   backface-visibility: hidden;
   /* 这里绝对不能写 will-change: transform —— 它会把这一层的光栅化分辨率钉死在
      "建层那一刻"的尺寸上，而正对镜头的那一面还要被放大（scale × 透视）。
      于是它一直拿放大前的纹理放大着显示：动的时候浏览器每帧重建所以清楚，
      一停下来就回到那张不够大的纹理 —— 糊。八张卡里只有正中那张会被放大，
      所以也只有它会糊，而且正好是"停下才糊"。 */
-  transition:
-    transform var(--dur-run) var(--ease),
-    scale 160ms var(--ease);
+  transition: transform var(--dur-run) var(--ease);
 }
 
 /* 正对镜头的那一面：浮出。位移留在 3D 里（它本来就是"离眼睛更近"），
-   **但放大不写在这儿** —— 理由见下面 .face.is-front .face__skin。
-   它已经站在中间、没有可换的对象，所以不给"可点"的手型，改回抓取手势 */
+   **但放大不写在这儿** —— 理由见下面 .face.is-front .face__skin。 */
 .face.is-front {
   transform:
     rotateY(calc(var(--i) * var(--step-deg)))
     translateZ(calc(var(--radius) + 20px));
-  cursor: grab;
-}
-
-/* 点下去先收一下，松手才跳 —— updatelog 卡片的按下反馈。只在可点的那几面上给 */
-.face:not(.is-front):active {
-  scale: 0.97;
-}
-
-/* 但按下去之后如果是在拖（不是在点），这一下收缩要立刻撤掉：
-   拖拽是"抓住整圈在转"，卡片还缩着就像被捏住了。
-   选择器比上面那条更具体，所以覆盖得住；160ms 之内自己弹回去 */
-.screen__viewport.is-dragging .face:not(.is-front):active {
-  scale: 1;
-}
-
-/* 焦点环画在皮肤上：外框自己是透明的一层，画在它上面看不见 */
-.face:focus-visible .face__skin {
-  outline: 3px solid rgba(255, 255, 255, 0.92);
-  outline-offset: 2px;
 }
 
 /* 3D 倾斜壳：壳自己不设尺寸，这里把它撑满整面 */
@@ -1017,21 +853,22 @@ const folio = computed(() => at(face.value).no)
 .face__skin {
   position: relative;
   display: flex;
-  flex-direction: column;
+  /* 横版刊页：左边正文栏、右边图版栏 */
+  flex-direction: row;
   box-sizing: border-box;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.55);
   /* 圆角比基本页大得多：大屏上这八块板是主角，角形就是它的性格 */
-  border-radius: clamp(22px, 1.8vw, 30px);
+  border-radius: clamp(18px, 1.5vw, 30px);
   corner-shape: superellipse(2);
   background: var(--tint, #eeebe5);
   color: var(--ink);
   text-align: left;
-  /* 阴影模糊半径直接决定这一层纹理要向外扩多少（约三倍半径），
-     层纹理越大越容易被归进"该降级"的那一档 —— 所以这里的半径收得比较紧 */
-  box-shadow: 0 1px 4px rgba(4, 7, 11, 0.3), 0 10px 20px rgba(4, 7, 11, 0.34);
+  /* 阴影只留一级、半径收得很紧：抬起感交给"正对镜头"那一档，静止时版面要平。
+     模糊半径同时决定这一层纹理要向外扩多少（约三倍半径），收紧了也省绘制 */
+  box-shadow: 0 1px 3px rgba(6, 9, 13, 0.24);
   /* 阴影故意不进过渡列表：带超椭圆角形的层，每帧重画一遍模糊阴影是这里最贵的一笔
      （updatelog 的卡片踩过同一个坑，注释也写在那边）。换面时位移动画遮得住，
      直接切换看不出来，省下的是八张卡每帧一次的路径 + 模糊重算 */
@@ -1048,163 +885,292 @@ const folio = computed(() => at(face.value).no)
  * 皮肤是普通 2D 层，缩放它会让浏览器按缩放后的尺寸重新光栅化，字才立得住。 */
 .face.is-front .face__skin {
   transform: scale(1.03);
-  border-color: rgba(255, 255, 255, 0.84);
-  box-shadow: 0 2px 6px rgba(4, 7, 11, 0.34), 0 16px 34px rgba(4, 7, 11, 0.5);
+  border-color: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 2px 8px rgba(6, 9, 13, 0.28), 0 26px 64px rgba(6, 9, 13, 0.34);
 }
 
-/* 封面：出血铺满卡的上半部。
- * 高度交给 flex 吃满剩余空间而不是钉死 16:9：卡高是定值，钉死比例就会在
- * 只有一行描述的那几张卡里留下一大块空白。留一个 40% 的底，描述到三行时
- * 封面也还站得住。 */
-.face__shot {
+/* ===== 图版栏（右）=====
+ * 一块实机界面截图当"图版"，不是配图：
+ *   1) 自带窗框裁掉 —— 顶部 5.52% 是 Windows 标题栏，右侧还有滚动条与窗口描边；
+ *   2) 只留左边 72% —— 控制台的正文本来就都在左侧，右半边全是空黑；
+ *   3) 高度吃满整栏 —— 正文露在顶部，下面那片空黑一路铺到卡底，
+ *      整栏因此读成"一整块屏幕"，而不是贴在纸上的一张图。
+ * 裁切靠容器查询单位 cqw 换算：cqw 就是这一栏的宽度，所以窗口一改，
+ * 裁切跟着一起缩放，常数（--shot-keep / --shot-skip / --shot-ratio）不用动。 */
+.face__plate {
+  container-type: inline-size;
+  display: flex;
+  flex: 0 0 var(--plate-w);
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  gap: clamp(10px, 1.2vh, 16px);
+  min-width: 0;
+  /* 与正文栏之间那一道竖发丝：编辑版式的分栏线 */
+  padding: var(--card-pad) var(--card-pad) var(--card-pad) var(--col-gap);
+  border-left: 1px solid var(--rule-soft);
+}
+
+/* 图版本体：一个裁剪框，底色就是控制台的黑。
+   高度吃满整栏 —— 控制台正文本来就在顶部，下面那一大片空黑正好接着往下铺，
+   于是这一栏读起来就是"一整块屏幕"，而不是一张贴在纸上的小图。 */
+.face__frame {
   position: relative;
   display: block;
   flex: 1 1 auto;
-  min-height: 40%;
   overflow: hidden;
-  background: color-mix(in srgb, var(--tint) 72%, #fff);
-}
-
-.face__img {
-  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center;
+  min-height: 0;
+  border: 1px solid rgba(22, 21, 15, 0.14);
+  border-radius: clamp(10px, 0.9vw, 16px);
+  background: #0b0c0e;
 }
 
-/* 只在底部一段化进卡面色，图与文字之间不留硬边 */
-.face__shot::after {
-  content: '';
+/* 截图：宽度放大到 1/0.72，再往上顶掉标题栏那一截。
+   左边多推 0.25cqw，把窗口那 2px 亮边推出框外 */
+.face__shot {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    transparent 46%,
-    color-mix(in srgb, var(--tint) 58%, transparent) 82%,
-    color-mix(in srgb, var(--tint) 97%, transparent) 100%
-  );
+  left: -0.25cqw;
+  top: calc(-100cqw * var(--shot-skip) * var(--shot-ratio) / var(--shot-keep));
+  width: calc(100cqw / var(--shot-keep));
+  max-width: none;
+  height: auto;
 }
 
-.face__no {
-  position: absolute;
-  top: clamp(10px, 1.1vh, 14px);
-  right: clamp(12px, 1vw, 16px);
+/* 图注：图片是证据，得署名 —— 左边写它是什么，右边写它来自哪个版本 */
+.face__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   font-family: var(--mono);
-  font-size: clamp(11px, 0.72vw, 13px);
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.94);
-  text-shadow: 0 1px 7px rgba(8, 12, 18, 0.55);
+  font-size: clamp(11.5px, 0.78vw, 13px);
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+  white-space: nowrap;
 }
 
-/* 图标章骑在封面与文字的交界上：上面是图、下面是字，它正好把两边缝起来 */
-.face__chip {
-  position: absolute;
-  left: clamp(14px, 1.2vw, 20px);
-  bottom: 0;
-  translate: 0 46%;
-  display: grid;
-  place-items: center;
-  width: clamp(32px, 2.5vw, 40px);
-  height: clamp(32px, 2.5vw, 40px);
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  border-radius: 13px;
-  corner-shape: superellipse(2);
-  background: var(--paper);
-  color: color-mix(in srgb, var(--ink) 66%, var(--tint));
-  box-shadow: 0 4px 12px rgba(22, 21, 15, 0.18);
+.face__caption-app {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 卡面下半：标签 / 标题 / 一句话 / 状态行。按内容取高，剩下的全给封面 */
-.face__body {
+/* ===== 正文栏（左）=====
+ * 四段自上而下：眉标行 → 标题块 → 要点表 → 参数行。
+ * 卡高由 70vh 定死，这里用 space-between 把余量摊成留白 ——
+ * 版式靠留白呼吸，不靠装饰填满。 */
+.face__main {
   position: relative;
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: clamp(6px, 0.9vh, 10px);
-  min-height: 0;
-  /* 上内距要把骑缝的图标章让出来 */
-  padding: clamp(22px, 2.6vh, 32px) clamp(16px, 1.4vw, 22px) clamp(14px, 1.6vh, 18px);
+  justify-content: space-between;
+  box-sizing: border-box;
+  gap: clamp(16px, 2.2vh, 30px);
+  min-width: 0;
+  padding: var(--card-pad) 0 var(--card-pad) var(--card-pad);
 }
 
-.face__tag {
-  align-self: flex-start;
-  padding: 3px 10px;
-  border: 1px solid rgba(22, 21, 15, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.66);
+/* 眉标行：编号 / 图标 / 分类在左，"正在展示"在右，底下一道发丝线 */
+.face__eyebrow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 0.9vw, 16px);
+  padding-bottom: clamp(10px, 1.3vh, 18px);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+/* 编号是这一行的主角：等宽、表格数字，正面那一张转成墨黑，其余退成中墨 */
+.face__index {
+  flex: none;
   font-family: var(--mono);
-  font-size: clamp(10px, 0.68vw, 11.5px);
+  font-size: clamp(17px, 1.5vw, 26px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mute);
+  transition: color 320ms ease;
+}
+
+.face__index i {
+  font-style: normal;
+  font-size: 0.56em;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.face__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--ink-mute);
+  transition: color 320ms ease;
+}
+
+/* 分类不套胶囊：等宽大写 + 字距，就是编辑版式里的栏目名 */
+.face__tag {
+  flex: none;
+  font-family: var(--mono);
+  font-size: clamp(11.5px, 0.8vw, 14px);
   font-weight: 600;
-  letter-spacing: 0.14em;
-  color: rgba(22, 21, 15, 0.6);
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+}
+
+/* 状态行：靠右，与左边的编号形成两端对拉 */
+.face__state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: clamp(11.5px, 0.78vw, 13px);
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* 标题块：一句话的刊题 + 一段导语 */
+.face__lede {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.2vh, 18px);
+  min-width: 0;
 }
 
 .face__title {
-  /* 这一面的主角 */
-  font-size: clamp(21px, 1.85vw, 30px);
+  /* 这一面的主角：字重 700、字距收紧，字号跟着卡宽走 */
+  font-size: clamp(36px, 4vw, 76px);
   font-weight: 700;
-  line-height: 1.12;
-  letter-spacing: -0.01em;
+  line-height: 1.03;
+  letter-spacing: -0.03em;
   color: var(--ink);
 }
 
+/* 标题下的一根短线：不长的那么一笔，正面那一张才伸开并转成强调色 ——
+   这是"你正在看这一面"最克制的那个记号（不遮内容、不改变布局） */
+.face__title::after {
+  content: '';
+  display: block;
+  width: clamp(28px, 2.4vw, 44px);
+  height: 2px;
+  margin-top: clamp(12px, 1.4vh, 20px);
+  background: rgba(22, 21, 15, 0.26);
+  transition: width 520ms var(--ease), background-color 520ms ease;
+}
+
 .face__desc {
-  font-size: clamp(12px, 0.9vw, 14.5px);
-  line-height: 1.62;
-  color: rgba(22, 21, 15, 0.66);
-  /* 两到三行封顶：卡高就那么多，多出来的留给封面 */
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  -webkit-box-orient: vertical;
+  max-width: 30ch;
+  font-size: clamp(15px, 1.2vw, 22px);
+  line-height: 1.6;
+  text-wrap: pretty;
+  color: var(--ink-soft);
+}
+
+/* ===== 要点表 =====
+ * 卡面的"详细内容"：三条短句，每条一行，行间一道发丝线 ——
+ * 读起来是清单，看起来是版面，而不是又一坨灰字。 */
+.face__points {
+  flex: none;
+  display: block;
+}
+
+.face__point {
+  position: relative;
+  display: block;
+  /* 左内距让出小方点，上下按 vh 收：窗一矮，行距先紧一档 */
+  padding: clamp(7px, 1vh, 14px) 0 clamp(7px, 1vh, 14px) clamp(16px, 1.3vw, 22px);
+  font-size: clamp(14px, 1.12vw, 19px);
+  line-height: 1.4;
+  color: var(--ink-soft);
+  /* 一行封顶：清单的节奏靠"一行一条"，换行会当场把三条读成五条 */
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 状态行：贴到卡底，与 updatelog 卡里那行同一个位置、同一种语气 */
-.face__foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: auto;
-  padding-top: clamp(8px, 1.2vh, 12px);
+/* 小方点：四角形的那么一点点，正好压住每行的行首 —— 全卡唯一的纯装饰 */
+.face__point::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  rotate: 45deg;
+  background: color-mix(in srgb, var(--ink) 32%, transparent);
+  transition: background-color 320ms ease;
+}
+
+/* 行间发丝线：只加在第二、三条的上沿，清单的头一条不封口 */
+.face__point + .face__point {
   border-top: 1px solid var(--rule-soft);
-  font-size: clamp(11px, 0.76vw, 12.5px);
-  letter-spacing: 0.08em;
-  color: rgba(22, 21, 15, 0.56);
 }
 
+/* ===== 参数行 =====
+ * 三枚等宽小片，透明底 + 1px 描边，克制到只剩轮廓 ——
+ * 与上面的清单形成"散文 / 表格"两种读法。 */
+.face__specs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: clamp(6px, 0.6vw, 10px);
+  padding-top: clamp(10px, 1.3vh, 18px);
+  border-top: 1px solid var(--rule-soft);
+}
+
+.face__spec {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid rgba(22, 21, 15, 0.13);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: clamp(11.5px, 0.8vw, 14px);
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  transition: border-color 320ms ease, color 320ms ease;
+}
+
+/* ===== 信号点：眉标行右侧那枚小圆 ===== */
 .face__signal {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  border: 1.5px solid rgba(22, 21, 15, 0.4);
+  border: 1.5px solid rgba(22, 21, 15, 0.34);
   transition: box-shadow 300ms ease, background-color 300ms ease, border-color 300ms ease;
 }
 
+/* ===== 正对镜头的那一面 =====
+ * 微交互只做"状态确认"：不遮内容、不改布局、不动字号。
+ * 四处一起亮：信号点、编号、标题线、参数片描边。 */
 .face.is-front .face__signal {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 0 0 3px rgba(10, 89, 247, 0.16);
 }
 
-/* 出血巨型序号：z-index 负值让它落在卡背景之上、内容之下 */
-.face__mark {
-  position: absolute;
-  right: 0.06em;
-  bottom: -0.08em;
-  z-index: -1;
-  font-family: var(--mono);
-  font-size: clamp(64px, 5.4vw, 96px);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.05em;
-  font-variant-numeric: tabular-nums;
-  color: rgba(22, 21, 15, 0.07);
+.face.is-front .face__index {
+  color: var(--ink);
+}
+
+.face.is-front .face__title::after {
+  width: clamp(48px, 3.6vw, 68px);
+  background: var(--accent);
+}
+
+.face.is-front .face__point::before {
+  background: color-mix(in srgb, var(--ink) 62%, transparent);
+}
+
+.face.is-front .face__spec {
+  border-color: rgba(22, 21, 15, 0.26);
+  color: var(--ink-soft);
 }
 
 /* 暗纱：不朝镜头的那几面退到暗处，正面自然跳出来。随旋转淡入淡出 */
@@ -1223,32 +1189,26 @@ const folio = computed(() => at(face.value).no)
   opacity: 0;
 }
 
-@media (hover: hover) {
-  /* 悬停在侧面板上：先亮一点，告诉用户"这一面能点过来" */
-  .face:not(.is-front):hover .face__veil {
-    opacity: 0.1;
-  }
-}
-
-/* ===== 左右切换 ===== */
+/* ===== 左右切换 =====
+ * 与退出控件同一套语言：--ctrl 见方、8px 方角、1px 发丝、一层薄玻璃。
+ * 位置照旧是版心两端的竖直中线（左右各一枚，夹住舞台），
+ * 只是从"深色圆钮 + 白描边"换成了版面上的方角控件。 */
 .screen__nav {
   position: absolute;
   top: 50%;
   display: grid;
   place-items: center;
-  width: clamp(44px, 3.4vw, 54px);
-  height: clamp(44px, 3.4vw, 54px);
+  box-sizing: border-box;
+  width: var(--ctrl);
+  height: var(--ctrl);
   padding: 0;
   translate: 0 -50%;
-  border: 1px solid rgba(255, 255, 255, 0.26);
-  border-radius: 50%;
-  background: var(--glass);
+  border: 1px solid var(--ctrl-line);
+  border-radius: var(--ctrl-radius);
+  background: var(--ctrl-bg);
   color: var(--on-stage);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  box-shadow: 0 10px 26px rgba(4, 7, 11, 0.36);
   cursor: pointer;
-  transition: background-color 0.2s ease, scale 0.2s var(--ease);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .screen__nav--prev {
@@ -1259,16 +1219,21 @@ const folio = computed(() => at(face.value).no)
   right: 0;
 }
 
+/* 悬浮：翻成实纸底 + 墨字 —— 与退出控件同一个动作，三枚控件手感一致。
+   不放大：放大是"贴纸"的动作，版面上的控件只换明度。 */
 .screen__nav:hover {
-  background: rgba(10, 14, 20, 0.84);
+  background: var(--ctrl-bg-hover);
+  border-color: var(--ctrl-line-hover);
+  color: var(--on-accent);
 }
 
+/* 按下：轻收一下给按感，收回来的幅度比原来小一档（版面控件不表演） */
 .screen__nav:active {
   scale: 0.94;
 }
 
 .screen__nav:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, #fff);
   outline-offset: 3px;
 }
 
@@ -1276,38 +1241,25 @@ const folio = computed(() => at(face.value).no)
   display: block;
 }
 
-/* ===== 页脚 ===== */
-/* 三段等分：两侧各占掉同样多的弹性宽度，中间的指示条就严格落在屏幕中线上 */
+/* ===== 页脚 =====
+ * 页脚只剩进度条这一件东西。它绝对定位贴在版心下沿 —— 不进流，所以它自身的
+ * 尺寸变化（某一段悬浮时变厚）绝不会把上面的卡片顶动一位。 */
 .screen__foot {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  flex: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: clamp(18px, 3.4vh, 40px);
+  display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: clamp(10px, 1.6vh, 20px);
-  padding-top: clamp(10px, 1.4vh, 16px);
-  border-top: 1px solid var(--line);
-}
-
-.screen__ordinal {
-  justify-self: start;
-  margin: 0;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  letter-spacing: 0.14em;
-  font-variant-numeric: tabular-nums;
-  color: var(--on-stage-2);
-}
-
-.screen__ordinal b {
-  font-weight: 600;
-  color: var(--on-stage);
+  justify-content: center;
 }
 
 /* 指示器：每一段染上对应功能的那块纸色 —— 八段就是八张卡的缩略 */
 .meter {
   display: flex;
   align-items: center;
+  /* 高度钉死：某一段悬浮时 4px→6px 只在自己身上变厚，不撑高这一条、也不推走卡片 */
+  height: 6px;
   gap: 6px;
   margin: 0;
   padding: 0;
@@ -1367,46 +1319,54 @@ const folio = computed(() => at(face.value).no)
   outline-offset: 3px;
 }
 
-.screen__hint {
-  justify-self: end;
-  margin: 0;
-  font-size: 11.5px;
-  letter-spacing: 0.08em;
-  color: var(--on-stage-3);
-}
-
-/* ===== 关闭 ===== */
-.screen__close {
+/* ===== 退出控件 =====
+ * 它在 .screen__inner 的 padding 盒之外，所以必须自己去量那两档百分比
+ * —— 但量的是同一个 clamp()，右缘因此与版心右缘严格同一条竖线（实测 0px 偏差）。
+ * 纵向：与顶栏共用同一个 padding 起点、同一档高度，所以两者的上下沿与中线
+ * 天然重合（实测 0px 偏差）—— 看上去就是顶栏右端的那一格，不需要再补任何偏移。
+ * 形状与左右切换钮完全一致，只是宽一点：多了一枚「退出」小字标签。 */
+.screen__exit {
   position: absolute;
-  top: clamp(16px, 2.6vh, 32px);
+  top: clamp(18px, 3.4vh, 40px);
   right: clamp(18px, 4vw, 64px);
   z-index: 3;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 16px 9px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.26);
-  border-radius: 999px;
-  background: var(--glass);
+  gap: 0.55em;
+  box-sizing: border-box;
+  height: var(--ctrl);
+  padding: 0 clamp(12px, 1.05vw, 16px);
+  border: 1px solid var(--ctrl-line);
+  border-radius: var(--ctrl-radius);
+  background: var(--ctrl-bg);
   color: var(--on-stage);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  font-size: 12.5px;
+  font-family: var(--mono);
+  font-size: clamp(11px, 0.78vw, 12.5px);
+  font-weight: 500;
   letter-spacing: 0.1em;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background-color 0.2s ease, scale 0.2s var(--ease);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-.screen__close:hover {
-  background: rgba(10, 14, 20, 0.84);
+.screen__exit svg {
+  display: block;
 }
 
-.screen__close:active {
-  scale: 0.96;
+/* 悬浮：翻成实纸底 + 墨字（与切换钮同一个动作）。
+   退出是这块版面上唯一的"离场"动作，明度对比给足，一眼认得出按得动 */
+.screen__exit:hover {
+  background: var(--ctrl-bg-hover);
+  border-color: var(--ctrl-line-hover);
+  color: var(--on-accent);
 }
 
-.screen__close:focus-visible {
-  outline: 2px solid #fff;
+.screen__exit:active {
+  scale: 0.94;
+}
+
+.screen__exit:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, #fff);
   outline-offset: 3px;
 }
 
@@ -1424,78 +1384,100 @@ const folio = computed(() => at(face.value).no)
 }
 
 /* ===== 响应式 =====
- * 断点只调三样：面多大、列怎么分、哪些次要文字退场。
+ * 断点只调三样：两栏怎么分、留白多厚、哪些次要文字退场。
+ * 卡尺寸（80vw × 70vh）与整条字阶都由 vw 驱动，窄窗自己会缩，不必逐档重写。
  */
 @media (max-width: 1100px) {
   .screen {
-    --face-w: clamp(232px, 32vw, 400px);
-    --face-h: clamp(310px, 50vh, 470px);
+    /* 图版栏收窄一档：窄窗里正文栏得留出能读的行长 */
+    --plate-w: 52%;
+    --card-pad: clamp(18px, 2.6vw, 30px);
+    --col-gap: clamp(18px, 2.6vw, 30px);
+  }
+}
+
+@media (max-width: 900px) {
+  /* 窄屏改成一栏：图版在上、正文在下；两栏之间那道竖发丝换成横发丝 */
+  .face__skin {
+    flex-direction: column-reverse;
   }
 
-  .screen__headgrid {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  .face__plate {
+    /* 一栏布局里图版排在正文上面，高度可以被压 —— 卡矮时先让图版缩，
+       正文一个像素都不许被裁（column-reverse 下溢出会跑到卡顶上去） */
+    flex: 0 1 auto;
+    width: 100%;
+    min-height: 0;
+    padding: var(--card-pad) var(--card-pad) 0;
+    border-left: 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  /* 一栏布局里图版不再是"吃满高度"，给它一个由裁切比例定死、但可被压的高度 */
+  .face__frame {
+    flex: 0 1 auto;
+    min-height: 0;
+    aspect-ratio: calc(1958 * var(--shot-keep)) / var(--shot-band);
+  }
+
+  .face__main {
+    flex: 1 1 auto;
+    padding: var(--card-pad);
+  }
+
+  .face__desc {
+    max-width: none;
   }
 }
 
 @media (max-width: 767px) {
   .screen {
     /* 移动端本会话不纳入设计，这里只保证小窗不崩：
-       面宽按视口收一档，让左右两张切换钮落在卡片之外 */
-    --face-w: min(62vw, 300px);
-    --face-h: clamp(280px, 44vh, 372px);
+       卡高再收一档，把高度让给上下两行正文；顶栏那一条同样要还回去 */
+    --face-h: min(70vh, calc(100vh - 150px));
   }
 
+  /* 版心四边一起收窄。这里不能只写 padding: 14px 16px —— 底边那一档
+     带上了顶栏高度（见 .screen__inner 的注释），写平了会把版面又顶下去 */
   .screen__inner {
-    padding: 14px 16px 12px;
+    padding: 14px 16px calc(14px + var(--top-h) + var(--top-gap));
   }
 
-  /* 窄屏改成上下两行：右栏顶到刊题下面，导语不会被挤成一列窄条 */
-  .screen__headgrid {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    gap: clamp(6px, 1.2vh, 12px);
+  /* 页脚贴到小窗版的版心下沿 */
+  .screen__foot {
+    bottom: 14px;
   }
 
-  .screen__note {
-    align-items: flex-start;
-    align-self: auto;
-    text-align: left;
-    padding-right: 0;
-    padding-bottom: 0;
-    border-right: 0;
+  /* 退出钮的 y 与版心的 padding 起点同一条线（与顶栏同高，自然对齐） */
+  .screen__exit {
+    top: 14px;
   }
 
-  .screen__title {
-    font-size: clamp(28px, 8.4vw, 40px);
-  }
-
-  /* 手机上刊语与落款都退场，把高度全留给柱体 */
-  .screen__lede,
-  .screen__hint {
-    display: none;
-  }
-
-  .screen__close {
-    padding: 10px;
-    border-radius: 50%;
-  }
-
-  .screen__close-text {
-    display: none;
-  }
-
-  .screen__nav {
-    width: 44px;
-    height: 44px;
-  }
-
+  /* 小窗里一卡两行：导语按视口收一档，要点表与参数行照旧全在 ——
+     详细内容是这一版的主角，先让它站住 */
   .face__desc {
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+    max-width: none;
+    font-size: clamp(13px, 3.4vw, 17px);
+  }
+}
+
+/* 再窄一档：退出控件退回纯图标（版面已经没有地方放那两个字了）。
+   尺寸跟着变成正方，与切换钮一模一样；aria-label 与 title 一直都在，
+   读屏与悬浮提示不受影响。 */
+@media (max-width: 600px) {
+  .screen__exit {
+    width: var(--ctrl);
+    gap: 0;
+    padding: 0;
   }
 
-  .screen__folio {
-    font-size: clamp(104px, 34vw, 200px);
+  .screen__exit-text {
+    display: none;
+  }
+
+  .screen__label {
+    /* 小字在这里会折行、会跟退出钮挤在一起，整条收掉，发丝线留住 */
+    display: none;
   }
 }
 
@@ -1505,35 +1487,16 @@ const folio = computed(() => at(face.value).no)
  * 元素回落到的静态样式就是动画终态，交接处不跳变。
  * 两个不能碰的地方：柱体的堆叠姿态由 transform 写着 —— 入场只动 rotate / scale
  * 这两个独立属性；舞台那一层才做淡入（prism 上做 opacity 会把 preserve-3d 压平）。
+ * 顶栏是 v3 新加的一条：它先落位（横向发丝跟着从左侧展开），退出控件随后弹出。
  */
-.screen.is-entering .screen__kicker {
-  animation: enter-rise var(--enter-dur-kicker) var(--ease) both;
-  animation-delay: var(--enter-kicker);
+.screen.is-entering .screen__top {
+  animation: enter-rise var(--enter-dur-top) var(--ease) both;
+  animation-delay: var(--enter-top);
 }
 
-.screen.is-entering .screen__title {
-  animation: enter-rise var(--enter-dur-title) var(--ease) both;
-  animation-delay: var(--enter-title);
-}
-
-.screen.is-entering .screen__note {
-  animation: enter-rise var(--enter-dur-meta) var(--ease) both;
-  animation-delay: var(--enter-meta);
-}
-
-.screen.is-entering .screen__mark {
-  animation: enter-fade var(--enter-dur-meta) ease both;
-  animation-delay: var(--enter-kicker);
-}
-
-.screen.is-entering .screen__rule {
-  animation: enter-rule var(--enter-dur-title) var(--ease) both;
-  animation-delay: var(--enter-meta);
-}
-
-.screen.is-entering .screen__close {
-  animation: enter-pop var(--enter-dur-close) var(--ease) both;
-  animation-delay: var(--enter-close);
+.screen.is-entering .screen__exit {
+  animation: enter-pop var(--enter-dur-exit) var(--ease) both;
+  animation-delay: var(--enter-exit);
 }
 
 /* 舞台做淡入（它不是 3D 上下文元素，安全），柱体在它里面摆正 */
@@ -1557,21 +1520,11 @@ const folio = computed(() => at(face.value).no)
   animation-delay: calc(var(--enter-nav) + var(--enter-nav-step));
 }
 
-.screen.is-entering .screen__ordinal {
-  animation: enter-rise var(--enter-dur-ordinal) var(--ease) both;
-  animation-delay: var(--enter-ordinal);
-}
-
 .screen.is-entering .meter__seg {
   /* 段本身靠宽度表达"正对镜头"，入场用横向展开，不去动宽度 */
   transform-origin: center;
   animation: enter-piece var(--enter-dur-meter) var(--ease) both;
   animation-delay: calc(var(--enter-meter) + var(--m-i, 0) * var(--enter-meter-step));
-}
-
-.screen.is-entering .screen__hint {
-  animation: enter-rise var(--enter-dur-hint) var(--ease) both;
-  animation-delay: var(--enter-hint);
 }
 
 @keyframes enter-fade {
@@ -1580,17 +1533,6 @@ const folio = computed(() => at(face.value).no)
   }
   to {
     opacity: 1;
-  }
-}
-
-@keyframes enter-rise {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
   }
 }
 
@@ -1605,14 +1547,15 @@ const folio = computed(() => at(face.value).no)
   }
 }
 
-@keyframes enter-rule {
+/* 顶栏：从下方浮起半行 + 淡入，与 features 页刊头的小字同一种"落位"姿态 */
+@keyframes enter-rise {
   from {
     opacity: 0;
-    transform: scaleX(0);
+    translate: 0 0.45em;
   }
   to {
     opacity: 1;
-    transform: none;
+    translate: 0 0;
   }
 }
 
@@ -1668,10 +1611,15 @@ const folio = computed(() => at(face.value).no)
   .face__skin,
   .face__veil,
   .face__signal,
+  .face__index,
+  .face__icon,
+  .face__spec,
+  .face__point::before,
+  .face__title::after,
   .screen__nav,
-  .screen__close,
-  .meter__seg,
-  .screen__folio {
+  .screen__top,
+  .screen__exit,
+  .meter__seg {
     transition: none;
     animation: none;
   }
