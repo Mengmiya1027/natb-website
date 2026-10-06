@@ -52,13 +52,16 @@
  *          一卡一纸色（沿用八色纸感色），墨字四档全部按 WCAG AA 反推。
  *          微交互只做"状态确认"，从不遮蔽内容（要点与参数在八面上都看得见）。
  *          控件（顶栏与三枚）是同一套方角语言：等尺寸、1px 发丝、只翻明度不缩放。
- * D2 网格  横版刊页：卡片 ≥ 80vw × 70vh。左「正文栏」/ 右「图版栏」，中间一道竖发丝；
- *          正文栏自上而下四段：眉标行 → 标题块 → 要点表 → 参数行。
+ * D2 网格  横版刊页：卡片 ≥ 80vw × 70vh。左「正文栏」/ 右「图版栏」；
+ *          v5 起两栏之间不再画竖发丝（图版满幅，它自己的边就是分界），
+ *          且分界线比原先靠左一档（--plate-w 60%：图版占右 60%）。
+ *          正文栏自上而下四段：眉标行 → 标题块 → 要点表 → 参数行；v5 起眉标行只剩余左端一组
+ *          （右端那枚"正在展示"状态位已下线）。
  * D3 字阶  全部随卡片宽度走（vw）：标题 clamp(36,4vw,76) / 导语 clamp(15,1.2vw,22)
  *          / 要点 clamp(14,1.12vw,19) / 编号 mono clamp(17,1.5vw,26)
  *          / 栏目名·参数片 mono clamp(11.5,0.8vw,14) / 图注·状态 mono clamp(11.5,0.78vw,13)。
  * D4 颜色  纸：八色纸感色，每面一块。墨：--ink / --ink-soft / --ink-mute（三档全过 AA）。
- *          舞台：深墨蓝渐变 + 一团冷光。强调色只用在"正在展示"的信号点与标题线。
+ *          舞台：深墨蓝渐变 + 一团冷光。强调色只用在标题线（"正对镜头"那个记号）。
  * D5 图版  实机截图裁掉自带窗框（Windows 标题栏 + 右侧滚动条），正文留在顶部，
  *          黑底一路铺到卡底，配一枚等宽图注 —— 它是证据，不是配图。
  * D6 动效  曲线 cubic-bezier(.22,1,.36,1)；换面 720ms（连击 ×0.5）；
@@ -66,6 +69,100 @@
  * D7 无障碍  正文对比度 ≥ 4.5:1、大字 ≥ 3:1；焦点环 2px（--accent 混白）+ 3px 外扩；
  *          八面皆不接指针与点击，翻面控件只有箭头、进度条与键盘；换面时 aria-live 播报
  *          导语 + 要点 + 参数。
+ *
+ * ── 设计系统（v4 · 现代极简：把 v3 的取舍收成一套可度量的系统）───────────────
+ * v3 已经把语言立住了（纸感八色 + 墨字 + 深墨蓝舞台 + 编辑刊页网格），
+ * 缺的是"可度量"：发丝线、圆角、阴影、字阶、曲线、时长大量散落在各条规则里写字面量，
+ * 改一处要满文件找；侧面板那层 30% 的暗纱又把最小一号文字（栏目名 / 图注 / 状态行）
+ * 压到 4.5:1 以下；控件描边只有约 1.8:1（WCAG 1.4.11 要 3:1）；
+ * 响应式那一档的注释里自己写着"移动端本会话不纳入设计"。
+ *
+ * v4 只做四件事，一个功能都不动：
+ *
+ * V1 系统化  分隔线 / 圆角 / 阴影 / 字阶 / 曲线 / 时长 / 焦点环在 .screen 上各定一条阶梯，
+ *            下面全部引用；阶梯本身的取值理由写在 token 块里。
+ * V2 对比度  --ink-mute 压深一档（#5d574c → #4f4a41）给暗纱腾出余量；暗纱从"整卡压黑 30%"
+ *            改成"正文栏几乎不动、图版栏压到 42%"的横向渐变 —— 文字对比度回升，
+ *            截图照样退到后面（图形本来不需要 4.5:1）；控件描边 0.22 → 0.40（≥3:1）；
+ *            --on-stage-3 0.48 → 0.58。每一档的实测值都写在对应规则的注释里。
+ * V3 克制    投影半径 64px → 28px、级数由三降到二，正面那张另补一道 1px 内高光
+ *            （纸的上沿受光）；舞台由"上亮下暗"改成"上下深、中间一条亮带"，
+ *            卡片于是读成"落在一条光带上"，而不是"浮在渐变色里"。
+ * V4 响应式  767px 那一档按真机重做（不再是"不崩就行"）：字号改用 9vw 起跳的阶梯、
+ *            要点表允许折行（窄屏上宁可两行，也不让一条要点被省略号吃掉）、
+ *            进度条触控热区撑到 30px（WCAG 2.5.8 要 24px）、底边带上安全区。
+ *
+ * ── v5 · 两处结构调整（其余全部沿用 v4 的设计系统）───────────────────────
+ * V5-1 **卡片的背景**不再是一块纯色纸。把这一面自己的封面（features 基本页那套
+ *      cover，public/images/features/cover）重度模糊（blur 26px + saturate 1.2）
+ *      垫在纸底下，再压一层该面的纸色暗纱（--wash，0.72）：纸还是那张纸
+ *      （八色识别码不丢、墨字 AA 也守得住），但封面的颜色与纹理从纸里透出来，
+ *      八张卡各有各的质地。见 .face__wash。
+ *      配套地，原来铺在半透明纸上的 --shot-* 截图不受影响（它有自己的黑底）。
+ *      注：页面背景仍是 v4 那套「上下压深、中间一条亮带」（.screen__glow）——
+ *      一度把整屏背景换成封面模糊，那是看错了对象，要换的是卡片不是页面。
+ * V5-2 图版从「贴在纸上的一张图」改成「卡片右侧那一整块屏」：去掉 .face__frame
+ *      （框、圆角、内边距全部取消），截图直接顶到卡片右上右下三边，裁切交给卡片
+ *      自己的 overflow 与圆角。图注随之改成压在画面底部的署名条（自带暗渐变）。
+ *      裁切常数与 cqw 换算一个字没改，所以 72% / 5.52% 那套仍然成立。
+ *
+ * ── v6 · 重点项（一处新增，其余全部沿用 v5）─────────────────────────────
+ * 要求：卡面上的「介绍」（要点表）与「标签」（参数行）里，至少各有一个重点项，
+ * 样式是蓝底 + 圆角 + 阴影 + 白字。
+ *
+ * 落点按"两侧说同一件事"来挑（数据里的 focus，见 FEATURES 上方那段注释）：
+ * 要点表里那一条与参数行里那一枚指向同一个事实，蓝块因此读成一句话的强调，
+ * 而不是两处随手点的记号。八面各一条 / 各一枚，不多不少 —— 重点一旦遍地都是，
+ * 就等于没有重点。
+ *
+ * 样式取的是**已有的三样东西**，没有引入新语言：
+ *   蓝     = --accent（#0a59f7，就是正面那条标题线用的强调色）；
+ *   圆角   = --r-sm（10px），与参数片、控件同一条阶梯；
+ *   阴影   = 一道收紧的投影（级数照旧是二，与 --shadow-rest / --shadow-front 同一口径）。
+ * 白字压在 #0a59f7 上是 5.55:1（AA 要 4.5:1），蓝块本身对最暗的那块纸（紫藤）
+ * 是 4.20:1（非文本 UI 要 3:1）—— 两档都在线上。
+ *
+ * 要点表那一行的方点转成白色留在原位（清单记号不因换底色而消失），上沿那道发丝线
+ * 留着占位（只改透明）是为了不跳 1px；蓝块**下侧**那一道行间线则整个抹掉 ——
+ * 它会在阴影里再叠出一条分界。字重随之升到 700：蓝底上的白字比纸上的墨字轻，
+ * 加一档配重才顶得住"重点"这两个字。
+ * v6.1: white dot kept, no rule below the key block, weight 700
+ *
+ * 不变式（v4 / v5 一条都没碰，改这个文件前仍然必须先读）：
+ *   · .prism 上不许落 overflow / opacity / filter / clip-path —— preserve-3d 会当场降级；
+ *   · 入场动画只动 rotate / scale，绝不碰 .prism 的 transform；
+ *   · 放大只写在 .face__skin 上（写进 .face 的 3D transform 里，停下来就糊）；
+ *   · 换面仍然只有箭头 / 滚轮 / 方向键 / 进度条四条路，退出仍然只有 Esc 与那枚控件；
+ *   · aria-live 播报、连击加速、prefers-reduced-motion 整批退化，全部保留。
+ *
+ * ── v7 · 换面动画的性能（只动性能，静止态的画面一律不动）─────────────────
+ * 症状：整圈转 45° 那 720ms 掉帧严重。实测口径 = 生产构建 + Intel Iris Xe /
+ * ANGLE D3D11 + CDP trace，**页内交替 A/B**（同一浏览器实例、交替注入还原样式、
+ * 多轮取中位、每轮热身 3 次）—— 跨进程比较的噪声会盖掉 20% 级的差异，
+ * 不要用那种口径下结论（这一轮踩过：同一份代码单点换面在 30～60fps 之间乱跳）。
+ *
+ * 五笔账，逐笔处理（下面括号里的数字都是那个口径实测）：
+ * V7-1 恒等 mask   --seam 关闭时 --seam-curve 直接给 none（见那条 token 注释）。
+ *      恒等 mask 一样是一层渲染表面，八个图版每帧各过一遍，而它一个像素都没改。
+ * V7-2 模糊缓存    .face__wash 加 will-change: filter。blur(10px) 的绘制面积是
+ *      整张卡的 1.28² ≈ 1.64 倍、八面各一层，换面时每帧重算一遍是最大的一笔
+ *      （单点换面里约 23% 帧预算）。缓存之后每帧只是把那张模糊图贴上去。
+ *      唯一代价：静止态的模糊纹理与之前差 1–2 个色阶（实测平均 0.5/255；最大通道差
+ *      67 只出现在极少数高对比边缘像素上），肉眼不可见。换成"只在换面期间加"
+ *      表面更好，但撤销缓存层要重新光栅化八张卡、动画收尾会顿一下，所以选择常驻。
+ * V7-3 状态确认过渡  换面时 is-front 挪位，十来处颜色/描边过渡同时起跑，连击时
+ *      又全都在被打断、重启 —— 实测占掉一半以上的绘制
+ *      （单点 raster 78.7→23.5ms、paint 170.3→66.1ms、缺帧 9→1）。这些过渡的语义
+ *      是"确认卡片正对镜头"，所以在动的这一档里关掉（见 .is-turning 那组选择器），
+ *      静止期一条不少 —— 指针 hover 的微交互手感完全没动。
+ * V7-4 指针跟随    换面期间冻结 TiltCard：它每帧写一次 transform，而那个宿主正在
+ *      整圈转动里，一次写入就让整面重新光栅化。走完 --dur-run 再交还。
+ *      顺带把 aria-live 改成防抖播报 —— 连击时读屏本来也播不过来。
+ * V7-5 暗纱时长    veil 与图版暗纱的过渡改成 min(--t-5, --dur-run)：单点仍是 420ms
+ *      （节奏不变），连击时不再比换面还长（420ms > 360ms 那一版会互相叠）。
+ *
+ * 角形（corner-shape）是最大的单项开销，账单独记在 .face__skin 上方 ——
+ * "换面期间切成正圆"确实能到满帧，但看得到角形跳变，**已回滚**。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -117,14 +214,24 @@ const TINTS = [
  * 裁切参数（--shot-keep / --shot-skip / --shot-band）在下面的样式里，一处定义。
  */
 const SHOT_DIR = import.meta.env.BASE_URL + 'images/features/screenshot/'
-/* 截图里窗口标题栏写着版本号，图注照抄 —— 9008 那张是 fix1 版 */
-const WIN = 'NewAndroidToolBox 1.0.3'
-const WIN_FIX1 = 'NewAndroidToolBox 1.0.3fix1'
+/* 封面（v5）：与 features 基本页同一套资源（public/images/features/cover），
+ * 文件名与功能同名。卡面上的图版照旧用实机截图，而**整屏背景**改用这张封面
+ * 重度模糊之后的色与纹理 —— 换面时背景跟着换，于是"每个功能有自己的空气"
+ * 这件事在背景上就读得出来，而不是八面共用一潭纯色。 */
+const COVER_DIR = import.meta.env.BASE_URL + 'images/features/cover/'
+/* 版本号（NewAndroidToolBox 1.0.3 / fix1）原先作为图注右端署名进卡面。
+ * 按要求撤掉了：图面上不再出现产品版本号，只留一句「实机界面」。
+ * 数据与常量一并删除，不留没人用的字段 —— 版本号本来就写在截图自带的标题栏里，
+ * 而那道标题栏在裁切时已经被裁掉了。 */
 
-/* 每一面四样东西：
+/* 每一面五样东西：
  *   desc   —— 沿用 features 基本页那句话，口径一致；
  *   points —— 三条一行读得完的要点，是这一面的"详细内容"；
  *   specs  —— 三枚关键参数，只放最硬的事实；
+ *   focus  —— 重点项（v6）：要点表里挑第几条、参数行里挑第几枚（都是 0 起），
+ *             被挑中的那一项在卡面上转成蓝底白字（见 .is-key）。
+ *             两侧刻意指向**同一件事**（如"实时修补 BOOT" ↔ "BOOT 修补"），
+ *             于是读起来是一句被加强的话，而不是两处互不相干的高亮；
  *   shot   —— 实机界面截图，图版栏那块。
  * 要点与参数都从 desc 长出来，不新增没有依据的指标；改文案只动这一处数据。 */
 const FEATURES = [
@@ -132,81 +239,81 @@ const FEATURES = [
     icon: IconShieldKeyhole,
     tag: 'ROOT',
     shot: 'root.webp',
-    win: WIN,
     title: '一键ROOT',
     desc: '支持Z2-Z11全系列机型一键ROOT，实时修补BOOT，安全稳定。',
     points: ['覆盖 Z2–Z11 全系列机型', '实时修补 BOOT，开机即生效', '一键全自动，不必手敲命令'],
     specs: ['Z2–Z11', 'BOOT 修补', '全自动'],
+    focus: { point: 1, spec: 1 }, // 实时修补 BOOT ↔ BOOT 修补
   },
   {
     icon: IconCloudDownload,
     tag: 'OTA',
     shot: 'ota.webp',
-    win: WIN,
     title: '离线OTA升级',
     desc: '支持离线OTA升级解决验证异常。',
     points: ['离线包升级，不挑网络环境', '解决验证异常，升级可正常完成', '无需第三方工具，NATB 内完成'],
     specs: ['离线包', '免网络', '验证修复'],
+    focus: { point: 1, spec: 2 }, // 解决验证异常 ↔ 验证修复
   },
   {
     icon: IconLayers,
     tag: 'RTOS',
     shot: 'rtos.webp',
-    win: WIN,
     title: 'RTOS支持',
     desc: '支持Z7Pro、Z9a等RTOS系统手表。',
     points: ['Z7Pro、Z9a 等 RTOS 机型', '与 Android 机型同一套界面', '连接即识别，不必额外装驱动'],
     specs: ['Z7Pro', 'Z9a', 'RTOS'],
+    focus: { point: 0, spec: 2 }, // Z7Pro、Z9a 等 RTOS 机型 ↔ RTOS
   },
   {
     icon: IconWidget,
     tag: 'APP',
     shot: 'appmanager.webp',
-    win: WIN,
     title: '应用管理',
     desc: '多种安装方式，总有一种适合您。',
     points: ['install / data 两条直装通道', '第三方安装器与 install-create', '列表内直接卸载与清理'],
     specs: ['install', 'data', 'install-create'],
+    focus: { point: 1, spec: 2 }, // 第三方安装器与 install-create ↔ install-create
   },
   {
     icon: IconCpuBolt,
     tag: 'EDL',
     shot: '9008.webp',
-    win: WIN_FIX1,
     title: '9008刷机',
     desc: '9008模式刷入Recovery/TWRP，备份与恢复。',
     points: ['9008 通道刷入 Recovery / TWRP', '分区备份与恢复并排管理', '不进系统也能救回变砖设备'],
     specs: ['9008', 'Recovery', 'TWRP'],
+    focus: { point: 0, spec: 0 }, // 9008 通道刷入 Recovery / TWRP ↔ 9008
   },
   {
     icon: IconMagicStick,
     tag: 'MODULE',
     shot: 'magisk.webp',
-    win: WIN,
     title: 'Magisk模块',
     desc: 'Magisk模块安装、卸载、列表管理，更方便地享受模块的乐趣。',
     points: ['本地模块一键安装与卸载', '模块清单随时查看与开关', '不必反复重刷，玩得更安心'],
     specs: ['安装', '卸载', '列表管理'],
+    focus: { point: 0, spec: 0 }, // 本地模块一键安装与卸载 ↔ 安装
   },
   {
     icon: IconFolderFiles,
     tag: 'FILES',
     shot: 'filemanager.webp',
-    win: WIN,
     title: '文件管理',
     desc: '摒弃传统的ADB方案与文件管理器，直接在NATB内管理文件，省心省力。',
     points: ['内置文件树，直读手表存储', '上传、下载、删除同在一处', '告别命令行与第三方管理器'],
     specs: ['免 ADB', '内置文件树', '上传下载'],
+    focus: { point: 0, spec: 1 }, // 内置文件树，直读手表存储 ↔ 内置文件树
   },
   {
     icon: IconScreenShare,
     tag: 'MIRROR',
     shot: 'scrcpy.webp',
-    win: WIN,
     title: '投屏控制',
     desc: 'scrcpy投屏控制，手表屏幕实时投影到电脑。',
     points: ['scrcpy 实时投屏，画面即时同步', '电脑端鼠标直接操作手表', '连线即可用，不必额外配置'],
     specs: ['scrcpy', '实时投屏', '鼠标接管'],
+    focus: { point: 0, spec: 0 }, // scrcpy 实时投屏，画面即时同步 ↔ scrcpy
   },
 ].map((item, index) => ({
   ...item,
@@ -215,6 +322,8 @@ const FEATURES = [
   tint: TINTS[index % TINTS.length],
   /* 图版地址：截图目录 + 与功能同名的文件 */
   plate: SHOT_DIR + item.shot,
+  /* 背景封面：封面目录 + 同一个文件名 */
+  cover: COVER_DIR + item.shot,
 }))
 
 /* ===== 八边形几何 =====
@@ -287,6 +396,11 @@ const index = ref(props.initial)
 const face = computed(() => ((index.value % N) + N) % N)
 const at = (i) => FEATURES[i]
 
+/* ===== 背景封面：两层轮流（v5）=====
+ * 换面时把新封面写进"当前没在显示的那一层"，再把它切到前台 —— 两层互相淡入淡出。
+ * 之所以只有两层：全屏 blur 是这一页最贵的一笔绘制，八张各留一层等于八张全屏纹理
+ * 常驻显存；两层互相顶替就够，且淡入淡出正好与整圈转动同一条时长。
+ * 初次挂载两层都写同一张，第一帧就不会从空白淡进来。 */
 /* ===== 连击加速 =====
  * 一次换面的过渡还没走完就又切，说明用户在快速连翻。这时若仍按 720ms 起跑，
  * 每次打断都恰好落在强缓动的慢尾巴上，越点越"一卡一卡"；所以只把连击这一路
@@ -307,10 +421,32 @@ function noteSwitch(force = false) {
 /* ===== 换面 ===== */
 const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 
+/* ── v7 · 换面期间冻结指针跟随 ──────────────────────────────────────────
+ * TiltCard 每帧往宿主上写一次 transform；而换面时那个宿主正在整圈转动里，
+ * 这一次写入就让整面内容重新光栅化一遍 —— 与转动叠加，正是最坏的那一帧。
+ * 可换面的 720ms 里卡片本来就在转，那 2.5° 的微仰没人看得见，
+ * 所以换面期间直接停掉跟随，走完 --dur-run 再交还：
+ * 静止态与改动前完全一致（姿态照旧跟着指针走，光斑照旧亮）。
+ * 窗口按当前节奏算 —— 连击是半速，冻结也少一半。 */
+const RUN_MS = 720 // 与样式里的 --dur 同值
+const turning = ref(false)
+let turnTimer = 0
+
+function holdPointer() {
+  if (reduceMotion) return
+  turning.value = true
+  clearTimeout(turnTimer)
+  turnTimer = window.setTimeout(() => {
+    turning.value = false
+    turnTimer = 0
+  }, RUN_MS * (combo.value ? COMBO_K : 1) + 20)
+}
+
 function step(delta) {
   if (!delta) return
   finishEntrance()
   noteSwitch()
+  holdPointer()
   index.value += delta
 }
 
@@ -419,6 +555,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (enterTimer) clearTimeout(enterTimer)
+  if (turnTimer) clearTimeout(turnTimer)
+  if (liveTimer) clearTimeout(liveTimer)
   window.removeEventListener('keydown', onKeydown)
 })
 
@@ -428,6 +566,23 @@ const announce = computed(() => {
      转过来的这一面说了什么，得由这一行播报补全。 */
   return `正在展示 ${item.no} / ${TOTAL_NO} ${item.title}：${item.desc}要点：${item.points.join('；')}。参数：${item.specs.join('、')}`
 })
+
+/* ── v7 · 播报防抖 ─────────────────────────────────────────────────────
+ * 原来是 announce 直接绑在 aria-live 上：连击时每 100 多毫秒就刷一次文本，
+ * 读屏会被刷屏（它本来就播不过来），而无障碍树的更新又正好落在换面最紧张的那几帧上。
+ * 现在停在最后一次换面上再播一次 —— 单点换面只晚 240ms，读起来反而更准。 */
+const live = ref('')
+let liveTimer = 0
+watch(
+  announce,
+  (text) => {
+    clearTimeout(liveTimer)
+    liveTimer = window.setTimeout(() => {
+      live.value = text
+    }, 240)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -436,7 +591,7 @@ const announce = computed(() => {
     <div
       v-if="open"
       class="screen"
-      :class="{ 'is-entering': entering }"
+      :class="{ 'is-entering': entering, 'is-turning': turning }"
       :style="[ringVars, enterVars, { '--dur-k': combo ? COMBO_K : 1 }]"
       role="dialog"
       aria-modal="true"
@@ -477,7 +632,7 @@ const announce = computed(() => {
                      不是把整面晃出去。 -->
                 <TiltCard
                   class="face__shell"
-                  :disabled="face !== i"
+                  :disabled="face !== i || turning"
                   :max-tilt="2.5"
                   :perspective="1500"
                   :scale="1"
@@ -488,6 +643,15 @@ const announce = computed(() => {
                   :glare-size="120"
                 >
                   <span class="face__skin">
+                    <!-- ── 卡片自己的背景（v5）：这一面的封面，模糊之后垫在纸底下。
+                         它只负责"质地"，纸色与墨字对比度仍由暗纱 + --tint 顶着，
+                         所以它铺在最下层、不接指针、也不参与任何 3D 变换 ── -->
+                    <span
+                      class="face__wash"
+                      :style="{ backgroundImage: `url(${item.cover})` }"
+                      aria-hidden="true"
+                    ></span>
+
                     <!-- ── 左：正文栏。编辑版式四段，自上而下：眉标 → 标题块 → 要点 → 参数 ── -->
                     <span class="face__main">
                       <span class="face__eyebrow">
@@ -496,10 +660,6 @@ const announce = computed(() => {
                           <component :is="item.icon" width="19" height="19" />
                         </span>
                         <span class="face__tag">{{ item.tag }}</span>
-                        <span class="face__state">
-                          <span class="face__signal" aria-hidden="true"></span>
-                          <span>{{ face === i ? '正在展示' : '转到这一面' }}</span>
-                        </span>
                       </span>
 
                       <span class="face__lede">
@@ -508,26 +668,43 @@ const announce = computed(() => {
                       </span>
 
                       <!-- 要点表：三条短句，靠左侧一枚小方点定位。一律用 span ——
-                           这一面整个是 <button>，只收 phrasing 内容 -->
+                           这一面整个是 <button>，只收 phrasing 内容。
+                           v6：focus.point 指到的那一条转成蓝底白字（重点项） -->
                       <span class="face__points">
-                        <span v-for="line in item.points" :key="line" class="face__point">{{ line }}</span>
+                        <span
+                          v-for="(line, pi) in item.points"
+                          :key="line"
+                          class="face__point"
+                          :class="{ 'is-key': pi === item.focus.point }"
+                        >
+                          {{ line }}
+                        </span>
                       </span>
 
-                      <!-- 参数行：三枚等宽小片，只放最硬的三条事实 -->
+                      <!-- 参数行：三枚等宽小片，只放最硬的三条事实。
+                           v6：focus.spec 指到的那一枚转成蓝底白字（重点项） -->
                       <span class="face__specs">
-                        <span v-for="spec in item.specs" :key="spec" class="face__spec">{{ spec }}</span>
+                        <span
+                          v-for="(spec, si) in item.specs"
+                          :key="spec"
+                          class="face__spec"
+                          :class="{ 'is-key': si === item.focus.spec }"
+                        >
+                          {{ spec }}
+                        </span>
                       </span>
                     </span>
 
-                    <!-- ── 右：图版栏。实机界面截图，自带窗框在样式里裁掉 ── -->
+                    <!-- ── 右：图版栏（v5 起满幅无框）。截图直接顶到卡片的右上右下三边：
+                         没有框、没有圆角、没有内边距，裁切交给卡片自己的 overflow 与圆角。
+                         裁掉的是"截屏"的味道（Windows 窗框 + 右侧滚动条），
+                         留下的是"一整块屏幕"。图注改成压在画面底部的署名条。 ── -->
                     <span class="face__plate">
-                      <span class="face__frame">
+                      <span class="face__shotwrap">
                         <img class="face__shot" :src="item.plate" alt="" draggable="false" decoding="async" />
                       </span>
-                      <span class="face__caption">
-                        <span>实机界面</span>
-                        <span class="face__caption-app">{{ item.win }}</span>
-                      </span>
+                      <!-- 图注：只剩这一句，靠右贴在画面下沿（版本号已按要求撤掉） -->
+                      <span class="face__caption"><span>实机界面</span></span>
                     </span>
 
                     <!-- 侧面板退到暗处，正对镜头的那一面才是亮的 -->
@@ -574,7 +751,7 @@ const announce = computed(() => {
         <span class="screen__exit-text">退出</span>
       </button>
 
-      <p class="screen__sr" aria-live="polite">{{ announce }}</p>
+      <p class="screen__sr" aria-live="polite">{{ live }}</p>
     </div>
   </Teleport>
 </template>
@@ -595,14 +772,98 @@ const announce = computed(() => {
 .screen {
   /* ── 纸与墨：卡面这一套直接沿用 features 基本页的墨色 ── */
   --ink: #16150f;
-  --rule-soft: rgba(22, 21, 15, 0.09);
+
+  /* ── 发丝线三档（v4）──
+     全页的分隔线、描边都从这三档取，规则里不再写字面量：
+       0.10 = 版面结构线（眉标底、要点行间、参数行上沿、两栏之间那道竖线）
+       0.16 = 有实体的框的轮廓（图版框、参数片）
+       0.30 = 正在展示那一面的强调轮廓
+     v4 之前那枚 --rule-soft（0.09）已经全部并进 --rule-hair，旧名不再保留 */
+  --rule-hair: rgba(22, 21, 15, 0.1);
+  --rule: rgba(22, 21, 15, 0.16);
+  --rule-strong: rgba(22, 21, 15, 0.3);
+
+  /* ── 圆角阶梯（v5 · 走"圆"这一侧）──
+     8 / 10 / 26–52 / 999：参数片 8 → 控件 10 → 卡片 26–52 → 进度条胶囊 999。
+     这一版把方向纠正过来了：之前 18–30 与之后的 6–10 / 12–18 都仍然偏硬，
+     26 都被嫌生硬，所以基准线定在 26 之上、一路给到 52（1600 宽屏下约 48px）。
+     同时去掉 corner-shape: superellipse —— squircle 的转角比正圆更"饱满"，
+     同样的半径看着更方，那正是把角压硬的东西；"往圆的方向"最字面的答案
+     就是正圆弧（corner-shape 默认值 round）。
+     小元件同步松一档，免得 8px 的参数片跟 48px 的卡片互相打架。 */
+  --r-xs: 8px;
+  --r-sm: 10px;
+  --r-lg: clamp(26px, 3vw, 52px);
+  --r-full: 999px;
+
+  /* ── 阴影两级 + 一道纸的上沿受光（v4）──
+     v3 正面那层是 0 26px 64px：模糊半径一大，这一层纹理就要向外扩约三倍半径去重绘，
+     八张卡每帧都在算这笔账。v4 收到 28px、级数降到二 —— 抬起感改由
+     "内高光 + 亮边 + 放大 3%"承担，版面上反而更平。
+     侧面板照旧零阴影：站出来的只能是正对镜头的那一张 */
+  --shadow-rest: 0 1px 2px rgba(4, 7, 11, 0.22);
+  --shadow-front: 0 1px 2px rgba(4, 7, 11, 0.26), 0 10px 28px rgba(4, 7, 11, 0.34);
+  --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+
+  /* ── 重点项（v6）──
+     卡面上唯一一处"实心色块"：要点表里那一条 + 参数行里那一枚（见 FEATURES 的 focus）。
+     三样取值全部从已有的系统里取，没有引入新语言：
+       蓝 = --accent（#0a59f7）/ 白字 / 圆角 --r-sm（10px，与参数片、控件同一条阶梯）。
+     阴影是一道收紧的两级投影，只是把范围换成强调色 —— 它要让蓝块"贴"在纸上，
+     而不是浮出一圈灰。
+     实测：白字压蓝 5.55:1（AA 正文要 4.5:1）；蓝块对最暗的那块纸（紫藤 #e2deee）
+     4.2:1（非文本 UI 的 3:1 也过）。 */
+  --key-bg: var(--accent);
+  --key-ink: #fff;
+  --key-r: var(--r-sm);
+  --key-shadow: 0 1px 2px rgba(4, 7, 11, 0.18), 0 8px 20px color-mix(in srgb, var(--accent) 34%, transparent);
+
+  /* ── 点阵间距（v6.3）──
+     --dot-gap 是"点与字之间的距离"，同时也是"点的左内边距"：一个值，三处消费 ——
+       ① .face__point 的左内距 = 点左内距 + 点宽(5px) + 点字距离 = 2×gap + 5px；
+       ② .face__point::before 的 left = gap（点不再贴在块左缘，左侧真的有了一段内边距）；
+       ③ .face__main 的左内距减去 gap，正文栏其余各段再用 margin-left 加回 gap ——
+          标题 / 导语 / 眉标 / 参数行的落点因此一个像素都不动。
+     取值就是改前的点字距离（clamp(16px,1.3vw,22px) - 7px），所以点与字之间的距离没变；
+     唯一的变化是原来那 2px 的 left 偏移并进了内距，要点这一组整体左移 2px。 */
+  --dot-gap: calc(clamp(16px, 1.3vw, 22px) - 7px);
+
+  /* ── 字阶（v4）──
+     八个台阶，全页字号只从这里取：
+       micro 刊头 / note 图注·状态 / meta 栏目名·参数片 / ctrl 控件标签 /
+       body 要点 / num 编号 / lede 导语 / display 标题
+     前四阶随 vw 走（卡片宽度就是版面宽度），后四阶的上下限卡在"大屏可读"与"小屏不溢"之间。
+     行高与字距跟着台阶走：display 收得更紧（1.02 / -0.035em）标题才立得住 */
+  --fs-micro: clamp(9.5px, 0.66vw, 11.5px);
+  --fs-note: clamp(11.5px, 0.78vw, 13px);
+  --fs-meta: clamp(11.5px, 0.8vw, 14px);
+  --fs-ctrl: clamp(11px, 0.78vw, 12.5px);
+  --fs-body: clamp(14px, 1.12vw, 19px);
+  --fs-num: clamp(17px, 1.5vw, 26px);
+  --fs-lede: clamp(15px, 1.2vw, 22px);
+  --fs-display: clamp(36px, 4vw, 76px);
+  --lh-display: 1.02;
+  --lh-lede: 1.58;
+  --lh-body: 1.4;
+  --tr-display: -0.035em;
+  --tr-wide: 0.2em;
+  --tr-note: 0.08em;
+
+  /* ── 焦点环（v4）──
+     全页只有一枚：三枚控件与八段进度条共用同一条。
+     底色是深墨蓝，强调色混白之后才在舞台上有足够亮度；3px 外扩保证焦点环不贴住描边 */
+  --ring: color-mix(in srgb, var(--accent) 70%, #fff);
+  --ring-w: 2px;
+  --ring-gap: 3px;
 
   /* ── 舞台：深墨蓝，图版从这里浮出来 ── */
   --stage: rgb(40, 50, 61);
   --stage-deep: rgb(15, 21, 28);
-  --on-stage: #f2f5f8;
-  --on-stage-2: rgba(242, 245, 248, 0.74);
-  --on-stage-3: rgba(242, 245, 248, 0.48);
+  --on-stage: #f4f7fa;
+  /* v4：三档一起上调。--on-stage-3 只用在刊头那个斜杠上，v3 的 0.48 实测约 3.9:1 ——
+     它落在文字行里，就按正文口径要 4.5:1，抬到 0.58 得约 6.4:1 */
+  --on-stage-2: rgba(244, 247, 250, 0.78);
+  --on-stage-3: rgba(244, 247, 250, 0.58);
   --line: rgba(255, 255, 255, 0.16);
   --accent: #0a59f7;
 
@@ -613,25 +874,43 @@ const announce = computed(() => {
   --top-h: clamp(34px, 4vh, 40px);
   --top-gap: clamp(12px, 1.7vh, 18px);
   --ctrl: var(--top-h);
-  --ctrl-radius: 8px;
+  --ctrl-radius: var(--r-sm);
   --ctrl-bg: rgba(255, 255, 255, 0.055);
   --ctrl-bg-hover: var(--on-stage);
-  --ctrl-line: rgba(255, 255, 255, 0.22);
+  /* v4：0.22 在舞台中段实测约 1.8:1 —— 1.4.11 对"控件的视觉边界"要 3:1，
+     抬到 0.40 得约 3.5:1。悬浮那一档翻成实纸底，本来就有 14:1，不必再抬 */
+  --ctrl-line: rgba(255, 255, 255, 0.4);
   --ctrl-line-hover: var(--on-stage);
   /* 悬浮翻成实纸底时的字色：与 features 页的墨黑同值 */
   --on-accent: #16150f;
 
   /* ── 纸与墨（卡面）：一卡一纸色，墨字三档 ──
-     三档都按"最深的那块纸色"（紫藤 #e2deee）反推过 WCAG AA，实测最低 5.3:1：
-     ink 正文标题 / ink-soft 导语、要点、参数 / ink-mute 栏目名、图注、状态。
-     小字不做第四档浅灰 —— 浅到 4.5:1 以下就不是"层级"，是读不清。 */
+     三档都按"最深的那块纸色"（紫藤 #e2deee，L=0.746，八块里最暗的一块）反推 WCAG AA：
+       ink       正文标题            静止 13.9:1
+       ink-soft  导语、要点、参数     静止 7.5:1
+       ink-mute  栏目名、图注、状态   静止 6.7:1
+     v4 把 ink-mute 从 #5d574c 压深到 #4f4a41：v3 那层 0.3 的暗纱底下，它实测只有 3.0:1
+     （AA 线是 4.5）；即便只留 0.12 的通铺，老值也只有 4.2:1。压深之后是 5.2:1，回到线上。
+     小字不做第四档浅灰：浅到 4.5:1 以下就不是"层级"，是读不清。 */
   --ink-soft: #46433b;
-  --ink-mute: #5d574c;
+  --ink-mute: #4f4a41;
 
   --font-latin: ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace;
 
+  /* ── 曲线与时长（v4）──
+     曲线只两条：--ease 给"位面级"的整圈转动（换面、柱体姿态），
+     --ease-out 给"元素级"的控件与微交互（起手快、收尾极缓）。
+     时长七档，每一档都有明确用途，下面的规则里不再出现裸毫秒值：
+       1 按下 / 2 悬浮 / 3 状态换色 / 4 尺寸形变 / 5 层级明暗 / 6 强调线 / dur 整圈换面 */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-1: 120ms;
+  --t-2: 180ms;
+  --t-3: 260ms;
+  --t-4: 340ms;
+  --t-5: 420ms;
+  --t-6: 560ms;
   --dur: 720ms;
   /* 连击时按这个倍数缩短。单点仍是 --dur 原节奏，真正生效的时长统一走 --dur-run */
   --dur-k: 1;
@@ -658,7 +937,7 @@ const announce = computed(() => {
   /* ── 刊页网格：一卡两栏 ── */
   --card-pad: clamp(22px, 2.3vw, 44px);
   --col-gap: clamp(22px, 2.4vw, 52px);
-  --plate-w: 56%;
+  --plate-w: 60%;
   /* 图版裁切三常数：只留左边 72%（控制台正文都在左侧）、跳过自带标题栏 5.52%；
      --shot-ratio 是源图的高/宽，用来把"跳过的比例"换算成像素。
      --shot-band 只在窄屏（一栏布局）里给图版一个固定高度，宽屏下图版吃满整栏 */
@@ -666,6 +945,35 @@ const announce = computed(() => {
   --shot-skip: 0.0552;
   --shot-band: 620;
   --shot-ratio: 0.5363;
+
+  /* ── 卡片自己的两个可调档（v5）──
+     --wash 纸色暗纱的不透明度：越大越接近原来的纯色纸（封面透出来越少）；
+     --seam 正文与图版之间那道渐变的宽度（旋钮可调，0 = 硬边）。
+     宽度踩过三次坑，记在这里：
+       ① 58px 线性渐变 —— 纸色铺在近黑截图上，是一团脏雾；
+       ② 8px 蒙版 + 纸上压深 —— 纸上先脏一块，接缝上又夹出一条发亮的棱线；
+       ③ 现在：宽度 44px，并且蒙版走**缓动曲线**（见 --seam-curve）。
+     病根是"线性"：线性渐变的首尾一定有折点，眼睛看得见从哪开始、到哪结束，
+     那就是雾感与硬感共同的来源；缓动把折点抹掉，才是一条真的过渡。 */
+  --wash: 0.72;
+  /* 接缝：**已关闭**（0 = 纸与图版之间是干净的硬边）。
+     这块前后试了三版（58px 线性 = 脏雾 / 8px + 纸上压深 = 脏块 + 亮棱 / 44px 缓动曲线），
+     都不合意，于是整体退回硬边。机械留着：把 0 改成一个宽度（比如 44px）就重新打开，
+     曲线本身没删（见下面两条 --seam-curve）。 */
+  --seam: 0px;
+
+  /* 接缝的两条缓动曲线（横版用 --seam-curve，一栏布局用 --seam-curve-y）。
+     六个档位 0 → .06 → .22 → .5 → .8 → 1，两端平、中间陡 —— 就是一条 S 曲线。
+     定义在这里而不是各个元素上，是为了让图版层与图注共用同一条曲线，
+     两处的淡出才对得齐。 */
+  /* v7 · 接缝关闭时曲线直接给 none。
+     恒等 mask 一样是"一层渲染表面"：换面时八个图版每帧都要各自过一遍蒙版，
+     实测约占 8% 的帧预算，而它此刻一个像素都没改（全黑 = 全不透明）。
+     要重新打开接缝：把上面的 --seam 改成宽度，再把下面两条换回 linear-gradient
+     —— 原定义是 90deg / 0deg 两条六档缓动（transparent 0 → .06 → .22 → .5
+     → .8 → #000，各档位置 = var(--seam) 的 0 / .18 / .38 / .6 / .82 / 1）。 */
+  --seam-curve: none;
+  --seam-curve-y: none;
 
   position: fixed;
   inset: 0;
@@ -685,14 +993,16 @@ const announce = computed(() => {
   pointer-events: none;
 }
 
-/* 舞台正中一团冷光把柱体托住；再往下压深，柱体才像"站在"地上 */
+/* ===== 背景（v4 口径恢复）=====
+ * 舞台回到 v4：上下压深、中间一条亮带，卡片落在光带上。
+ * （v5 一度把整屏背景换成封面模糊 —— 那是我看错了对象：要换的是**卡片**的背景，
+ *   不是页面的。这一层因此原样退回 v4，封面改用在卡片自己身上，见 .face__wash。） */
 .screen__glow {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(52% 44% at 50% 46%, rgba(158, 188, 222, 0.2), rgba(158, 188, 222, 0) 72%),
-    radial-gradient(120% 90% at 50% 24%, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 62%),
-    linear-gradient(180deg, var(--stage) 0%, var(--stage-deep) 100%);
+    radial-gradient(52% 44% at 50% 48%, rgba(158, 188, 222, 0.16), rgba(158, 188, 222, 0) 72%),
+    linear-gradient(180deg, var(--stage-deep) 0%, var(--stage) 46%, var(--stage-deep) 100%);
 }
 
 /* ===== 顶部一条（版心行）=====
@@ -721,9 +1031,9 @@ const announce = computed(() => {
   gap: 0.5em;
   margin: 0;
   font-family: var(--mono);
-  font-size: clamp(9.5px, 0.66vw, 11.5px);
+  font-size: var(--fs-micro);
   font-weight: 500;
-  letter-spacing: 0.2em;
+  letter-spacing: var(--tr-wide);
   text-transform: uppercase;
   white-space: nowrap;
   /* 顶栏字是"版面上的记号"，不是要读的正文：--on-stage-2 一档刚好 */
@@ -845,6 +1155,51 @@ const announce = computed(() => {
      会按更高的像素密度光栅化它 —— 正对"动画期间清楚、停下就糊"这个症状：
      动画期间每帧重建所以清楚，停下来改从缓存的纹理取，密度不够就糊。 */
   backface-visibility: hidden;
+  /* ── v7 · 试过把投影挪到这一层：**不可行，已回滚**（记在这里免得再走一遍）──
+     动机是好的：.face__skin 带 scale(1.03) 的换面过渡，正离开 / 正进入的那两张卡
+     每帧重新光栅化，挂在它身上的投影就每帧陪着重算一遍模糊（实测占 20% 帧预算）。
+     但这一层是 preserve-3d 容器（.tilt 写着 transform-style: preserve-3d），
+     在它身上落 border-radius + corner-shape 会让浏览器为圆角裁剪建一层渲染表面，
+     3D 上下文当场降级 —— 实测 single 从 39.7fps 掉到 25.2fps，
+     去掉圆角后立刻回到 45.8fps。投影因此留在 .face__skin 上（见那一条）。 */
+}
+
+/* ── v7 · 角形（corner-shape）这条性能账，记在这里 ──────────────────────
+ * `corner-shape: superellipse(2)`（squircle）的角不是圆弧，而是一条要数值解出来的
+ * 路径；换面时八张卡每帧都要重新光栅化，这条路径也就每帧重算一遍。
+ * 它是整个换面动画里最大的单一开销（实测数据见下）。
+ *
+ * 试过、并且**已经否决**的做法：在换面的 720ms 里把角形退回正圆弧。
+ *   实测确实有效 —— 单点 53.4 → 60.0fps、缺帧 93 → 8、重绘准备 135.8 → 60.1ms，
+ *   但**切换本身看得见**：换面第一帧八张卡的角形一起跳一下，用户当场指出"很明显"。
+ *   角形不是能淡入淡出的属性，切换必然是一帧硬跳，所以这条路封死。
+ *
+ * 现在的取舍：保持 squircle 常驻，换面时为此多付这一笔。
+ * 如果哪天愿意把**静止态**的圆角也定成正圆弧（v4 的 token 注释里本来就写着
+ * "去掉 corner-shape: superellipse，正圆弧才是圆"），把那两条 corner-shape 删掉即可 ——
+ * 那是不必切换、也没有突变的一劳永逸解法（实测 60fps 满帧）。
+ * 注意：**不要在换面期间切换它**（见上）。
+ */
+
+/* ── v7 · 换面期间收起"状态确认"的过渡 ─────────────────────────────────
+ * 换面时 is-front 从一个面挪到另一个面，那一面上的十来处状态确认
+ * （编号转墨、标题线伸长、参数片描边加深、要点的点提色……）会同时开始各自的过渡。
+ * 单点换面时它们在 720ms 里各自走完，看着正常；连击时全都在被打断、重启 ——
+ * 实测这一批过渡占掉换面动画一半以上的绘制：
+ *   单点  raster 78.7 → 23.5ms、paint 170.3 → 66.1ms、缺帧 9 → 1
+ *   连击  raster 34.3 → 13.1ms、paint  86.9 → 34.9ms
+ * 而它们的作用本来就是"状态确认"，确认的时机是卡片**正对镜头**的时候，
+ * 不是它刚开始转的时候 —— 所以只在动的这一档里关掉；
+ * 静止期（也就是指针真正 hover 上去的时候）一条不少地留着。 */
+.screen.is-turning .face__point,
+.screen.is-turning .face__point::before,
+.screen.is-turning .face__spec,
+.screen.is-turning .face__index,
+.screen.is-turning .face__tag,
+.screen.is-turning .face__icon,
+.screen.is-turning .face__desc,
+.screen.is-turning .face__title::after {
+  transition: none;
 }
 
 /* 皮肤：这一面所有看得见的东西 —— 底色、描边、圆角、投影都在它身上，
@@ -859,20 +1214,47 @@ const announce = computed(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  /* 圆角比基本页大得多：大屏上这八块板是主角，角形就是它的性格 */
-  border-radius: clamp(18px, 1.5vw, 30px);
+  /* ── 边框：鸿蒙式「光从上往下打」（v5）──
+     不是均匀的一条 rgba 描边，而是把边框本身做成一道自上而下的光。
+     但**必须有一层打底**：我第一版只用了那道光，下沿衰减到 0.14，
+     结果卡片的下边缘直接消失在深色舞台里 —— 看着像"卡片没有底"。
+     所以现在是三层背景叠在同一个盒上：
+       ① padding-box 铺纸色
+       ② border-box 铺那道光（上近纯白 → 78% 处归零）
+       ③ border-box 再铺一层均匀的 0.34 打底 —— 光衰减到零之后，
+          四边仍然有 0.34 的描边把卡片框住
+     配合内高光（--shadow-edge）与"上紧下松"的投影，才读得出"光从上面来"。 */
+  border: 1px solid transparent;
+  background-image:
+    linear-gradient(var(--tint, #eeebe5), var(--tint, #eeebe5)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.85) 0%,
+      rgba(255, 255, 255, 0.25) 40%,
+      rgba(255, 255, 255, 0) 78%
+    ),
+    linear-gradient(rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.34));
+  background-origin: border-box;
+  background-clip: padding-box, border-box, border-box;
+  /* v4 起走 --r-lg，与参数片、控件同属一条阶梯。
+     v5 把方向纠正到"圆"这一侧：26–52（宽屏约 48px），并且去掉 superellipse ——
+     正圆弧才是"圆"，squircle 在同样半径下更饱满、看着更方 */
+  border-radius: var(--r-lg);
   corner-shape: superellipse(2);
-  background: var(--tint, #eeebe5);
   color: var(--ink);
   text-align: left;
   /* 阴影只留一级、半径收得很紧：抬起感交给"正对镜头"那一档，静止时版面要平。
      模糊半径同时决定这一层纹理要向外扩多少（约三倍半径），收紧了也省绘制 */
-  box-shadow: 0 1px 3px rgba(6, 9, 13, 0.24);
+  box-shadow: var(--shadow-rest);
   /* 阴影故意不进过渡列表：带超椭圆角形的层，每帧重画一遍模糊阴影是这里最贵的一笔
-     （updatelog 的卡片踩过同一个坑，注释也写在那边）。换面时位移动画遮得住，
-     直接切换看不出来，省下的是八张卡每帧一次的路径 + 模糊重算 */
-  transition: transform var(--dur-run) var(--ease), border-color 420ms ease;
+     （updatelog 的卡片踩过同一个坑，注释也写在那边）。换面时整圈转动遮得住，
+     直接切换看不出来。
+     v7 注：试过把它挪到 .face__shell 去躲开 scale 过渡带来的每帧重算，结果更糟
+     （preserve-3d 容器上加圆角会降级 3D，见 .face__shell 那条注释）——
+     这一笔目前只能留着，它是换面动画里第二大的一笔固定开销。 */
+  /* 边框现在是一道渐变（见上面 background-image），没有 border-color 可过渡 ——
+     换面时它瞬间切换，正好被整圈转动那 720ms 遮住，看不出来 */
+  transition: transform var(--dur-run) var(--ease);
   transform: scale(1);
 }
 
@@ -885,46 +1267,143 @@ const announce = computed(() => {
  * 皮肤是普通 2D 层，缩放它会让浏览器按缩放后的尺寸重新光栅化，字才立得住。 */
 .face.is-front .face__skin {
   transform: scale(1.03);
-  border-color: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 2px 8px rgba(6, 9, 13, 0.28), 0 26px 64px rgba(6, 9, 13, 0.34);
+  /* 正对镜头那一张：打底与那道光各提一档（上沿拉到纯白，四边也更清楚） */
+  background-image:
+    linear-gradient(var(--tint, #eeebe5), var(--tint, #eeebe5)),
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      rgba(255, 255, 255, 0.34) 40%,
+      rgba(255, 255, 255, 0) 78%
+    ),
+    linear-gradient(rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0.46));
+  background-origin: border-box;
+  background-clip: padding-box, border-box, border-box;
+  /* v4：两级 + 一道内高光（纸的上沿受光）。半径由 64px 收到 28px：
+     抬起感不再靠"一大团模糊"，改由"亮边 + 内高光 + 放大 3%"三样合起来表达 */
+  box-shadow: var(--shadow-front), var(--shadow-edge);
 }
 
-/* ===== 图版栏（右）=====
- * 一块实机界面截图当"图版"，不是配图：
+/* ===== 卡片自己的背景（v5）：封面模糊 + 纸色暗纱 =====
+ * 卡片原来是一块纯色纸（--tint 八色之一）。现在把**这一面自己的封面**
+ * （features 基本页那套 cover，public/images/features/cover）重度模糊之后垫在底下，
+ * 再压一层该面的纸色暗纱：纸还是那张纸（八色识别码不丢、墨字对比度也守得住），
+ * 但它不再是一块死色 —— 封面的颜色与纹理从纸里透出来，八张卡各有各的质地。
+ *
+ * 两个几何注意点：
+ *   1) inset 取负值：blur 会把自身边缘一起化开，不外扩的话四边会露出一圈透明；
+ *   2) 它铺在最下层（DOM 里第一个子元素，且后面几层都是定位元素），
+ *      所以既不遮字、也不影响 .face__plate 的满幅截图。
+ * 为什么不在页面背景上做：那是我一度看错了对象（要换的是卡片，不是页面）。 */
+.face__wash {
+  position: absolute;
+  inset: -14%;
+  background-position: center;
+  background-size: cover;
+  filter: blur(10px) saturate(1.2);
+  /* ── v7 · 模糊结果缓存（换面动画最大的一笔）──
+     blur(10px) 的绘制面积是整张卡的 1.28² ≈ 1.64 倍，八面各一层。
+     换面时每张卡都要重新光栅化，这层模糊就会跟着每帧重算一遍 ——
+     实测这一项独占约 23% 的帧预算。
+     will-change: filter 让它成为独立的渲染表面：模糊只在内容/尺寸变化时算一次，
+     换面期间每帧只是把那张缓存好的模糊图贴上去。
+     它不会把卡片"锁"在低分辨率上（那是 will-change: transform 的毛病，见 .face__shell）：
+     这一层本来就是重模糊，分辨率对它没有意义。 */
+  will-change: filter;
+}
+
+/* 纸色暗纱：压在封面上，把墨字拉回 AA。再叠一道自上而下的光 —— 这是"光从上面来"
+   落在纸面上的那半句（边框那半句在 .face__skin 上）。
+   0.72 是"纸的质地看得见、字又读得清"的那一档；
+   逐面实测值见 audit-cardbg.json（每面取卡片左边距那块空纸的真实像素）。
+   这道光只会把纸往亮里推，墨字对比度只会更高，不会更低。 */
+.face__wash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 28%),
+    var(--tint, #eeebe5);
+  opacity: var(--wash, 0.72);
+}
+
+/* ===== 图版栏（右）· v5 起满幅无框 =====
+ * 一块实机界面截图当"图版"，不是配图。v5 把它从"贴在纸上的一张图"改成
+ * "卡片右侧那一整块屏幕"：不要框、不要圆角、不要内边距，截图直接顶到卡片的
+ * 右上右下三边，裁切交给卡片自己的 overflow 与圆角 —— 右半边于是真的读成一块屏。
+ *
+ * 裁掉的是"截屏"的味道，留下的还是那张证据：
  *   1) 自带窗框裁掉 —— 顶部 5.52% 是 Windows 标题栏，右侧还有滚动条与窗口描边；
  *   2) 只留左边 72% —— 控制台的正文本来就都在左侧，右半边全是空黑；
- *   3) 高度吃满整栏 —— 正文露在顶部，下面那片空黑一路铺到卡底，
- *      整栏因此读成"一整块屏幕"，而不是贴在纸上的一张图。
+ *   3) 高度吃满整栏 —— 正文露在顶部，下面那片空黑一路铺到卡底。
  * 裁切靠容器查询单位 cqw 换算：cqw 就是这一栏的宽度，所以窗口一改，
  * 裁切跟着一起缩放，常数（--shot-keep / --shot-skip / --shot-ratio）不用动。 */
 .face__plate {
+  position: relative;
   container-type: inline-size;
-  display: flex;
   flex: 0 0 var(--plate-w);
-  flex-direction: column;
-  justify-content: center;
-  box-sizing: border-box;
-  gap: clamp(10px, 1.2vh, 16px);
   min-width: 0;
-  /* 与正文栏之间那一道竖发丝：编辑版式的分栏线 */
-  padding: var(--card-pad) var(--card-pad) var(--card-pad) var(--col-gap);
-  border-left: 1px solid var(--rule-soft);
+  overflow: hidden;
+  /* 底色交给 .face__shotwrap —— 这一层要留透明，蒙版的淡出段才能透出卡片自己的纸 */
+  background: transparent;
+  /* 图版与正文栏交界那一侧的两个角给一档小圆角（v6.4）：黑屏的左角变圆之后，
+     圆角处透出来的是卡片自己的纸色 ——「纸与屏」这条分界在上下两端才收得住。
+     取值走 --r-sm（10px），与参数片、控件同一档；右侧两角不动（它们顶到卡片边，
+     由卡片自己的 --r-lg 负责）。overflow 一直是 hidden，所以内部绝对定位的截图
+     与图注会一起被裁出这个圆角。 */
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+  corner-shape: superellipse(2);
 }
 
-/* 图版本体：一个裁剪框，底色就是控制台的黑。
-   高度吃满整栏 —— 控制台正文本来就在顶部，下面那一大片空黑正好接着往下铺，
-   于是这一栏读起来就是"一整块屏幕"，而不是一张贴在纸上的小图。 */
-.face__frame {
-  position: relative;
-  display: block;
-  flex: 1 1 auto;
+/* ===== 正文栏 → 图版：那道渐变（v5，第三版）=====
+ * 前两版都不对，记在这里免得再走回去：
+ *   ① 58px 线性渐变：纸色铺在近黑截图上，读起来是一团脏雾；
+ *   ② 8px 蒙版 + 纸上压深：纸上先脏一块、接缝上又夹出一条发亮的棱线
+ *      （压深区与蒙版透出的纸亮度不一致），最后仍是硬黑。
+ *
+ * 这一版只做一件事：**把蒙版做成带缓动的平滑曲线**。
+ * 线性渐变的首尾一定有折点，眼睛看得见"从哪开始、到哪结束"，那就是雾感的来源；
+ * 多档缓动（0 → .06 → .22 → .5 → .8 → 1）把折点抹掉，从纸到图版才是一条真的过渡。
+ * 宽度由 --seam 给（默认 44px，旋钮可调，0 = 硬边）。
+ * 纸侧的压深那层已删除 —— 它是①和②共同的病根。
+ *
+ * 为什么不往图上盖一层纸色：卡片有封面纹理，纸的颜色是混合出来的，盖色配不准；
+ * 蒙版让下面卡片的纸原样透上来，过渡处的颜色天然就是纸的颜色。
+ * 侧面板那层暗纱挂在这一层上，所以它跟着一起淡出，不会在纸上压出暗带。 */
+.face__shotwrap {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  width: 100%;
-  min-height: 0;
-  border: 1px solid rgba(22, 21, 15, 0.14);
-  border-radius: clamp(10px, 0.9vw, 16px);
   background: #0b0c0e;
+  -webkit-mask-image: var(--seam-curve);
+  mask-image: var(--seam-curve);
 }
+
+/* 侧面板的截图退到暗处（v5）：暗纱只压图版，不压卡片 —— 图形本来就不受 1.4.3 的
+   4.5:1 约束，文字那半边因此一个字都不用动。它挂在这个蒙版层上，
+   所以淡出段里它也跟着淡出（不会在纸上压出一道暗带），并且盖在截图之上 ——
+   侧面连署名条一起退后。0.42 是那一档"看得清是张界面截图、但一眼知道它不是主角" */
+.face__shotwrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgb(6, 9, 13);
+  opacity: 0.42;
+  pointer-events: none;
+  /* v7 · 与换面时长同步（见 .face__veil 那条注释）：单点仍是 420ms 不动，
+     连击换面只有 360ms 时这一档跟着收短，不再拖着上一段的尾巴。 */
+  transition: opacity min(var(--t-5), var(--dur-run)) ease;
+}
+
+.face.is-front .face__shotwrap::after {
+  opacity: 0;
+}
+
+/* （v5 第三版删掉了这里的一层：原先在正文栏右缘压一道 20px 的暗渐变当"折痕"。
+ *  它有两个害处：纸上先脏一块；而且它的压深区与蒙版透出的纸亮度不一致，
+ *  正好在接缝上夹出一条发亮的棱线 —— 纸色没变，人眼却看见一条凸起。
+ *  过渡全部交给图版那条缓动蒙版，纸这一侧保持干净。） */
 
 /* 截图：宽度放大到 1/0.72，再往上顶掉标题栏那一截。
    左边多推 0.25cqw，把窗口那 2px 亮边推出框外 */
@@ -937,23 +1416,38 @@ const announce = computed(() => {
   height: auto;
 }
 
-/* 图注：图片是证据，得署名 —— 左边写它是什么，右边写它来自哪个版本 */
+/* 图注：图片是证据，得署名 —— 左边写它是什么，右边写它来自哪个版本。
+   v5 起压在画面底部（原来是框下面的一行，框没了，署名就跟着进画面）：
+   一条自下而上的暗渐变压住字，无论底下的截图是亮是暗都读得清；
+   字也换成舞台那三档，不再是纸上的墨字 */
 .face__caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  /* 只剩一句署名了，靠右贴 —— 原来两端对拉（左"实机界面"、右版本号），
+     版本号撤掉之后没必要再拉开 */
+  justify-content: flex-end;
   gap: 12px;
+  padding: clamp(28px, 4vh, 56px) var(--card-pad) calc(var(--card-pad) * 0.7);
+  background: linear-gradient(180deg, rgba(6, 9, 13, 0) 0%, rgba(6, 9, 13, 0.72) 46%, rgba(6, 9, 13, 0.92) 100%);
   font-family: var(--mono);
-  font-size: clamp(11.5px, 0.78vw, 13px);
-  letter-spacing: 0.08em;
-  color: var(--ink-mute);
+  font-size: var(--fs-note);
+  letter-spacing: var(--tr-note);
+  color: var(--on-stage-2);
   white-space: nowrap;
+  /* 它自己那道底衬渐变是个矩形 —— 左缘是硬边，会正好压在接缝上，
+     于是卡片最下面那一段"没有渐变"（上面的过渡到这里被盖掉了）。
+     给它上同一条缓动曲线，底衬与文字一起在接缝这一侧淡出，
+     整条接缝从顶到底才是同一条过渡。 */
+  -webkit-mask-image: var(--seam-curve);
+  mask-image: var(--seam-curve);
 }
 
-.face__caption-app {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* （原 .face__caption-app 是右端版本号的省略号规则，随版本号一起去掉了） */
 
 /* ===== 正文栏（左）=====
  * 四段自上而下：眉标行 → 标题块 → 要点表 → 参数行。
@@ -968,29 +1462,45 @@ const announce = computed(() => {
   box-sizing: border-box;
   gap: clamp(16px, 2.2vh, 30px);
   min-width: 0;
-  padding: var(--card-pad) 0 var(--card-pad) var(--card-pad);
+  /* 上边距比左右收一档：卡面右上角那块是满幅的图版，上留白跟左边一样厚的话，
+     眉标行会被压得太低（"卡片上边距过大"）。下半仍是整档 card-pad ——
+     参数行要贴着卡底，上下不对称是有意的。 */
+  padding: calc(var(--card-pad) * 0.5) 0 var(--card-pad) calc(var(--card-pad) - var(--dot-gap));
 }
 
-/* 眉标行：编号 / 图标 / 分类在左，"正在展示"在右，底下一道发丝线 */
+/* 除要点表以外，正文栏每一段都把 main 让出去的 --dot-gap 用外边距加回来 ——
+   标题 / 导语 / 眉标 / 参数行因此停在原来的落点上，一个像素都不动。
+   宽度也是对的：flex 拉伸项 + 左边距 = 原来的内容宽，右缘不会多出来。 */
+.face__main > *:not(.face__points) {
+  margin-left: var(--dot-gap);
+}
+
+/* 眉标行：编号 / 图标 / 分类三样，左对齐排一行，底下一道发丝线 */
 .face__eyebrow {
   flex: none;
   display: flex;
   align-items: center;
   gap: clamp(10px, 0.9vw, 16px);
   padding-bottom: clamp(10px, 1.3vh, 18px);
-  border-bottom: 1px solid var(--rule-soft);
+  border-bottom: 1px solid var(--rule-hair);
 }
 
-/* 编号是这一行的主角：等宽、表格数字，正面那一张转成墨黑，其余退成中墨 */
+/* 编号是这一行的主角：等宽、表格数字，正面那一张转成墨黑，其余退成中墨。
+   "01" 单独放大到 1.4em、"/08" 收到 0.56em —— 分母是注脚，分子才是这一面的号 */
 .face__index {
   flex: none;
   font-family: var(--mono);
-  font-size: clamp(17px, 1.5vw, 26px);
+  font-size: var(--fs-num);
   font-weight: 700;
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--ink-mute);
-  transition: color 320ms ease;
+  transition: color var(--t-3) ease;
+}
+
+.face__index b {
+  font-size: 1.4em;
+  font-weight: 700;
 }
 
 .face__index i {
@@ -1004,33 +1514,35 @@ const announce = computed(() => {
   flex: none;
   display: grid;
   place-items: center;
+  /* 图标与它后面的栏目名一起被推到这一行的最右端（= 正文栏的右缘）。
+     margin-left: auto 放在这一对的头一个身上，两个一起走。 */
+  margin-left: auto;
   color: var(--ink-mute);
-  transition: color 320ms ease;
+  transition: color var(--t-3) ease;
 }
 
-/* 分类不套胶囊：等宽大写 + 字距，就是编辑版式里的栏目名 */
+/* 分类不套胶囊：等宽大写 + 字距，就是编辑版式里的栏目名。
+   margin-right 把它（连同前面的图标）从接缝往回让出折痕那一段的宽度 ——
+   右对齐的落点是"内容区最右"，但最右那 20px 是折痕的压深，
+   字压进折痕里会读成失误；停在折痕起点才干净。 */
 .face__tag {
   flex: none;
+  /* 右端留出这一行自己的间距（与 .face__eyebrow 的 gap 同一条公式），
+     图标+栏目名就不会顶到图版上；接缝打开时改让折痕那一段的宽度，取两者大的。
+     注意单位：--seam 必须带单位（0px 而不是 0），否则 max() 里混进无单位数，
+     整条声明会被判无效 —— 这里踩过一次，右边距直接算成 0。 */
+  margin-right: max(clamp(10px, 0.9vw, 16px), calc(var(--seam) * 2.5));
   font-family: var(--mono);
-  font-size: clamp(11.5px, 0.8vw, 14px);
+  font-size: var(--fs-meta);
   font-weight: 600;
-  letter-spacing: 0.2em;
+  letter-spacing: var(--tr-wide);
   color: var(--ink-mute);
 }
 
-/* 状态行：靠右，与左边的编号形成两端对拉 */
-.face__state {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: clamp(11.5px, 0.78vw, 13px);
-  letter-spacing: 0.08em;
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
+/* 状态位下线（v5）：原来这里还有一条 .face__state（"正在展示 / 转到这一面" + 信号点）。
+ * 它靠 margin-left:auto 与左端编号形成两端对拉，去掉之后眉标行只剩余左端一组，
+ * "哪一面正对镜头"改由标题线转强调色、编号转墨黑、参数片描边加深三处交代 ——
+ * 状态确认从四处收成三处，版面少一个重复的信号（读屏那边照旧由 aria-live 播报）。 */
 
 /* 标题块：一句话的刊题 + 一段导语 */
 .face__lede {
@@ -1043,10 +1555,10 @@ const announce = computed(() => {
 
 .face__title {
   /* 这一面的主角：字重 700、字距收紧，字号跟着卡宽走 */
-  font-size: clamp(36px, 4vw, 76px);
+  font-size: var(--fs-display);
   font-weight: 700;
-  line-height: 1.03;
-  letter-spacing: -0.03em;
+  line-height: var(--lh-display);
+  letter-spacing: var(--tr-display);
   color: var(--ink);
 }
 
@@ -1059,15 +1571,17 @@ const announce = computed(() => {
   height: 2px;
   margin-top: clamp(12px, 1.4vh, 20px);
   background: rgba(22, 21, 15, 0.26);
-  transition: width 520ms var(--ease), background-color 520ms ease;
+  transition: width var(--t-6) var(--ease), background-color var(--t-6) ease;
 }
 
 .face__desc {
-  max-width: 30ch;
-  font-size: clamp(15px, 1.2vw, 22px);
-  line-height: 1.6;
+  font-size: var(--fs-lede);
+  line-height: var(--lh-lede);
   text-wrap: pretty;
   color: var(--ink-soft);
+  /* 右侧留一个字（1em 随导语字号走）—— 长句折行到最右时不要顶到折缝上，
+     与接缝之间始终隔着一个字的空气 */
+  margin-right: 1em;
 }
 
 /* ===== 要点表 =====
@@ -1081,10 +1595,14 @@ const announce = computed(() => {
 .face__point {
   position: relative;
   display: block;
-  /* 左内距让出小方点，上下按 vh 收：窗一矮，行距先紧一档 */
-  padding: clamp(7px, 1vh, 14px) 0 clamp(7px, 1vh, 14px) clamp(16px, 1.3vw, 22px);
-  font-size: clamp(14px, 1.12vw, 19px);
-  line-height: 1.4;
+  /* 左内距 = 点左内边距 + 点宽(5px) + 点字距离 = 2×--dot-gap + 5px（三样都由 --dot-gap 推出来）；
+     上下按 vh 收：窗一矮，行距先紧一档 */
+  padding: clamp(7px, 1vh, 14px) 0 clamp(7px, 1vh, 14px) calc(var(--dot-gap) * 2 + 5px);
+  /* 右缘让出与眉标同一档（与重点块那条公式完全一样）：hover 的淡墨底与重点块的蓝块
+     因此停在同一条右边界上，不会一路铺到与图版的接缝（v7.3） */
+  margin-right: max(clamp(10px, 0.9vw, 16px), calc(var(--seam) * 2.5));
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   color: var(--ink-soft);
   /* 一行封顶：清单的节奏靠"一行一条"，换行会当场把三条读成五条 */
   white-space: nowrap;
@@ -1096,19 +1614,64 @@ const announce = computed(() => {
 .face__point::before {
   content: '';
   position: absolute;
-  left: 2px;
+  /* 点左侧也留出内边距，值就是点与字之间的距离（v6.3 之前贴在 left: 2px） */
+  left: var(--dot-gap);
   top: 50%;
   width: 5px;
   height: 5px;
   margin-top: -2.5px;
   rotate: 45deg;
   background: color-mix(in srgb, var(--ink) 32%, transparent);
-  transition: background-color 320ms ease;
+  transition: background-color var(--t-3) ease;
 }
 
 /* 行间发丝线：只加在第二、三条的上沿，清单的头一条不封口 */
 .face__point + .face__point {
-  border-top: 1px solid var(--rule-soft);
+  border-top: 1px solid var(--rule-hair);
+}
+
+/* ===== 重点项（v6）：要点表里那一条 =====
+ * 蓝底 + 圆角 + 阴影 + 白字 —— 整张卡上唯一一块实心色。"这一面最重要的是什么"
+ * 于是不用读，一眼就落在那一条上。
+ *
+ * 几处细节都得交代：
+ *   1) 小方点**留着**，转成白色（--key-ink）—— 清单记号不该因为换了底色就消失；
+ *      位置由左内距推出来（落在内距正中），免得贴着蓝块边缘；
+ *   2) 上沿那道发丝线改透明、不删 —— 删掉会让这一行往上跳 1px，三条的节奏就歪了；
+ *      "看不见但不挪位"靠的是留着占位、抹掉颜色；
+ *   3) 这一条**下侧也不留线**（见 .face__point.is-key + .face__point）：蓝块自带阴影收边，
+ *      紧挨着它下面再压一道发丝线，会在阴影里叠出一条多余的分界；
+ *   4) 字重升到 700：蓝底上的白字比纸上的墨字轻，加一档配重才顶得住"重点"这两个字；
+ *   5) 内距左右收成对称档，右缘再让出与眉标同一档的空气 —— 正文栏右缘就是图版的左缘，
+ *      蓝块一路铺到那里会读成"蓝块压着屏"，停出一格才干净。 */
+.face__point.is-key {
+  /* 内距只改上、右、下三边，**左边不动** —— 左内距与 .face__point 同一条公式
+     （2×--dot-gap + 5px），蓝块里的文字与白点才跟上下两条要点落在同一条竖线上 */
+  padding: clamp(9px, 1.2vh, 16px) clamp(11px, 0.95vw, 17px) clamp(9px, 1.2vh, 16px)
+    calc(var(--dot-gap) * 2 + 5px);
+  /* 右缘这一道与 .face__eyebrow 的 gap 同一条公式；接缝打开时改让折痕那一段 */
+  margin-right: max(clamp(10px, 0.9vw, 16px), calc(var(--seam) * 2.5));
+  border-top-color: transparent;
+  border-radius: var(--key-r);
+  background: var(--key-bg);
+  color: var(--key-ink);
+  font-weight: 700;
+  box-shadow: var(--key-shadow);
+}
+
+/* 蓝块下侧不留线：紧跟着它的那一条要点不吃那道行间发丝线
+   （蓝块自己的 border-top 也在上面那条规则里改成了透明） */
+.face__point.is-key + .face__point {
+  border-top-color: transparent;
+}
+
+/* 白色小方点：位置与普通要点**逐像素相同** —— left / width / height / rotate 全部沿用
+   .face__point::before 的值，这里一个都不覆盖，只把颜色换成白。
+   八条要点于是共用同一条点阵竖线（先前把 left 挪到"内距正中"是错的：点歪了一格）。 */
+.face__point.is-key::before {
+  background: var(--key-ink);
+  /* 白点悬浮时会放大一倍半：过渡挂在这里（基础态），移开时才走得动 */
+  transition: background-color var(--t-3) ease, scale var(--t-2) var(--ease-out);
 }
 
 /* ===== 参数行 =====
@@ -1121,39 +1684,42 @@ const announce = computed(() => {
   align-items: center;
   gap: clamp(6px, 0.6vw, 10px);
   padding-top: clamp(10px, 1.3vh, 18px);
-  border-top: 1px solid var(--rule-soft);
+  border-top: 1px solid var(--rule-hair);
 }
 
 .face__spec {
   flex: none;
   padding: 4px 10px;
-  border: 1px solid rgba(22, 21, 15, 0.13);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-xs);
   font-family: var(--mono);
-  font-size: clamp(11.5px, 0.8vw, 14px);
+  font-size: var(--fs-meta);
   letter-spacing: 0.06em;
   color: var(--ink-mute);
   white-space: nowrap;
-  transition: border-color 320ms ease, color 320ms ease;
+  transition: border-color var(--t-3) ease, color var(--t-3) ease;
 }
 
-/* ===== 信号点：眉标行右侧那枚小圆 ===== */
-.face__signal {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(22, 21, 15, 0.34);
-  transition: box-shadow 300ms ease, background-color 300ms ease, border-color 300ms ease;
+/* ===== 重点项（v6）：参数行里那一枚 =====
+ * 与要点表那一条同一套语言（蓝底 / 圆角 / 阴影 / 白字），只是尺寸保持小片这一档 ——
+ * 它是这行等宽小片里的"实心那枚"，另两枚仍是透明底 + 发丝描边。
+ * 内距与另两枚**一模一样**（4px 10px）：三枚片同高同宽，行里才对得齐；
+ * "重点"由颜色与阴影说，不由尺寸说。描边改透明而不是删掉，也是为了不差这 2px。
+ * 字重提到 600：蓝底上的等宽小字本来就比纸上难读半档，加一档配重补回来
+ * （等宽字体的 600 与 400 同宽，不会把这一枚撑长）。 */
+.face__spec.is-key {
+  border-color: transparent;
+  border-radius: var(--key-r);
+  background: var(--key-bg);
+  color: var(--key-ink);
+  font-weight: 600;
+  box-shadow: var(--key-shadow);
 }
 
 /* ===== 正对镜头的那一面 =====
  * 微交互只做"状态确认"：不遮内容、不改布局、不动字号。
- * 四处一起亮：信号点、编号、标题线、参数片描边。 */
-.face.is-front .face__signal {
-  border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(10, 89, 247, 0.16);
-}
+ * v5 起三处一起亮：编号转墨黑、标题线转强调色并伸长、参数片描边加深。
+ * （原来是四处 —— 眉标行右端那枚信号点随"正在展示"状态位一起去掉了。） */
 
 .face.is-front .face__index {
   color: var(--ink);
@@ -1168,21 +1734,46 @@ const announce = computed(() => {
   background: color-mix(in srgb, var(--ink) 62%, transparent);
 }
 
+/* 上一条是"正面态的方点转深墨"（3 类），会盖过蓝块里的白点（2 类）——
+   这里用 4 类把它拉回白色（与下面参数片那条同一个道理）。
+   少了这一条，只有正对镜头的那一面会在蓝块上留一枚发暗的方点。 */
+.face.is-front .face__point.is-key::before {
+  background: var(--key-ink);
+}
+
 .face.is-front .face__spec {
-  border-color: rgba(22, 21, 15, 0.26);
+  border-color: var(--rule-strong);
   color: var(--ink-soft);
 }
 
-/* 暗纱：不朝镜头的那几面退到暗处，正面自然跳出来。随旋转淡入淡出 */
+/* 但"参数片描边加深"这条对重点项不适用 —— 蓝块本来就是实心的。
+   这一条必须写在上一条之后、且带 .is-key（特异性 4 类 > 3 类），
+   否则上面那条会把白字改回墨字、把蓝块重新描一道边。 */
+.face.is-front .face__spec.is-key {
+  border-color: transparent;
+  color: var(--key-ink);
+}
+
+/* 暗纱：不朝镜头的那几面退到暗处，正面自然跳出来。随旋转淡入淡出。
+ * v4 是"整卡压黑 30%"，那时最小一号文字掉到 4.0:1，所以收到 0.12。
+ * v5 卡片有了自己的封面底色（.face__wash）之后，底色会随封面深浅浮动 ——
+ * 逐面实测（audit-cardbg.json）发现 rtos 那张粉封面把纸压到 rgb(226,185,215)，
+ * 再叠 0.12 暗纱，元信息只剩 3.98:1（AA 线下）。所以再收到 0.05：
+ * 卡片自己已经有纹理与色差，"退后"这件事交给透视、图版压暗与正面那条亮边去做，
+ * 这一层只负责给侧面轻轻收一点光。 */
 .face__veil {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  corner-shape: inherit;
   background: rgb(6, 9, 13);
-  opacity: 0.3;
+  opacity: 0.05;
   pointer-events: none;
-  transition: opacity 420ms ease;
+  /* ── v7 · 过渡时长与换面同步 ────────────────────────────────────────
+     单点换面是 --dur 720ms，这里仍是 --t-5（420ms）—— 节奏一个字都没变。
+     连击时换面只有 --dur-run（720 × 0.5 = 360ms），420ms 的暗纱就比换面还长：
+     每次新换面都在"上一段还没淡完"的时候起跑，连击那几帧于是同时挂着两条透明度过渡。
+     min() 只在连击那一路生效，正好补上那一档"越点越卡"的漏洞。 */
+  transition: opacity min(var(--t-5), var(--dur-run)) ease;
 }
 
 .face.is-front .face__veil {
@@ -1208,7 +1799,11 @@ const announce = computed(() => {
   background: var(--ctrl-bg);
   color: var(--on-stage);
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color var(--t-2) ease,
+    border-color var(--t-2) ease,
+    color var(--t-2) ease,
+    scale var(--t-1) var(--ease-out);
 }
 
 .screen__nav--prev {
@@ -1233,8 +1828,8 @@ const announce = computed(() => {
 }
 
 .screen__nav:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, #fff);
-  outline-offset: 3px;
+  outline: var(--ring-w) solid var(--ring);
+  outline-offset: var(--ring-gap);
 }
 
 .screen__nav svg {
@@ -1279,14 +1874,15 @@ const announce = computed(() => {
   padding: 0;
   border: 0;
   appearance: none;
-  border-radius: 999px;
+  border-radius: var(--r-full);
+  /* v4 复测：0.44 这一档在 --stage-deep 上实测 3.5:1，过 1.4.11 的 3:1，维持原值不动 */
   background: color-mix(in srgb, var(--seg, #fff) 44%, transparent);
   cursor: pointer;
   transition:
-    width 340ms var(--ease),
-    height 180ms ease,
-    background-color 320ms ease,
-    box-shadow 300ms ease;
+    width var(--t-4) var(--ease),
+    height var(--t-2) ease,
+    background-color var(--t-3) ease,
+    box-shadow var(--t-3) ease;
 }
 
 /* 条本身只有 4px 高，点击热区靠伪元素撑开（左右各 3px，正好不越过 6px 的缝） */
@@ -1315,8 +1911,8 @@ const announce = computed(() => {
 }
 
 .meter__seg:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 3px;
+  outline: var(--ring-w) solid var(--ring);
+  outline-offset: var(--ring-gap);
 }
 
 /* ===== 退出控件 =====
@@ -1341,12 +1937,16 @@ const announce = computed(() => {
   background: var(--ctrl-bg);
   color: var(--on-stage);
   font-family: var(--mono);
-  font-size: clamp(11px, 0.78vw, 12.5px);
+  font-size: var(--fs-ctrl);
   font-weight: 500;
   letter-spacing: 0.1em;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color var(--t-2) ease,
+    border-color var(--t-2) ease,
+    color var(--t-2) ease,
+    scale var(--t-1) var(--ease-out);
 }
 
 .screen__exit svg {
@@ -1366,8 +1966,8 @@ const announce = computed(() => {
 }
 
 .screen__exit:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, #fff);
-  outline-offset: 3px;
+  outline: var(--ring-w) solid var(--ring);
+  outline-offset: var(--ring-gap);
 }
 
 /* 读屏用：换面时把"现在看的是哪一项"播报出去 */
@@ -1383,41 +1983,270 @@ const announce = computed(() => {
   border: 0;
 }
 
+/* ===== v7 · 微交互层 =====
+ * 需求原话：「加入大量的微交互：鼠标悬浮时变大、背景变黑之类的，形式多种」。
+ *
+ * 落点**全部在卡片内部元素**上：卡片本体不接悬浮 —— 不放大、不位移、不压暗、
+ * 也不把舞台压黑。指针要"摸得到"的是里头那一件件东西：要点行、重点块、参数片、
+ * 图版、图注、编号、栏目名、图标、标题线、描述。骨架（3D 环 / 换面四条路 /
+ * aria-live 播报 / 焦点环）一根头发都不碰。
+ *
+ * 三条硬约束照旧（改这一节前先读）：
+ *   ① 尺寸与位移只写在普通 2D 层上，绝不写进 .face 的 3D transform —— 会糊；
+ *   ② .prism 上不落 overflow / opacity / filter / clip-path —— preserve-3d 会降级；
+ *   ③ prefers-reduced-motion 下只留颜色与明暗，尺寸 / 位移 / 旋转整批退掉（本节末尾）。
+ *
+ * 十一种形式，逐一落点：
+ *   ① 要点行      悬浮 → 一层 9% 淡墨底 + 小圆角（与导语 .face__desc 的悬浮完全同款：
+ *                 不铺深色底、不动内距，区块高度一个像素都不变）
+ *   ② 要点上的点  墨色从 32% 提到 62%（不换白、不放大）
+ *   ③ 重点块      提亮 8% + 外扩一圈柔蓝 + 上浮 1px；白点放大 1.5 倍
+ *   ④ 参数片      悬浮 → 背景变黑 + 白字 + 放大 1.08；重点片则提亮 + 放大
+ *   ⑤ 图版        悬浮 → 截图推近 3.5%（变大）+ 画面压暗 0.28（变黑）
+ *   ⑥ 图注        悬浮 → 上浮 4px + 提亮
+ *   ⑦ 编号        放大 1.12 + 转强调蓝
+ *   ⑧ 栏目名      字距加宽到 0.28em + 转墨黑
+ *   ⑨ 图标        放大 1.18 + 转 10° + 转强调蓝
+ *   ⑩ 标题线      伸长到 88px 并发光
+ *   ⑪ 描述        一层淡墨底（变黑）+ 小圆角
+ * 控件侧另有三条：左右箭头图标朝各自方向让 2px、退出钮的叉转 90°、刊头小字提亮抖开。
+ */
+
+/* ⑤ 图版：截图推近（变大）+ 画面压暗（变黑）。
+   压暗挂在 .face__shotwrap::after 上 —— 它本来就是侧面板用的那层暗纱
+   （正面是 0，侧面 0.42），悬浮时给 0.28：同一套语言，只是更轻。 */
+.face__shot {
+  transition: transform var(--t-6) var(--ease-out);
+}
+
+.face.is-front .face__plate:hover .face__shot {
+  transform: scale(1.035);
+}
+
+.face.is-front .face__plate:hover .face__shotwrap::after {
+  opacity: 0.28;
+}
+
+/* ⑥ 图注：上浮 + 提亮 */
+.face__caption {
+  transition: translate var(--t-4) var(--ease-out), color var(--t-3) ease;
+}
+
+.face__caption:hover {
+  translate: 0 -4px;
+  color: var(--on-stage);
+}
+
+/* ① 要点行：悬浮**与导语（.face__desc）同款** —— 只加一层 9% 的淡墨底 + 小圆角。
+   不铺深色底、不动内距，区块高度一个像素都不变。 */
+.face__point {
+  transition: background-color var(--t-2) ease;
+}
+
+.face.is-front .face__point:not(.is-key):hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  border-radius: var(--r-xs);
+}
+
+/* ② 要点上的点：跟着行一起收敛 —— 只把墨色提一档，不换白也不放大 */
+.face__point::before {
+  transition: background-color var(--t-3) ease;
+}
+
+.face.is-front .face__point:not(.is-key):hover::before {
+  background: color-mix(in srgb, var(--ink) 82%, transparent);
+}
+
+/* ③ 重点块：它本来就是实心蓝块，悬浮改成"提亮 + 外扩 + 上浮"；白点放大 */
+.face__point.is-key {
+  transition: background-color var(--t-2) ease;
+}
+
+.face.is-front .face__point.is-key:hover {
+  /* 只换颜色：不位移、不外扩、不动内距 —— 高度与占位一个像素都不变
+     （外扩那圈影会让它看着比旁边高，已经被否掉） */
+  background: color-mix(in srgb, var(--key-bg) 88%, #fff);
+}
+
+.face.is-front .face__point.is-key:hover::before {
+  scale: 1.5;
+}
+
+/* ④ 参数片：悬浮 → 背景变黑 + 白字 + 放大一档。
+   scale 不参与布局，旁边两枚不会跟着挪位 —— 读起来是"这一枚被拈起来" */
+.face__spec {
+  transition:
+    border-color var(--t-3) ease,
+    color var(--t-3) ease,
+    background-color var(--t-2) ease,
+    scale var(--t-2) var(--ease-out);
+}
+
+.face.is-front .face__spec:not(.is-key):hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 88%, transparent);
+  color: #fff;
+  scale: 1.08;
+}
+
+.face.is-front .face__spec.is-key:hover {
+  background: color-mix(in srgb, var(--key-bg) 86%, #fff);
+  scale: 1.08;
+}
+
+/* ⑦⑧⑨⑩ 编号 / 栏目名 / 图标 / 标题线：各自被悬浮时反应 */
+.face__index {
+  transition: color var(--t-3) ease, scale var(--t-3) var(--ease-out);
+}
+
+.face__tag {
+  transition: color var(--t-3) ease, letter-spacing var(--t-3) ease;
+}
+
+.face__icon {
+  transition: color var(--t-3) ease, rotate var(--t-3) var(--ease-out), scale var(--t-3) var(--ease-out);
+}
+
+.face.is-front .face__index:hover {
+  color: var(--accent);
+  scale: 1.12;
+}
+
+.face.is-front .face__tag:hover {
+  color: var(--ink);
+  letter-spacing: 0.28em;
+}
+
+.face.is-front .face__icon:hover {
+  color: var(--accent);
+  rotate: 10deg;
+  scale: 1.18;
+}
+
+/* 悬浮标题时线伸长 —— 选择器必须带 .face.is-front：
+   正面态那条 `.face.is-front .face__title::after`（3 类）比 `.face__title:hover::after`
+   （2 类）权重高，不带前缀这条 hover 整条失效。 */
+.face.is-front .face__title:hover::after {
+  width: clamp(64px, 4.6vw, 88px);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+/* ⑪ 描述：一层淡墨底（变黑）+ 小圆角。
+   刻意不加内距 —— 那会把折行位置挪掉 */
+.face__desc {
+  transition: background-color var(--t-2) ease;
+}
+
+.face.is-front .face__desc:hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  border-radius: var(--r-xs);
+}
+
+/* 控件侧：图标朝各自的方向让一让 */
+.screen__nav svg,
+.screen__exit svg {
+  transition: translate var(--t-2) var(--ease-out), rotate var(--t-2) var(--ease-out);
+}
+
+.screen__nav--prev:hover svg {
+  translate: -2px 0;
+}
+
+.screen__nav--next:hover svg {
+  translate: 2px 0;
+}
+
+.screen__exit:hover svg {
+  rotate: 90deg;
+}
+
+/* 刊头小字：提亮 + 字距抖开 */
+.screen__label {
+  transition: color var(--t-3) ease, letter-spacing var(--t-3) ease;
+}
+
+.screen__top:hover .screen__label {
+  color: var(--on-stage);
+  letter-spacing: 0.26em;
+}
+
+/* 本节收尾：少动效时只留颜色与明暗 —— 尺寸 / 位移 / 旋转整批退掉，
+   否则"关掉动效"反而会看到一串瞬跳的形变。 */
+@media (prefers-reduced-motion: reduce) {
+  .face.is-front .face__point.is-key:hover,
+  .face__caption:hover {
+    translate: none;
+  }
+
+  .face.is-front .face__point.is-key:hover::before,
+  .face.is-front .face__spec:not(.is-key):hover,
+  .face.is-front .face__spec.is-key:hover,
+  .face.is-front .face__index:hover,
+  .face.is-front .face__icon:hover {
+    scale: none;
+  }
+
+  .face.is-front .face__icon:hover {
+    rotate: none;
+  }
+
+  .face.is-front .face__plate:hover .face__shot {
+    transform: none;
+  }
+
+  .screen__nav--prev:hover svg,
+  .screen__nav--next:hover svg {
+    translate: none;
+  }
+
+  .screen__exit:hover svg {
+    rotate: none;
+  }
+}
+
 /* ===== 响应式 =====
- * 断点只调三样：两栏怎么分、留白多厚、哪些次要文字退场。
- * 卡尺寸（80vw × 70vh）与整条字阶都由 vw 驱动，窄窗自己会缩，不必逐档重写。
+ * 断点只调四样：两栏怎么分、留白多厚、哪些次要文字退场、控件挪到哪儿。
+ * 卡尺寸（80vw × 70vh）与字阶都由 vw 驱动，窄窗自己会缩，不必逐档重写。
+ * v4：前两档口径不变；767 那一档从"不崩就行"改成真机口径（字号、折行、触控热区、安全区）。
  */
 @media (max-width: 1100px) {
   .screen {
     /* 图版栏收窄一档：窄窗里正文栏得留出能读的行长 */
-    --plate-w: 52%;
+    --plate-w: 56%;
     --card-pad: clamp(18px, 2.6vw, 30px);
     --col-gap: clamp(18px, 2.6vw, 30px);
   }
 }
 
 @media (max-width: 900px) {
-  /* 窄屏改成一栏：图版在上、正文在下；两栏之间那道竖发丝换成横发丝 */
+  /* 窄屏改成一栏：图版在上、正文在下（v5 起两栏之间不再有发丝线，
+     图版自己的边就是分界） */
   .face__skin {
     flex-direction: column-reverse;
   }
 
+  /* 一栏布局里图版排在正文上面（v5：它自己就是那块满幅的屏）。
+     宽度顶满整卡，高度由裁切比例定死、并且可以被压 —— 卡矮时先让图版缩，
+     正文一个像素都不许被裁（column-reverse 下溢出会跑到卡顶上去） */
   .face__plate {
-    /* 一栏布局里图版排在正文上面，高度可以被压 —— 卡矮时先让图版缩，
-       正文一个像素都不许被裁（column-reverse 下溢出会跑到卡顶上去） */
     flex: 0 1 auto;
     width: 100%;
     min-height: 0;
-    padding: var(--card-pad) var(--card-pad) 0;
-    border-left: 0;
-    border-top: 1px solid var(--rule-soft);
+    aspect-ratio: calc(1958 * var(--shot-keep)) / var(--shot-band);
+    /* 一栏布局里交界处跑到下沿（图版在上、正文在下），小圆角跟着给左下 / 右下 */
+    border-radius: 0 0 var(--r-sm) var(--r-sm);
   }
 
-  /* 一栏布局里图版不再是"吃满高度"，给它一个由裁切比例定死、但可被压的高度 */
-  .face__frame {
-    flex: 0 1 auto;
-    min-height: 0;
-    aspect-ratio: calc(1958 * var(--shot-keep)) / var(--shot-band);
+  /* 一栏布局里图版在上、正文在下：过渡方向跟着转成竖向（用曲线的竖向版） */
+  .face__shotwrap {
+    -webkit-mask-image: var(--seam-curve-y);
+    mask-image: var(--seam-curve-y);
+  }
+
+  /* 一栏布局里接缝转成横向（图版下缘），图注那道底衬用同一条曲线 */
+  .face__caption {
+    -webkit-mask-image: var(--seam-curve-y);
+    mask-image: var(--seam-curve-y);
   }
 
   .face__main {
@@ -1432,32 +2261,71 @@ const announce = computed(() => {
 
 @media (max-width: 767px) {
   .screen {
-    /* 移动端本会话不纳入设计，这里只保证小窗不崩：
-       卡高再收一档，把高度让给上下两行正文；顶栏那一条同样要还回去 */
-    --face-h: min(70vh, calc(100vh - 150px));
+    /* 手机上一块 86vw × 72vh 的立牌。卡高收一档，把高度让给上下两行正文；
+       顶栏那一条（--top-h + --top-gap）同样要在下面的兜底里还回去 */
+    --face-w: 86vw;
+    --face-h: min(72vh, calc(100vh - 132px));
+    --card-pad: clamp(14px, 4vw, 20px);
+    --top-h: 36px;
+    --top-gap: 12px;
   }
 
-  /* 版心四边一起收窄。这里不能只写 padding: 14px 16px —— 底边那一档
-     带上了顶栏高度（见 .screen__inner 的注释），写平了会把版面又顶下去 */
+  /* 版心四边一起收窄。这里不能只写 padding: 12px 14px —— 底边那一档
+     带上了顶栏高度（见 .screen__inner 的注释），写平了会把版面又顶下去。
+     底边另外叠一条安全区：env() 在没开 viewport-fit=cover 的环境里就是 0，
+     所以这一条今天不改变任何像素，等哪天 index.html 开了它才生效 */
   .screen__inner {
-    padding: 14px 16px calc(14px + var(--top-h) + var(--top-gap));
+    padding: 12px 14px calc(12px + var(--top-h) + var(--top-gap) + env(safe-area-inset-bottom, 0px));
   }
 
-  /* 页脚贴到小窗版的版心下沿 */
+  /* 页脚贴到小窗版的版心下沿，并让开底部安全区 */
   .screen__foot {
-    bottom: 14px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   /* 退出钮的 y 与版心的 padding 起点同一条线（与顶栏同高，自然对齐） */
   .screen__exit {
-    top: 14px;
+    top: 12px;
   }
 
-  /* 小窗里一卡两行：导语按视口收一档，要点表与参数行照旧全在 ——
-     详细内容是这一版的主角，先让它站住 */
+  /* 箭头从"卡片左右两侧"挪到舞台下沿两端（v4）：小屏上卡片占掉 86vw，
+     两侧只剩十几像素，贴在中间会正好压在卡面上。
+     这两枚是手机上唯一的翻面入口（没有滚轮也没有方向键），一枚都不能少 */
+  .screen__nav {
+    top: auto;
+    bottom: 0;
+    translate: none;
+  }
+
+  /* 标题与导语各自换一条起跳线：4vw 在 390px 上只剩 15.6px，
+     会被 clamp 的下限兜成 36px —— 那就与卡宽脱钩了，横竖都不合适 */
+  .face__title {
+    font-size: clamp(30px, 9vw, 44px);
+  }
+
   .face__desc {
     max-width: none;
-    font-size: clamp(13px, 3.4vw, 17px);
+    font-size: clamp(14px, 3.9vw, 18px);
+  }
+
+  /* 要点表：窄屏允许折行。一行封顶是宽屏的节奏，小屏上那会吃掉半句话 */
+  .face__point {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  /* 进度条：段加宽，触控热区撑到 30px（2.5.8 的下限是 24px） */
+  .meter {
+    gap: 5px;
+  }
+
+  .meter__seg {
+    width: clamp(22px, 5.4vw, 30px);
+  }
+
+  .meter__seg::before {
+    inset: -14px -4px;
   }
 }
 
@@ -1604,13 +2472,48 @@ const announce = computed(() => {
   }
 }
 
+/* ===== 高对比度偏好（v4）=====
+ * 用户在系统里要求"提高对比度"：发丝线整体加重一档、墨字再压深、
+ * 暗纱收到最低。侧面板的层级改由缩放（透视）与投影承担 —— 那两样本来就在，
+ * 只是平时被暗纱盖住了一半。正面那一张照旧没有暗纱（选择器权重更高） */
+@media (prefers-contrast: more) {
+  .screen {
+    --rule-hair: rgba(22, 21, 15, 0.24);
+    --rule: rgba(22, 21, 15, 0.38);
+    --rule-strong: rgba(22, 21, 15, 0.55);
+    --ink-soft: #2e2b25;
+    --ink-mute: #38342c;
+    --on-stage-2: rgba(244, 247, 250, 0.94);
+    --on-stage-3: rgba(244, 247, 250, 0.84);
+    --ctrl-line: rgba(255, 255, 255, 0.72);
+    --ctrl-bg: rgba(255, 255, 255, 0.12);
+  }
+
+  .face__veil {
+    opacity: 0.04;
+  }
+
+  .face__shotwrap::after {
+    opacity: 0.5;
+  }
+}
+
+/* ===== 减少透明（v4）=====
+ * 控件那层薄玻璃换成一块实底。玻璃在深色舞台上本来就只是"淡淡的一层底"，
+ * 换成实色视觉上几乎无差，但对要求减少透明度的用户是必需的 */
+@media (prefers-reduced-transparency: reduce) {
+  .screen {
+    --ctrl-bg: rgb(46, 57, 70);
+  }
+}
+
 /* 少动效：.is-entering 压根不会挂上，这里只兜住常驻的那几条过渡 */
 @media (prefers-reduced-motion: reduce) {
   .prism,
   .face,
   .face__skin,
   .face__veil,
-  .face__signal,
+  .face__shotwrap::after,
   .face__index,
   .face__icon,
   .face__spec,
