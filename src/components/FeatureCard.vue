@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 /**
  * 鍥剧墖澧欑殑涓€鏍硷細涓€寮犳墜缁樼殑鎶借薄鎻掔敾 + 鍥炬敞銆?
  *
@@ -10,8 +10,6 @@
  * 涓夊眰鍙樻崲鍚勮蛋鍚勭殑閬擄細鐖剁骇 grid 鐨勮宸钩绉汇€佸叆鍦虹敤 translate 灞炴€с€?
  * 鎸囬拡鍊炬枩鐢?transform锛屼簰涓嶈鐩栥€?
  */
-import BorderGlow from '@/components/vue-bits/BorderGlow.vue'
-
 defineProps({
   item: { type: Object, required: true },
 })
@@ -43,15 +41,6 @@ defineProps({
       <span class="cell__desc">{{ item.desc }}</span>
     </span>
 
-    <BorderGlow
-      overlay
-      :border-radius="8"
-      :edge-sensitivity="18"
-      :glow-radius="22"
-      glow-color="222 95 72"
-      :colors="['#7aa7ff', '#a78bfa', '#22d3ee']"
-      :fill-opacity="0.32"
-    />
   </button>
 </template>
 
