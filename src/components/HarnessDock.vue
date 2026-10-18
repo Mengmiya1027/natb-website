@@ -12,27 +12,12 @@ import HomePage from '@/pages/HomePage.vue'
 import Features from '@/pages/Features.vue'
 import UpdateLog from '@/pages/UpdateLog.vue'
 import ProjectInfo from '@/pages/ProjectInfo.vue'
-import FeatureBigScreen from '@/components/FeatureBigScreen.vue'
-
-/** 沿用原来的 ?face=N 预览参数：功能页放大状态暂行预览（FeatureBigScreen）开场正对第几面（0 起） */
-const FACE = (() => {
-  const n = Number(new URLSearchParams(window.location.search).get('face'))
-  return Number.isInteger(n) && n >= 0 && n < 8 ? n : 0
-})()
 
 export const DOCK_TABS = [
   { id: 'home', short: '首页', file: 'HomePage.vue', desc: '粒子汇聚 / 标题起飞', comp: HomePage },
-  { id: 'features', short: '功能', file: 'Features.vue', desc: '卡片网格 / 查看器', comp: Features },
+  { id: 'features', short: '功能', file: 'Features.vue', desc: '卡片网格 / 大屏模式', comp: Features },
   { id: 'updatelog', short: '更新', file: 'UpdateLog.vue', desc: '3D 卡片轴', comp: UpdateLog },
   { id: 'projectinfo', short: '关于', file: 'ProjectInfo.vue', desc: '项目说明 / 二维码', comp: ProjectInfo },
-  {
-    id: 'octagon',
-    short: '功能页放大状态暂行预览',
-    file: 'FeatureBigScreen.vue',
-    desc: '8 面 3D 大屏',
-    comp: FeatureBigScreen,
-    props: { open: true, initial: FACE },
-  },
 ]
 
 /** 默认标签（启动即展示的那一页）。首页不显示顶栏开关，故这里也要用到 */

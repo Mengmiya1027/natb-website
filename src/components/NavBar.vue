@@ -2,16 +2,24 @@
 import { computed } from 'vue'
 import { useAnimationStore } from '@/stores/animation'
 
-// 右侧图片位：填地址即显示，留空用占位图标
-const actionIcon = ''
+const QQ_URL = 'https://qm.qq.com/q/Cb2vLZtsZ4'
 
 // 跟随 base，子路径部署也能取到 public 下的图标
 const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
 
 const store = useAnimationStore()
 
-// 顶栏跟字同步：汇聚完先按着，等字起飞才滑进来
+// 首页已经换成常驻顶栏：挂载即显示，不再等粒子上台
 const shown = computed(() => store.isFlying || store.isLanded)
+
+/**
+ * 首页只做一屏，顶栏不再有页内锚点可跳。
+ * 这里只广播站内页面切换请求（介绍 → 功能 / 关于 → 项目信息），
+ * 由 App.vue 统一决定展示哪一页；下载直接进 QQ 群。
+ */
+function goTab(id) {
+  window.dispatchEvent(new CustomEvent('natb:tab', { detail: id }))
+}
 </script>
 
 <template>
@@ -23,22 +31,28 @@ const shown = computed(() => store.isFlying || store.isLanded)
   >
     <div class="dock">
       <!-- 左：圆形图标 + 字样 -->
-      <a class="brand" href="#">
+      <a class="brand" href="#" @click.prevent="goTab('home')">
         <img class="brand-icon" :src="brandIcon" alt="NATB" />
         <span class="brand-text">NATB</span>
       </a>
 
       <nav class="links" aria-label="主导航">
-        <button class="link" type="button">介绍</button>
-        <button class="link" type="button">下载</button>
-        <button class="link" type="button">关于</button>
+        <a class="link" href="#" @click.prevent="goTab('features')">介绍</a>
+        <a class="link" :href="QQ_URL" target="_blank" rel="noopener">下载</a>
+        <a class="link" href="#" @click.prevent="goTab('projectinfo')">关于</a>
       </nav>
 
-      <!-- 右：圆形图片位，将来当按钮用 -->
-      <button class="action" type="button" aria-label="更多">
-        <img v-if="actionIcon" class="action-icon" :src="actionIcon" alt="" />
-        <i-lucide-image v-else width="18" height="18" aria-hidden="true" />
-      </button>
+      <!-- 右：QQ 交流群入口 -->
+      <a
+        class="action"
+        :href="QQ_URL"
+        target="_blank"
+        rel="noopener"
+        aria-label="加入 QQ 交流群"
+        title="加入 QQ 交流群"
+      >
+        <i-lucide-message-circle width="17" height="17" aria-hidden="true" />
+      </a>
     </div>
   </header>
 </template>
@@ -138,6 +152,7 @@ const shown = computed(() => store.isFlying || store.isLanded)
   color: rgba(255, 255, 255, 0.72);
   font-family: inherit;
   font-size: 17px;
+  text-decoration: none;
   cursor: pointer;
   transition: color 0.2s ease, background 0.2s ease, scale 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -163,7 +178,8 @@ const shown = computed(() => store.isFlying || store.isLanded)
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.72);
+  text-decoration: none;
   cursor: pointer;
   transition: background 0.2s ease, scale 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }

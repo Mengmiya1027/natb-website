@@ -1,9 +1,8 @@
 <script setup>
 import FeatureCard from '@/components/FeatureCard.vue'
-import FeatureViewer from '@/components/FeatureViewer.vue'
-import { useViewerStore } from '@/stores/viewer'
+import FeatureBigScreen from '@/components/FeatureBigScreen.vue'
 import { useAnimationStore } from '@/stores/animation'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 // 图标沿用 solar 的 bold-duotone：两路同色不同明度，压成单色后层次还在
 import IconShieldKeyhole from '~icons/solar/shield-keyhole-bold-duotone'
@@ -129,17 +128,24 @@ const DECOR_SIDE = [6, 7, 8, 9].map(ART_AT)
  */
 const ENTER = {
   mark: 0,
-  kicker: 80,
-  title: 150,
-  rule: 230,
-  lede: 290,
-  meta: 370,
+  kicker: 90,
+  title: 140,
+  rule: 250,
+  lede: 320,
+  meta: 400,
   cards: 300,
-  cellStep: 44,
-  durHead: 780,
-  durCell: 720,
+  cellStep: 52,
+  durHead: 980,
+  durCell: 940,
+  sweepDelay: 840,
+  sweepDur: 1300,
 }
-const ENTER_END = ENTER.cards + ENTER.cellStep * (FEATURES.length - 1) + ENTER.durCell + 40
+// 收尾时间要覆盖最晚的一格、格内细节和最后那道扫光，撤类时才不会把动画腰斩。
+const ENTER_END = Math.max(
+  ENTER.cards + ENTER.cellStep * 12 + ENTER.durCell,
+  ENTER.sweepDelay + ENTER.sweepDur,
+  ENTER.cards + ENTER.cellStep * (FEATURES.length - 1) + ENTER.durCell + 420,
+) + 60
 
 const ms = (v) => `${v}ms`
 const enterVars = {
@@ -153,22 +159,50 @@ const enterVars = {
   '--enter-cell-step': ms(ENTER.cellStep),
   '--enter-dur-head': ms(ENTER.durHead),
   '--enter-dur-cell': ms(ENTER.durCell),
+  '--enter-sweep': ms(ENTER.sweepDelay),
+  '--enter-sweep-dur': ms(ENTER.sweepDur),
 }
 
-const viewer = useViewerStore()
+/* 每个格子给一份自己的入场姿态：卡片从纸面下方浮起，四周画报从画外收拢。
+ * --i 不再是 DOM 序号，而是这一格的入场次序；栅格会先把八张功能卡点亮，
+ * 装饰格再像装订边一样把整面墙封起来。 */
+function enterPose(order, x, y, rot) {
+  return {
+    '--i': order,
+    '--enter-x': `${x}px`,
+    '--enter-y': `${y}px`,
+    '--enter-rot': `${rot}deg`,
+  }
+}
+const cardEnterStyle = (i) => enterPose(i, i % 2 ? 8 : -8, 46, i % 2 ? 0.55 : -0.55)
+const topEnterStyle = (i) => enterPose(5.2 + i * 0.42, (i - 2.5) * 5, -44, i % 2 ? 0.6 : -0.6)
+const sideEnterStyle = (order, dir) => enterPose(order, dir * 54, 0, dir * 0.7)
+const bottomEnterStyle = (i) => enterPose(9.8 + i * 0.42, (i - 2.5) * 5, 44, i % 2 ? -0.6 : 0.6)
+
 // 开场那场粒子戏还没落位时，这里的入场要等着
 const anim = useAnimationStore()
-const activeItem = computed(() => (viewer.active >= 0 ? FEATURES[viewer.active] : null))
+
+/* ===== 大屏模式 =====
+ * 点某一格 → 打开 8 面 3D 大屏，并让那一面正对镜头（FeatureBigScreen 的 initial）。
+ * 开关放在这一页：大屏组件自身不自持状态，退出只有 Esc 与它顶栏那枚控件，
+ * 出口一律由 @close 交回来。
+ */
+const bigOpen = ref(false)
+// 退场已经开始：背景页先同拍去模糊、回正，不等大屏彻底卸载后才开始那 600ms
+const bigClosing = ref(false)
+// 背景玻璃过渡的当前时长。进入 600ms，退出由大屏传回 460ms，保证两边同一拍
+const glassMs = ref(600)
+// 大屏开场正对第几面（0 起）。关闭后留着不清：下次从另一格进，覆盖的就是新值
+const bigIndex = ref(0)
+// 八格的几何都量下来：大屏里翻过面再退出时，要缩回当前那一面自己的卡，
+// 不能再先绕回 initial 那一面（那会平白多出 720ms）。
+const origins = ref(null)
+// 当前被藏起来的那一格：起手时藏掉、退出时放回来。不是响应式的 —— 它只是 DOM 交接的把手
+let sourceEl = null
 
 const gridEl = ref(null)
 const wallEl = ref(null)
 const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
-
-// 点开的那一格在屏幕上的真实几何，充当覆盖层 FLIP 的起点
-const originRect = ref(null)
-// 格内各元素的同一份几何：大窗要逐元素飞，不能整格一起放大
-const originParts = ref(null)
-let sourceEl = null
 
 /* ===== 指针：视差与倾斜 =====
  * 视差让整片网格跟着指针反向轻移（±14px），是"镜头在动"而不是"格子在做操"；
@@ -188,7 +222,7 @@ function clearTilt() {
 }
 
 function onPointerMove(event) {
-  if (reduceMotion || viewer.expanded) return
+  if (reduceMotion || bigOpen.value) return
   const wall = wallEl.value
   if (wall) {
     const r = wall.getBoundingClientRect()
@@ -214,6 +248,13 @@ function onPointerLeave() {
   pax.value = 0
   pay.value = 0
 }
+
+/* ===== 一镜到底的起点：把被点那一格的真实几何量给大屏 =====
+ * 大屏要"从这张卡长大"，就得知道它在屏幕上的位置、未旋转的宽高、倾斜角与圆角；
+ * 卡内的标题与描述还要各自飞到大屏正面的对应元素上，所以字号也一并量 ——
+ * 元素框宽未必等于文字宽，只按框宽缩放会把标题压扁。
+ * 量的时候这一格必须已经回正：倾斜是"贴着指针那一格"的临时姿态。
+ */
 
 // 倾斜角度由样式给，脚本要用时现读 —— 断点改了角度这里跟着变，不会两处写死
 function wallRotation() {
@@ -248,55 +289,140 @@ function quadOrigin(el, rot) {
   }
 }
 
-async function pickCard(event) {
-  if (viewer.expanded) return
+/** 只量整格外框：退场跟随每帧调用，不重复读标题 / 描述与字号 */
+function measureCellShape(el) {
+  const rot = wallRotation()
+  const cell = quadOrigin(el, rot)
+  cell.radius = parseFloat(getComputedStyle(el).borderRadius) || 0
+  return cell
+}
+
+/** 量一格：整格几何 + 卡内两块（标题 / 描述）的几何与字号 */
+function measureCell(el) {
+  const rot = wallRotation()
+  const cell = measureCellShape(el)
+  const pick = (sel) => {
+    const node = el.querySelector(sel)
+    return node ? quadOrigin(node, rot) : null
+  }
+  const font = (sel) => {
+    const node = el.querySelector(sel)
+    return node ? parseFloat(getComputedStyle(node).fontSize) : null
+  }
+  return {
+    cell,
+    parts: {
+      title: pick('.cell__head'),
+      desc: pick('.cell__desc'),
+      fonts: { title: font('.cell__title'), desc: font('.cell__desc') },
+    },
+  }
+}
+
+/**
+ * 退场时的实时几何。卡片墙可能还在做视差回正、背景页也在从 1.05 缩回 1；
+ * 每帧现量，缩回中的大屏才能始终咬住当前真实位置。
+ */
+function getLiveOrigin(index) {
+  const el = gridEl.value?.querySelector(`.cell[data-index="${index}"]`)
+  return el ? { cell: measureCellShape(el) } : null
+}
+
+/**
+ * 点一格 → 进大屏，并让那一面正对镜头。
+ *
+ * 进的时候不再是"切一屏"：这一格的几何先量下来交给大屏，由大屏正对镜头的那一面
+ * 从这张卡长大到满屏（一镜到底，见 FeatureBigScreen 的 v8 那段）；退出反向缩回同一格。
+ * 这里只负责量、开门、把真格交接出去。
+ */
+function pickCard(event) {
+  if (bigOpen.value) return
   const el = event.target instanceof Element ? event.target.closest('.cell') : null
   if (!el || !gridEl.value?.contains(el)) return
   const index = Number(el.dataset.index)
   if (!Number.isInteger(index) || index < 0 || index >= FEATURES.length) return
 
-  // 倾斜态下量出来的矩形是歪的，量之前先让这一格回正
+  // 倾斜是"贴着指针那一格"的姿态，量几何之前先回正，退出时也不留残余
   clearTilt()
+  // 入场还没跑完就点：直接收尾，卡片墙停在与大屏退场一致的终态
+  if (entering.value) finishEntrance()
 
-  // 入场还没跑完就点：先把动画撤掉，等类真正落地再量，量到的才是落位后的几何
-  if (entering.value) {
-    finishEntrance()
-    await nextTick()
-  }
-  const rot = wallRotation()
-  const origin = quadOrigin(el, rot)
-  origin.radius = parseFloat(getComputedStyle(el).borderRadius) || 0
-  originRect.value = origin
+  const cells = [...gridEl.value.querySelectorAll('.cell[data-index]')]
+  // 入场起点要跟"当下眼睛看到的卡"一致：指针通常还悬在卡上，所以先量 hover 态
+  const entryGeometry = measureCell(el)
+  // 退场终点必须是非 hover 的静止尺寸。临时挂类、强制回流量完再撤掉；
+  // 这些样式变更都发生在同一次任务里，浏览器不会把中间态画出来。
+  const wasRestLocked = cells.map((cell) => cell.classList.contains('is-rest-measure'))
+  cells.forEach((cell) => cell.classList.add('is-rest-measure'))
+  void gridEl.value.offsetWidth
+  const restGeometry = Object.fromEntries(
+    cells.map((cell) => [Number(cell.dataset.index), measureCell(cell)]),
+  )
+  cells.forEach((cell, i) => {
+    if (!wasRestLocked[i]) cell.classList.remove('is-rest-measure')
+  })
 
-  const pick = (sel) => {
-    const node = el.querySelector(sel)
-    return node ? quadOrigin(node, rot) : null
-  }
-  // 字号也带上：框宽未必等于文字宽，只按框宽缩放会把标题压扁
-  const font = (sel) => {
-    const node = el.querySelector(sel)
-    return node ? parseFloat(getComputedStyle(node).fontSize) : null
-  }
-  originParts.value = {
-    title: pick('.cell__head'),
-    desc: pick('.cell__desc'),
-    fonts: {
-      title: font('.cell__title'),
-      desc: font('.cell__desc'),
-    },
-  }
+  // 每个面都带一份 rest 几何：大屏里翻到哪一面，退出就缩回那一面的静止卡。
+  // 被点的那一面额外保留 hover 几何，仅用于入场起手。
+  origins.value = Object.fromEntries(
+    cells.map((cell) => {
+      const i = Number(cell.dataset.index)
+      const entry = i === index ? entryGeometry : restGeometry[i]
+      return [i, { ...entry, rest: restGeometry[i] }]
+    }),
+  )
+
   sourceEl = el
-  viewer.open(index)
+  bigIndex.value = index
+  bigClosing.value = false
+  glassMs.value = 600
+  bigOpen.value = true
 }
 
-/** 覆盖层预光栅完、动画即将起手，这一刻才把真格藏掉，交接处不留空白 */
-function onViewerReady() {
-  if (sourceEl) sourceEl.style.visibility = 'hidden'
+/** 大屏开始退出：把卡片墙锁在非 hover 姿态，避免退场终点跟着指针放大 */
+function lockCardsToRest() {
+  gridEl.value?.querySelectorAll('.cell').forEach((cell) => {
+    cell.classList.add('is-rest-measure')
+  })
+}
+
+let restReleaseHandler = null
+
+/** 关闭后不要立刻让 hover 弹回来：等用户下一次移动指针再恢复 */
+function releaseRestAfterPointerMove() {
+  if (restReleaseHandler) return
+  restReleaseHandler = () => {
+    restReleaseHandler = null
+    clearRestLock()
+  }
+  window.addEventListener('pointermove', restReleaseHandler, { once: true, passive: true })
+}
+
+/** 清掉测量类，组件卸载或指针首次移动时用 */
+function clearRestLock() {
+  gridEl.value?.querySelectorAll('.cell').forEach((cell) => {
+    cell.classList.remove('is-rest-measure')
+  })
+}
+
+/** 大屏预光栅完、即将起手：这一刻才把真格藏掉，交接处不留空白 */
+function onBigReady(index) {
+  const el = gridEl.value?.querySelector(`.cell[data-index="${index}"]`)
+  if (!el) return
+  sourceEl = el
+  el.style.visibility = 'hidden'
+}
+
+/** 大屏开始退出：背景页立刻跟着去模糊、回正，时长与大屏缩回完全一致 */
+function onBigClosing(duration) {
+  bigClosing.value = true
+  glassMs.value = Number(duration) || 460
+  lockCardsToRest()
 }
 
 /**
- * 真格归位。收起时大窗会在格子淡出前先发 release 把它放出来，
- * 此时它被覆盖层压着看不见，交接处就没有空白也没有突变。
+ * 真格归位。退出时大屏会在缩回动画落位之前先发 release 把它放出来，
+ * 此时它被大屏正面压着看不见，交接处就没有空白也没有突变。
  */
 function restoreSource() {
   const el = sourceEl
@@ -310,9 +436,13 @@ function restoreSource() {
   }))
 }
 
-function onViewerClosed() {
+/** 大屏退出（Esc / 它顶栏那枚控件）后回到卡片墙 */
+function closeBig() {
+  bigOpen.value = false
+  bigClosing.value = false
+  glassMs.value = 600
   restoreSource()
-  viewer.finish()
+  releaseRestAfterPointerMove()
 }
 
 /* ===== 入场的开关 =====
@@ -370,16 +500,21 @@ onMounted(() => {
   }
 })
 
-watch(() => viewer.expanded, (open) => {
-  if (open) {
-    clearTilt()
-    pax.value = 0
-    pay.value = 0
-  }
+// 大屏一开，指针的视差与倾斜立即停住：后面那一页已经不在人眼前了
+watch(bigOpen, (open) => {
+  if (!open) return
+  clearTilt()
+  pax.value = 0
+  pay.value = 0
 })
 
 onBeforeUnmount(() => {
   clearTilt()
+  clearRestLock()
+  if (restReleaseHandler) {
+    window.removeEventListener('pointermove', restReleaseHandler)
+    restReleaseHandler = null
+  }
   if (enterTimer) clearTimeout(enterTimer)
   if (enterGate) clearTimeout(enterGate)
   stopGate?.()
@@ -390,9 +525,9 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="feature"
-    :class="{ 'is-entering': entering, 'is-gated': gated }"
-    :style="enterVars"
-    :inert="viewer.expanded || undefined"
+    :class="{ 'is-entering': entering, 'is-gated': gated, 'is-behind-glass': bigOpen && !bigClosing }"
+    :style="[enterVars, { '--glass-dur': `${glassMs}ms` }]"
+    :inert="bigOpen || undefined"
   >
     <!-- ── 刊头：编辑版式的页眉。左栏是刊名与刊题，右栏是导语加八项目录 ── -->
     <header class="masthead">
@@ -403,8 +538,16 @@ onBeforeUnmount(() => {
         <div class="masthead__lead">
           <span class="masthead__kicker">NATB — 特色功能</span>
           <!-- 双色调标题：后两字退成暖灰，一句四字就分出了主次 -->
-          <h1 class="masthead__title">
-            <span class="masthead__title-a">随心</span><span class="masthead__title-b">所欲</span>
+          <h1 class="masthead__title" aria-label="随心所欲">
+            <span class="masthead__title-mask" aria-hidden="true"
+              ><span class="masthead__title-char masthead__title-a" :style="{ '--j': 0 }">随</span></span
+            ><span class="masthead__title-mask" aria-hidden="true"
+              ><span class="masthead__title-char masthead__title-a" :style="{ '--j': 1 }">心</span></span
+            ><span class="masthead__title-mask" aria-hidden="true"
+              ><span class="masthead__title-char masthead__title-b" :style="{ '--j': 2 }">所</span></span
+            ><span class="masthead__title-mask" aria-hidden="true"
+              ><span class="masthead__title-char masthead__title-b" :style="{ '--j': 3 }">欲</span></span
+            >
           </h1>
         </div>
 
@@ -443,13 +586,13 @@ onBeforeUnmount(() => {
             :key="`top-${i}`"
             class="tile"
             aria-hidden="true"
-            :style="{ '--i': i }"
+            :style="topEnterStyle(i)"
           >
             <img class="tile__img" :src="src" alt="" draggable="false" />
           </span>
 
           <!-- 第二行：左插画 + 四张卡 + 右插画 -->
-          <span class="tile" aria-hidden="true" :style="{ '--i': 6 }">
+          <span class="tile" aria-hidden="true" :style="sideEnterStyle(7.5, -1)">
             <img class="tile__img" :src="DECOR_SIDE[0]" alt="" draggable="false" />
           </span>
           <FeatureCard
@@ -457,14 +600,14 @@ onBeforeUnmount(() => {
             :key="item.idx"
             :item="item"
             :data-index="item.idx"
-            :style="{ '--i': 7 + i }"
+            :style="cardEnterStyle(item.idx)"
           />
-          <span class="tile" aria-hidden="true" :style="{ '--i': 11 }">
+          <span class="tile" aria-hidden="true" :style="sideEnterStyle(7.9, 1)">
             <img class="tile__img" :src="DECOR_SIDE[1]" alt="" draggable="false" />
           </span>
 
           <!-- 第三行：左插画 + 四张卡 + 右插画 -->
-          <span class="tile" aria-hidden="true" :style="{ '--i': 12 }">
+          <span class="tile" aria-hidden="true" :style="sideEnterStyle(8.4, -1)">
             <img class="tile__img" :src="DECOR_SIDE[2]" alt="" draggable="false" />
           </span>
           <FeatureCard
@@ -472,9 +615,9 @@ onBeforeUnmount(() => {
             :key="item.idx"
             :item="item"
             :data-index="item.idx"
-            :style="{ '--i': 13 + i }"
+            :style="cardEnterStyle(item.idx)"
           />
-          <span class="tile" aria-hidden="true" :style="{ '--i': 17 }">
+          <span class="tile" aria-hidden="true" :style="sideEnterStyle(8.8, 1)">
             <img class="tile__img" :src="DECOR_SIDE[3]" alt="" draggable="false" />
           </span>
 
@@ -484,7 +627,7 @@ onBeforeUnmount(() => {
             :key="`bot-${i}`"
             class="tile"
             aria-hidden="true"
-            :style="{ '--i': 18 + i }"
+            :style="bottomEnterStyle(i)"
           >
             <img class="tile__img" :src="src" alt="" draggable="false" />
           </span>
@@ -493,16 +636,20 @@ onBeforeUnmount(() => {
 
     </section>
 
-    <!-- 展开的大窗：Teleport 到 body，压在顶栏之上 -->
-    <FeatureViewer
-      v-if="viewer.expanded && activeItem && originRect"
-      :item="activeItem"
-      :origin="originRect"
-      :origin-parts="originParts"
-      :total="FEATURES.length"
-      @ready="onViewerReady"
+    <!-- 大屏模式：八面 3D 柱体，Teleport 到 body。
+         它常挂载、由 open 自己决定在不在场 —— 组件内部要靠 open 的跳变起跑入场，
+         挂上再卸的写法会让那一段动画从头到尾都用不上。
+         origins 是刚量好的那一格几何：大屏正面从它长大（一镜到底）；
+         ready / release 是两层之间的交接点 —— 真格藏掉、放回都压在动画边界上。 -->
+    <FeatureBigScreen
+      :open="bigOpen"
+      :initial="bigIndex"
+      :origins="origins"
+      :get-origin="getLiveOrigin"
+      @ready="onBigReady"
       @release="restoreSource"
-      @closed="onViewerClosed"
+      @closing="onBigClosing"
+      @close="closeBig"
     />
   </div>
 </template>
@@ -530,6 +677,26 @@ onBeforeUnmount(() => {
   background: var(--paper);
   color: var(--ink);
   user-select: none;
+  /* 大屏打开时这一页要退到玻璃后面（见 .is-behind-glass）：模糊与轻微的推近
+     都走这条过渡，退出时原路回来。曲线与大屏那次接续保持同一组数值 */
+  --glass-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: filter var(--glass-dur, 600ms) var(--glass-ease),
+    scale var(--glass-dur, 600ms) var(--glass-ease);
+}
+
+/* ===== 大屏背后的毛玻璃 =====
+ * 大屏一开，这一页整片退到玻璃后面：真实的 filter: blur，而不是 backdrop-filter。
+ * 为什么不用 backdrop-filter：本机 Chrome 在软件合成路径下会把这条声明**整条丢掉**
+ * （CSS.supports('backdrop-filter', …) 是 true，computed 却读回 none），效果随环境飘；
+ * 而作用在页面自己身上的 filter 任何渲染路径都生效 —— 模糊的还是同一面卡片墙，
+ * 观感一样，而且能被截图直接验到。
+ *
+ * 顺带推近一点点（scale 1.05）：blur 会把四边化开，不外扩就会在屏幕边缘露出一圈
+ * 被纸色冲淡的晕；推近既盖住了那一圈，读起来也是"镜头近了一档"。
+ * 两者都走 .feature 上那条 600ms 的过渡，与大屏自己的接续同一条曲线。 */
+.feature.is-behind-glass {
+  filter: blur(36px) saturate(1.1);
+  scale: 1.05;
 }
 
 /* ===== 刊头 ===== */
@@ -614,6 +781,8 @@ onBeforeUnmount(() => {
 /* 刊题：这一段版面的主角。上一版只有 39px，四个字撑不满左栏，
    右半边又空着，整条页眉就没有落点 */
 .masthead__title {
+  display: flex;
+  align-items: flex-end;
   margin: 0;
   font-size: clamp(40px, 4.4vw, 66px);
   font-weight: 700;
@@ -621,6 +790,20 @@ onBeforeUnmount(() => {
   line-height: 1;
   color: var(--ink);
   white-space: nowrap;
+}
+
+/* 逐字上浮：每个字各有一个裁切窗，升起时只露出纸面上那一截，
+   像活字被逐枚压进版心。比整行一起淡入更像"排印"，也不靠弹跳卖萌。 */
+.masthead__title-mask {
+  display: inline-flex;
+  overflow: hidden;
+  padding: 0.04em 0 0.09em;
+  margin: -0.04em 0 -0.09em;
+}
+
+.masthead__title-char {
+  display: block;
+  transform-origin: 50% 100%;
 }
 
 .masthead__title-b {
@@ -692,6 +875,41 @@ onBeforeUnmount(() => {
   overflow: hidden;
   /* 墨蓝底：图版从深色里浮出来，格与格之间那道缝成了版面的网格线 */
   background: var(--stage);
+  isolation: isolate;
+}
+
+/* 入场时先把整面墙压进暗房，再让卡片一枚枚亮起来；最后一道斜向扫光
+   沿着纸面掠过，是整场入场唯一的"高光时刻"，不参与常态渲染。 */
+.wall::before,
+.wall::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.wall::before {
+  background:
+    radial-gradient(circle at 50% 46%, rgba(13, 18, 25, 0.24), rgba(13, 18, 25, 0.92) 76%),
+    linear-gradient(180deg, rgba(13, 18, 25, 0.36), rgba(13, 18, 25, 0.88));
+}
+
+.wall::after {
+  inset: -9%;
+  z-index: 3;
+  background: linear-gradient(
+    104deg,
+    transparent 41%,
+    rgba(255, 255, 255, 0.04) 46%,
+    rgba(255, 255, 255, 0.14) 48.5%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0.12) 51.5%,
+    rgba(255, 255, 255, 0.03) 54%,
+    transparent 59%
+  );
+  translate: -130% 0;
 }
 
 /*
@@ -855,9 +1073,12 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 入场 =====
- * 这里只管姿态与曲线，起跑点与时长全部来自脚本注入的 --enter-*。
- * 整套都挂在 .is-entering 下：撤掉这个类，动画连同蒙版一起消失，
- * 元素回落到的静态样式就是动画的终态，交接处不跳变。
+ * 这一版不是"整页淡入 + 卡片上浮"，而是一段有三幕的排印过程：
+ *   1. 刊头逐字压进纸面，发丝线从左向右拉出；
+ *   2. 八张功能卡先从暗房里浮起，四周画报再像装订边一样从画外收拢；
+ *   3. 最后一道斜向扫光掠过整面墙，把纸感与卡片的高光一次性串起来。
+ * 所有时间与姿态仍由脚本注入的 --enter-* 驱动，撤掉 .is-entering 后
+ * 元素回落到静态终态，交接不跳帧。
  */
 .feature {
   /* 入场共用一条缓动：只靠错峰分出层次，才像一口气 */
@@ -869,41 +1090,122 @@ onBeforeUnmount(() => {
   visibility: hidden;
 }
 
+/* 第一幕：版心先落位。套准标记像盖章一样定住，刊题逐字从裁切窗里升起。 */
 .feature.is-entering .masthead__mark {
-  animation: enter-fade var(--enter-dur-head) ease both;
+  animation: enter-mark 760ms var(--enter-ease) both;
   animation-delay: var(--enter-mark);
 }
 
 .feature.is-entering .masthead__kicker {
-  animation: enter-rise var(--enter-dur-head) var(--enter-ease) both;
+  animation: enter-wipe 820ms var(--enter-ease) both;
   animation-delay: var(--enter-kicker);
 }
 
-.feature.is-entering .masthead__title {
-  animation: enter-rise var(--enter-dur-head) var(--enter-ease) both;
-  animation-delay: var(--enter-title);
+.feature.is-entering .masthead__title-char {
+  animation: enter-char 980ms var(--enter-ease) both;
+  animation-delay: calc(var(--enter-title) + var(--j, 0) * 52ms);
 }
 
 .feature.is-entering .masthead__rule {
-  animation: enter-rule var(--enter-dur-head) var(--enter-ease) both;
+  animation: enter-rule 980ms var(--enter-ease) both;
   animation-delay: var(--enter-rule);
 }
 
 .feature.is-entering .masthead__lede {
-  animation: enter-rise var(--enter-dur-head) var(--enter-ease) both;
+  animation: enter-line 900ms var(--enter-ease) both;
   animation-delay: var(--enter-lede);
 }
 
 .feature.is-entering .masthead__meta {
-  animation: enter-fade var(--enter-dur-head) ease both;
+  animation: enter-fade 820ms var(--enter-ease) both;
   animation-delay: var(--enter-meta);
 }
 
-/* 十六格一起按序号错峰浮现。位移走 translate 属性 —— transform 留给指针倾斜 */
+/* 第二幕：卡片墙从暗房里显影。镜头感交给明暗与错峰，
+ * 不再缩放整块 108vw × 100vh 的墙面 —— 那是低配机器上最贵的一层。 */
+.feature.is-entering .wall::before {
+  animation: enter-veil 1180ms ease both;
+  animation-delay: var(--enter-cards);
+}
+
+/* 十六格各自带着来自画外的位移与极小角度浮现。
+ * 只用 translate / scale / rotate / opacity：动画全程留在合成层上，
+ * 不再对大块卡面逐帧做 blur 或 clip-path，低配机器也能稳住帧率。 */
 .feature.is-entering .cell,
 .feature.is-entering .tile {
   animation: enter-cell var(--enter-dur-cell) var(--enter-ease) both;
   animation-delay: calc(var(--enter-cards) + var(--i, 0) * var(--enter-cell-step));
+  transform-origin: 50% 100%;
+}
+
+
+/* 第三幕：扫光只发生一次。它不改变任何布局，也不参与常态渲染，
+ * 只在入场末尾把整面墙的纸面高光连成一条线。 */
+.feature.is-entering .wall::after {
+  animation: enter-sweep var(--enter-sweep-dur) cubic-bezier(0.3, 0.02, 0.18, 1) both;
+  animation-delay: var(--enter-sweep);
+}
+
+@keyframes enter-mark {
+  from {
+    opacity: 0;
+    scale: 0.3;
+    rotate: -45deg;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    rotate: 0deg;
+  }
+}
+
+@keyframes enter-wipe {
+  from {
+    opacity: 0;
+    translate: -0.45em 0;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes enter-char {
+  from {
+    opacity: 0;
+    translate: 0 108%;
+    rotate: 1.8deg;
+  }
+  58% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    rotate: 0deg;
+  }
+}
+
+@keyframes enter-rule {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes enter-line {
+  from {
+    opacity: 0;
+    translate: 0 0.5em;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 
 @keyframes enter-fade {
@@ -915,37 +1217,53 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes enter-rise {
-  from {
-    opacity: 0;
-    translate: 0 0.5em;
+@keyframes enter-veil {
+  0% {
+    opacity: 0.96;
   }
-  to {
-    opacity: 1;
-    translate: 0 0;
+  55% {
+    opacity: 0.34;
+  }
+  100% {
+    opacity: 0;
   }
 }
 
-@keyframes enter-rule {
-  from {
-    opacity: 0;
-    transform: scaleX(0);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* 格子从下方浮上来，并顺带把"窗口浮起"那点位移预演一遍 */
 @keyframes enter-cell {
-  from {
+  0% {
     opacity: 0;
-    translate: 0 22px;
+    translate: var(--enter-x, 0px) var(--enter-y, 36px);
+    scale: 0.925;
+    rotate: var(--enter-rot, 0deg);
   }
-  to {
+  28% {
+    opacity: 0.7;
+  }
+  58% {
+    opacity: 1;
+  }
+  100% {
     opacity: 1;
     translate: 0 0;
+    scale: 1;
+    rotate: 0deg;
+  }
+}
+
+@keyframes enter-sweep {
+  0% {
+    opacity: 0;
+    translate: -130% 0;
+  }
+  10% {
+    opacity: 0.9;
+  }
+  62% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    translate: 130% 0;
   }
 }
 
@@ -956,13 +1274,25 @@ onBeforeUnmount(() => {
   }
 
   .feature.is-entering .cell,
+  .feature.is-entering .tile,
+  .feature.is-entering .wall::before,
+  .feature.is-entering .wall::after,
   .feature.is-entering .masthead__mark,
   .feature.is-entering .masthead__kicker,
-  .feature.is-entering .masthead__title,
+  .feature.is-entering .masthead__title-char,
   .feature.is-entering .masthead__rule,
   .feature.is-entering .masthead__lede,
   .feature.is-entering .masthead__meta {
     animation: none;
+  }
+}
+
+/* 减少透明：大屏背后不再磨砂 —— 那一侧会换成 v4 那块实色舞台，
+   这一页保持原样退到它后面就行 */
+@media (prefers-reduced-transparency: reduce) {
+  .feature.is-behind-glass {
+    filter: none;
+    scale: 1;
   }
 }
 </style>

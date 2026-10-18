@@ -184,12 +184,19 @@ import IconX from '~icons/lucide/x'
 import TiltCard from './3dcard.vue'
 
 const props = defineProps({
-  /** 大屏模式开着没有。模式本身不自持状态：接线那一侧说了算 */
-  open: { type: Boolean, default: true },
+  /** 大屏模式开着没有。模式本身不自持状态：由 features 页说了算 */
+  open: { type: Boolean, default: false },
   /** 开场正对镜头的是第几面（0 起）。从某张卡进大屏时用它直接定位 */
   initial: { type: Number, default: 0 },
+  /**
+   * 一镜到底的起点：{ [面序号]: { cell, parts } }，由 features 页在点击那一刻量好。
+   * 没有它（起点几何缺失）就退回原来那套「整圈摆进来」的入场。
+   */
+  origins: { type: Object, default: null },
+  /** 退场时每帧读取源卡当前几何；卡片墙的视差 / 页面缩放还在动，终点必须跟着走 */
+  getOrigin: { type: Function, default: null },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'ready', 'release', 'closing'])
 
 /* ===== 色板 =====
  * 八块都是低饱和纸感色：深墨蓝舞台之上，一圈浅色立牌就是一圈灯笼。
@@ -444,6 +451,8 @@ function holdPointer() {
 
 function step(delta) {
   if (!delta) return
+  // 接续 / 缩回期间整圈不许动：正面正被 FLIP 拿着，转一下几何就对不上了
+  if (flipping.value) return
   finishEntrance()
   noteSwitch()
   holdPointer()
@@ -471,6 +480,11 @@ const wheelPx = (event) =>
 function onWheel(event) {
   const dy = wheelPx(event)
   if (!dy) return
+  // 接续 / 缩回期间不换面（与 step 同一条守卫），但滚轮照样拦下，不丢给外层
+  if (flipping.value) {
+    event.preventDefault()
+    return
+  }
   finishEntrance()
   // 页面锁死在视窗里，本没有滚动可抢；拦下来是为了不把滚轮事件链给外层
   event.preventDefault()
@@ -484,7 +498,359 @@ function onWheel(event) {
   step(dir * steps)
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * v8 · 一镜到底（从卡片接续）
+ *
+ * 点某一格进大屏时不再"切一屏"：正对镜头的那一面从被点那一格的真实几何
+ * （位置、未旋转宽高、倾斜角、圆角）长大到正位，逐元素接续 —— 标题飞标题、
+ * 导语飞导语、图版从卡片中心抽出来；卡片上没有对应物的块（眉标、要点、参数）
+ * 等壳落位大半再浮起。退出时用同一套几何写反向关键帧，缩回当前这一面自己的卡。
+ *
+ * 为什么能动：正对镜头那一面在环上的 3D 变换只剩 translateZ（rotateY(0)），
+ * 透视对它是均匀缩放，所以"屏幕矩形"与"皮肤局部尺寸"之间只差一个常数比 ——
+ * 量一次终态矩形、再量一次皮肤的布局宽，就反算出起手该给多少 translate / scale，
+ * 不必去解析透视矩阵。放大照旧只写在 .face__skin（2D 皮肤层）上，
+ * 柱体的 3D transform 一个字没动，v7 那三条不变式一条没破。
+ *
+ * 从卡片进来时整圈**不摆入**、舞台也不淡入（stage 淡入会让正面跟着半透明，
+ * 起手帧就对不上卡片了）：这两条由 .is-flipping 那组样式负责，它同时把大屏自己的
+ * 控件按原来的顺序送进来 —— 关键帧与 .is-entering 那套共用，不另写一条时间轴。
+ * 其余七面直接在场：给单个 .face 落 opacity 会让它变成独立透明组，
+ * preserve-3d 里的远近排序就不可靠了，不值当。
+ *
+ * 交接协议（与 features 页的 @ready / @release / @closing 对齐）：
+ *   起手前   emit('ready', face)    真格藏掉（皮肤起手几乎全透明，重叠的两帧看不出来）
+ *   缩回前   emit('closing', ms)   宿主把背景页同拍去模糊、回正
+ *   缩回时   emit('release')       真格放回（它被大屏正面压着，也不会突变）
+ *   落位之后 emit('close')         宿主收掉大屏
+ * ══════════════════════════════════════════════════════════════════════════ */
+const screenEl = ref(null)
+/** 正在接续 / 正在缩回：这一段时间里换面与指针跟随都要停手 */
+const flipping = ref(false)
+/** 缩回中：七面、控件、背景要跟着淡走（见样式里 .is-unflipping 那组） */
+const unflipping = ref(false)
+/** 本次接续 / 缩回的全部 WAAPI 动画。退出时先取消上一轮再重建，不靠倒放碰运气 */
+let flipAnims = []
+let flipTimer = 0
+let flipRaf = 0
+let flipClosing = false
+
+/* 两个方向共用一套几何，但时长分开：
+ *   进入 740ms —— 从一格长到满屏，需要足够行程让"长大"读得出来；
+ *   退出 460ms —— 用户已经做过决定，点到即走，必须明显快于进入。
+ * 退出不再复用倒放 + 负速率：那会让动画先 pending 一帧、并多出一段 130ms 的
+ * 交接淡出，实测整段反而接近甚至超过进入。这里直接写反向关键帧，起止时间可控。 */
+const FLIP_IN_MS = 740
+const FLIP_CORNER_MS = 360
+const FLIP_OUT_MS = 460
+/** 退出最后这段整体交叉淡化：让纸色大屏和卡片插画在同尺寸下交出去 */
+const FLIP_OUT_FADE_MS = 100
+/** 进入 / 退出共用：浏览器标准的平滑 ease，起手不迟滞、中段不过冲、收尾缓落 */
+const FLIP_EASE = 'cubic-bezier(0.25, 0.1, 0.25, 1)'
+/** 退出相关 CSS 动画共用同一条时间轴；控件和侧板先收，正面缩回走到最后 */
+const flipVars = {
+  '--flip-out-dur': ms(FLIP_OUT_MS),
+  '--flip-out-side': ms(Math.round(FLIP_OUT_MS * 0.48)),
+  '--flip-out-ctl': ms(Math.round(FLIP_OUT_MS * 0.4)),
+  '--flip-ease': FLIP_EASE,
+}
+
+function flipPlay(el, frames, opts) {
+  if (!el) return null
+  const anim = el.animate(frames, opts)
+  flipAnims.push(anim)
+  return anim
+}
+
+function flipMid(el) {
+  const r = el.getBoundingClientRect()
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }
+}
+
+/** 给定固定的大屏终态矩形，算出源卡当前几何对应的 transform 参数 */
+function flipTarget(origin, end, skinWidth, restSX = 1, restSY = 1) {
+  const o = origin?.cell
+  if (!o || !end || !skinWidth) return null
+  // end.w 同时包含皮肤自带的 scale(1.03) 和父级透视投影，不能混成一个 k。
+  const k = end.w / skinWidth || 1
+  const project = k / (restSX || 1)
+  const sx = (o.w / end.w) * restSX
+  const sy = (o.h / end.h) * restSY
+  const dx = (o.cx - end.x) / project
+  const dy = (o.cy - end.y) / project
+  return { o, k, sx, sy, dx, dy }
+}
+
+/** 一次量齐从卡片到大屏所需的几何，进出两个方向共用 */
+function flipGeometry(skin, origin, end = flipMid(skin)) {
+  if (!skin) return null
+  const rest = getComputedStyle(skin).transform
+  let restSX = 1
+  let restSY = 1
+  try {
+    const m = new DOMMatrixReadOnly(rest)
+    restSX = m.a || 1
+    restSY = m.d || 1
+  } catch {
+    // 读不到矩阵时按 1 处理
+  }
+  const target = flipTarget(origin, end, skin.offsetWidth, restSX, restSY)
+  if (!target) return null
+  const rBig = parseFloat(getComputedStyle(skin).borderRadius) || 0
+  const rSrc = target.o.radius || rBig * (target.sx / (restSX || 1))
+  return { ...target, end, rest, restSX, restSY, rBig, rSrc }
+}
+
+/** 大屏正面压回源卡时，皮肤层自己的 transform */
+function sourceTransform(g) {
+  return `translateZ(0) translate(${g.dx.toFixed(3)}px, ${g.dy.toFixed(3)}px) rotate(${g.o.rot}deg) scale(${g.sx.toFixed(4)}, ${g.sy.toFixed(4)})`
+}
+
+/** 与退出 CSS 曲线同一组数值；逐帧跟随时要自己算进度 */
+function makeCubicBezier(x1, y1, x2, y2) {
+  const cx = 3 * x1
+  const bx = 3 * (x2 - x1) - cx
+  const ax = 1 - cx - bx
+  const cy = 3 * y1
+  const by = 3 * (y2 - y1) - cy
+  const ay = 1 - cy - by
+  const sx = (t) => ((ax * t + bx) * t + cx) * t
+  const sy = (t) => ((ay * t + by) * t + cy) * t
+  const solve = (x) => {
+    let t = x
+    for (let i = 0; i < 8; i += 1) {
+      const err = sx(t) - x
+      if (Math.abs(err) < 1e-6) break
+      const d = (3 * ax * t + 2 * bx) * t + cx
+      if (Math.abs(d) < 1e-6) break
+      t -= err / d
+    }
+    return Math.min(1, Math.max(0, t))
+  }
+  return (x) => sy(solve(Math.min(1, Math.max(0, x))))
+}
+
+const easeFlip = makeCubicBezier(0.25, 0.1, 0.25, 1)
+
+/** 有起点几何、且不是少动效，才走一镜到底；否则退回原来那套整圈摆入 */
+function startFlipOrEntrance() {
+  const o = props.origins?.[face.value]?.cell
+  if (reduceMotion || !o) {
+    startEntrance()
+    return
+  }
+  entering.value = false
+  flipping.value = true
+  runFlipIn()
+}
+
+/**
+ * 从卡片长大到正位。
+ * 几何一次量齐再起动画：起手之后每一次 getBoundingClientRect 都会把刚写的
+ * transform 逼着同步重排一次，散着量就是每量一次卡一下。
+ */
+function runFlipIn() {
+  const front = screenEl.value?.querySelector('.face.is-front')
+  const skin = front?.querySelector('.face__skin')
+  const origin = props.origins?.[face.value]
+  const g = flipGeometry(skin, origin)
+  if (!front || !skin || !g) {
+    // 起点几何不在：退回整圈摆入
+    flipping.value = false
+    startEntrance()
+    return
+  }
+
+  // 把终态矩形、皮肤局部宽度与静止缩放固定下来；之后每帧只换源卡几何
+  const { o, sx, sy, rest, rBig, rSrc } = g
+  const base = { easing: FLIP_EASE, fill: 'both', duration: FLIP_IN_MS }
+  const from = sourceTransform(g)
+
+  emit('ready', face.value)
+  flipPlay(skin, [
+    { transform: from, opacity: 0.02 },
+    { transform: from, opacity: 1, offset: 0.1 },
+    { transform: rest, opacity: 1 },
+  ], base)
+  flipPlay(skin, [
+    { borderRadius: `${(rSrc / sx).toFixed(2)}px / ${(rSrc / sy).toFixed(2)}px` },
+    { borderRadius: `${rBig}px` },
+  ], { ...base, duration: FLIP_CORNER_MS })
+
+  const parts = origin.parts || {}
+  const fonts = parts.fonts || {}
+  const fly = (el, src, delay, srcFont) => {
+    if (!el || !src) return
+    const box = flipMid(el)
+    const kk = srcFont ? srcFont / parseFloat(getComputedStyle(el).fontSize) : src.w / box.w
+    flipPlay(el, [
+      {
+        transform: `translateZ(0) translate(${(src.cx - box.x).toFixed(2)}px, ${(src.cy - box.y).toFixed(2)}px) rotate(${src.rot}deg) scale(${kk.toFixed(4)})`,
+        opacity: 0,
+      },
+      { transform: 'translateZ(0) translate(0px, 0px) rotate(0deg) scale(1)', opacity: 1 },
+    ], { ...base, duration: FLIP_IN_MS - delay, delay })
+  }
+  fly(front.querySelector('.face__title'), parts.title, 80, fonts.title)
+  fly(front.querySelector('.face__desc'), parts.desc, 120, fonts.desc)
+
+  const plate = front.querySelector('.face__plate')
+  if (plate) {
+    const box = flipMid(plate)
+    flipPlay(plate, [
+      {
+        transform: `translateZ(0) translate(${(o.cx - box.x).toFixed(2)}px, ${(o.cy - box.y).toFixed(2)}px) rotate(${o.rot}deg) scale(0.26)`,
+        opacity: 0.02,
+      },
+      { transform: 'translateZ(0) translate(0px, 0px) rotate(0deg) scale(1)', opacity: 1 },
+    ], { ...base, duration: FLIP_IN_MS - 150, delay: 150 })
+  }
+
+  const rise = (el, delay) => {
+    if (!el) return
+    flipPlay(el, [
+      { opacity: 0, transform: 'translateZ(0) translateY(0.7vh)' },
+      { opacity: 1, transform: 'translateZ(0) translateY(0px)' },
+    ], { ...base, duration: FLIP_IN_MS - delay, delay })
+  }
+  rise(front.querySelector('.face__eyebrow'), 340)
+  rise(front.querySelector('.face__points'), 400)
+  rise(front.querySelector('.face__specs'), 460)
+
+  clearTimeout(flipTimer)
+  flipTimer = window.setTimeout(() => {
+    flipTimer = 0
+    if (!flipClosing) flipping.value = false
+  }, FLIP_IN_MS + 40)
+}
+
+function stopFlip() {
+  clearTimeout(flipTimer)
+  flipTimer = 0
+  if (flipRaf) {
+    cancelAnimationFrame(flipRaf)
+    flipRaf = 0
+  }
+  flipAnims.forEach((anim) => anim.cancel())
+  flipAnims = []
+  flipClosing = false
+  flipping.value = false
+  unflipping.value = false
+}
+
+async function runFlipOut() {
+  if (flipClosing) return
+  flipClosing = true
+
+  const screen = screenEl.value
+  const front = screen?.querySelector('.face.is-front')
+  const skin = front?.querySelector('.face__skin')
+  const origin = props.origins?.[face.value]?.rest || props.origins?.[face.value]
+  const g = flipGeometry(skin, origin)
+
+  if (!screen || !front || !skin || !g || flipping.value || turning.value) {
+    const duration = reduceMotion ? 1 : 180
+    emit('closing', duration)
+    emit('release')
+    flipping.value = true
+    unflipping.value = true
+    const fade = screen?.animate(
+      [{ opacity: 1 }, { opacity: 0 }],
+      { duration, easing: 'linear', fill: 'both' },
+    )
+    await (fade?.finished.catch(() => {}) ?? Promise.resolve())
+    emit('close')
+    return
+  }
+
+  finishEntrance()
+  flipAnims.forEach((anim) => anim.cancel())
+  flipAnims = []
+  flipping.value = true
+  unflipping.value = true
+  emit('closing', FLIP_OUT_MS)
+  emit('release')
+
+  const end = flipMid(skin)
+  const skinWidth = skin.offsetWidth
+  const { restSX, restSY, rBig } = g
+
+  const motion = new Promise((resolve) => {
+    const started = performance.now()
+    const prevTransition = skin.style.transition
+    skin.style.transition = 'none'
+
+    const step = (now) => {
+      const t = Math.min(1, Math.max(0, (now - started) / FLIP_OUT_MS))
+      const p = easeFlip(t)
+      const live = props.getOrigin?.(face.value) || origin
+      const target = flipTarget(live, end, skinWidth, restSX, restSY)
+      if (!target) {
+        flipRaf = 0
+        skin.style.transition = prevTransition
+        resolve()
+        return
+      }
+      const tx = target.dx * p
+      const ty = target.dy * p
+      const rx = restSX + (target.sx - restSX) * p
+      const ry = restSY + (target.sy - restSY) * p
+      const rot = target.o.rot * p
+      skin.style.transform = `translateZ(0) translate(${tx.toFixed(3)}px, ${ty.toFixed(3)}px) rotate(${rot.toFixed(3)}deg) scale(${rx.toFixed(4)}, ${ry.toFixed(4)})`
+      const rSrc = target.o.radius || rBig * (target.sx / (restSX || 1))
+      const brx = rBig + (rSrc / target.sx - rBig) * p
+      const bry = rBig + (rSrc / target.sy - rBig) * p
+      skin.style.borderRadius = `${brx.toFixed(2)}px / ${bry.toFixed(2)}px`
+      if (t < 1) {
+        flipRaf = requestAnimationFrame(step)
+      } else {
+        flipRaf = 0
+        skin.style.transition = prevTransition
+        resolve()
+      }
+    }
+    flipRaf = requestAnimationFrame(step)
+  })
+
+  const fadeContent = (el) => {
+    if (!el) return
+    flipPlay(el, [{ opacity: 1 }, { opacity: 0 }], {
+      duration: Math.round(FLIP_OUT_MS * 0.42),
+      easing: 'ease',
+      fill: 'both',
+    })
+  }
+  fadeContent(front.querySelector('.face__main'))
+  fadeContent(front.querySelector('.face__plate'))
+
+  const fadeStart = 1 - FLIP_OUT_FADE_MS / FLIP_OUT_MS
+  flipPlay(screen, [
+    { opacity: 1, offset: 0 },
+    { opacity: 1, offset: fadeStart },
+    { opacity: 0, offset: 1 },
+  ], { duration: FLIP_OUT_MS, easing: 'linear', fill: 'both' })
+
+  await Promise.all([
+    motion,
+    ...flipAnims.map((anim) => anim.finished.catch(() => {})),
+  ])
+  emit('close')
+}
+
+/** 大屏退出入口：只负责决定是走完整缩回，还是做一次极短淡出 */
 function close() {
+  if (flipClosing) return
+  if (reduceMotion) {
+    finishEntrance()
+    emit('closing', 0)
+    emit('release')
+    emit('close')
+    return
+  }
+  if (flipAnims.length || flipping.value) {
+    runFlipOut()
+    return
+  }
   finishEntrance()
   emit('close')
 }
@@ -527,17 +893,20 @@ function startEntrance() {
   enterTimer = window.setTimeout(finishEntrance, ENTER_END)
 }
 
-/** 每开一次都从 initial 那一面起跑 */
+/** 每开一次都从 initial 那一面起跑：有起点几何就走一镜到底，否则整圈摆入 */
 watch(
   () => props.open,
   (on) => {
     if (!on) {
       finishEntrance()
+      // 宿主收掉大屏：这一轮接续的动画与状态一并清掉，下次从干净的开
+      stopFlip()
       return
     }
+    unflipping.value = false
     wheelAcc = 0
     index.value = props.initial || 0
-    nextTick(startEntrance)
+    nextTick(startFlipOrEntrance)
   },
 )
 
@@ -550,10 +919,11 @@ watch(
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
-  if (props.open) startEntrance()
+  if (props.open) startFlipOrEntrance()
 })
 
 onBeforeUnmount(() => {
+  stopFlip()
   if (enterTimer) clearTimeout(enterTimer)
   if (turnTimer) clearTimeout(turnTimer)
   if (liveTimer) clearTimeout(liveTimer)
@@ -590,9 +960,15 @@ watch(
   <Teleport to="body">
     <div
       v-if="open"
+      ref="screenEl"
       class="screen"
-      :class="{ 'is-entering': entering, 'is-turning': turning }"
-      :style="[ringVars, enterVars, { '--dur-k': combo ? COMBO_K : 1 }]"
+      :class="{
+        'is-entering': entering,
+        'is-turning': turning,
+        'is-flipping': flipping,
+        'is-unflipping': unflipping,
+      }"
+      :style="[ringVars, enterVars, flipVars, { '--dur-k': combo ? COMBO_K : 1 }]"
       role="dialog"
       aria-modal="true"
       aria-label="特色功能大屏模式"
@@ -632,7 +1008,7 @@ watch(
                      不是把整面晃出去。 -->
                 <TiltCard
                   class="face__shell"
-                  :disabled="face !== i || turning"
+                  :disabled="face !== i || turning || flipping"
                   :max-tilt="2.5"
                   :perspective="1500"
                   :scale="1"
@@ -859,6 +1235,12 @@ watch(
   /* ── 舞台：深墨蓝，图版从这里浮出来 ── */
   --stage: rgb(40, 50, 61);
   --stage-deep: rgb(15, 21, 28);
+  /* v8 毛玻璃（见 .screen__backdrop）：底色两档 + 光池那条亮带。
+     0.7 是"背后的卡片墙透得出来、浅色彩页又压得住"的那一档 ——
+     0.55 实测在 features 那面彩墙前面太灰，卡片浮不出来。 */
+  --glass: rgba(22, 30, 40, 0.7);
+  --glass-deep: rgba(12, 17, 23, 0.62);
+  --glass-mid: rgba(40, 50, 61, 0.1);
   --on-stage: #f4f7fa;
   /* v4：三档一起上调。--on-stage-3 只用在刊头那个斜杠上，v3 的 0.48 实测约 3.9:1 ——
      它落在文字行里，就按正文口径要 4.5:1，抬到 0.58 得约 6.4:1 */
@@ -980,29 +1362,43 @@ watch(
   z-index: 120;
   overflow: hidden;
   box-sizing: border-box;
-  background: var(--stage);
+  /* v8：底色交给下面那层毛玻璃（.screen__backdrop），这一层必须透 ——
+     这里若留一个不透明底，backdrop-filter 采到的就是它自己的纯色，毛玻璃也就没了 */
+  background: transparent;
   color: var(--on-stage);
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ===== 背景 ===== */
+/* ===== 背景（v8 · 毛玻璃）=====
+ * 大屏不再是一块独立的深墨蓝舞台，而是压在这一页之上的一层玻璃：背后的卡片墙被
+ * 磨砂虚化，正对镜头那一面从卡片里长出来时，"从墙里长出来"这件事才看得见 ——
+ * v4–v7 那层实色舞台把背后挡死了，卡片像是在空白里长大。
+ *
+ * 模糊**不在这里做**：backdrop-filter 在本机 Chrome 的软件合成路径下会被整条丢掉
+ * （CSS.supports 说支持、computed 却读回 none，见 Features.vue 的 .is-behind-glass），
+ * 所以磨砂交给背后那一页自己的 filter —— 任何渲染路径都生效，也能被截图验到。
+ * 这一层只负责那口深色玻璃的底色，以及出场时"渐渐化开"的 opacity 动画
+ * （blur 不参与动画，背后的模糊结果才能被整段复用）。
+ *
+ * 底色只到 --glass（0.7）：再深就退回实色舞台，再浅压不住背后的彩页。
+ * 卡片上的墨字不靠这一层衬 —— 它们压在自己的纸色上，所以这一层可以放开半透明。 */
 .screen__backdrop {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  background: var(--glass);
 }
 
-/* ===== 背景（v4 口径恢复）=====
- * 舞台回到 v4：上下压深、中间一条亮带，卡片落在光带上。
- * （v5 一度把整屏背景换成封面模糊 —— 那是我看错了对象：要换的是**卡片**的背景，
- *   不是页面的。这一层因此原样退回 v4，封面改用在卡片自己身上，见 .face__wash。） */
+/* ===== 光池（v4 口径保留，v8 改成半透明叠加）=====
+ * 仍是"上下压深、中间一条亮带"，卡片落在光带上。整层半透明 ——
+ * 它压在毛玻璃之上，实色会把刚磨出来的质地重新盖死。 */
 .screen__glow {
   position: absolute;
   inset: 0;
   background:
     radial-gradient(52% 44% at 50% 48%, rgba(158, 188, 222, 0.16), rgba(158, 188, 222, 0) 72%),
-    linear-gradient(180deg, var(--stage-deep) 0%, var(--stage) 46%, var(--stage-deep) 100%);
+    linear-gradient(180deg, var(--glass-deep) 0%, var(--glass-mid) 46%, var(--glass-deep) 100%);
 }
 
 /* ===== 顶部一条（版心行）=====
@@ -2472,6 +2868,94 @@ watch(
   }
 }
 
+/* ===== 一镜到底（v8）=====
+ * 从卡片进来时整圈**不摆入**、舞台也不淡入：正面正被 FLIP 拿着从卡片长大，
+ * 舞台若同时淡入，起手帧上的正面就是半透明的，对不上底下那张卡。
+ * 这一组负责三件事：控件按顺序送进来（关键帧与 .is-entering 那套共用，时间轴不写第二遍）、
+ * 背景从"清晰的卡片墙"化开成毛玻璃、两侧那七面从更小更暗处浮起来。
+ *
+ * 七面的渐变写在 .face__skin 上，不写在 .face 上：给 .face 落 opacity 会让整面变成
+ * 一个独立透明组，preserve-3d 里的远近排序就不可靠了；皮肤本来就是一张带裁剪、
+ * 圆角与阴影的独立层，动它没有这个问题，而且缩的是"板子上的画"，不是环的姿态。
+ *
+ * 缩回时控件与侧板用 animation-direction: reverse 快速淡出；
+ * 正面则由 WAAPI 写一套反向关键帧缩回，两者共用 560ms 的退出时间轴。 */
+.screen.is-flipping .screen__backdrop {
+  /* 只动 opacity：blur 不参与动画（理由见 .screen__backdrop 那段）。
+     它比正面晚起一拍 —— 起手那两帧正面还贴着卡片，背景先亮就露馅了 */
+  animation: enter-fade 520ms var(--flip-ease) both;
+  animation-delay: 80ms;
+}
+
+.screen.is-flipping .face:not(.is-front) .face__skin {
+  /* 比正面晚 220ms：读起来是"正面先从卡里长出来，一圈随后围上来"，
+     并与壳大致同时收尾（160 + 580 = 壳那 740ms） */
+  animation: flip-side-in 580ms var(--flip-ease) both;
+  animation-delay: 180ms;
+}
+
+/* 正面那张的封面模糊（.face__wash）：壳从四分之一个屏幕长到满屏时，这一层是
+ * 整段动画里最贵的一笔 —— blur(10px) 的绘制面积本来就是卡片的 1.64 倍，
+ * 再乘上放大后的像素尺寸，等于每帧重算一张 1500×1000 的模糊。它只是底纹
+ * （纸色与暗纱压在它上面），所以接续期间先收掉模糊、换同一张清晰图：
+ * 壳在动的时候那点糊看不出来，落位之后模糊回来（那一刻壳已经停住）。 */
+.screen.is-flipping .face.is-front .face__wash {
+  filter: none;
+}
+
+.screen.is-flipping .screen__top {
+  animation: enter-rise 300ms var(--flip-ease) both;
+  animation-delay: 120ms;
+}
+
+.screen.is-flipping .screen__exit {
+  animation: enter-pop 270ms var(--flip-ease) both;
+  animation-delay: 180ms;
+}
+
+.screen.is-flipping .screen__nav--prev {
+  animation: enter-nav-left 260ms var(--flip-ease) both;
+  animation-delay: 380ms;
+}
+
+.screen.is-flipping .screen__nav--next {
+  animation: enter-nav-right 260ms var(--flip-ease) both;
+  animation-delay: 430ms;
+}
+
+.screen.is-flipping .meter__seg {
+  transform-origin: center;
+  animation: enter-piece 240ms var(--flip-ease) both;
+  animation-delay: calc(360ms + var(--m-i, 0) * 20ms);
+}
+
+.screen.is-unflipping .screen__backdrop,
+.screen.is-unflipping .screen__top,
+.screen.is-unflipping .screen__exit,
+.screen.is-unflipping .screen__nav,
+.screen.is-unflipping .meter__seg {
+  animation: enter-fade var(--flip-out-ctl) var(--flip-ease) both reverse;
+}
+
+/* 七面往回缩：与进来时同一条关键帧反着播 —— 环缩回卡片那一刻正好淡尽。
+   壳反向是 960 / 1.5 = 640ms，这一条与它同量级 */
+.screen.is-unflipping .face:not(.is-front) .face__skin {
+  animation: flip-side-in var(--flip-out-side) var(--flip-ease) both reverse;
+}
+
+/* 侧面那一圈浮起来：只做透明度。
+ * 这里**故意不缩放** —— 与 v7 那笔账同一个道理：scale 会让这七张卡（连同各自的
+ * 封面模糊）每帧重新光栅化；它们本来就在 3D 里斜着，缩 7% 根本看不出来，
+ * 代价却是整段动画里最贵的一笔。 */
+@keyframes flip-side-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* ===== 高对比度偏好（v4）=====
  * 用户在系统里要求"提高对比度"：发丝线整体加重一档、墨字再压深、
  * 暗纱收到最低。侧面板的层级改由缩放（透视）与投影承担 —— 那两样本来就在，
@@ -2496,14 +2980,26 @@ watch(
   .face__shotwrap::after {
     opacity: 0.5;
   }
+
+  /* 毛玻璃也压实一档：提高对比度的用户要的是"层次清楚"，
+     不是"背后的彩页透出来"（模糊值照旧，只把底色推近实色） */
+  .screen__backdrop {
+    background: rgba(15, 21, 28, 0.82);
+  }
 }
 
 /* ===== 减少透明（v4）=====
  * 控件那层薄玻璃换成一块实底。玻璃在深色舞台上本来就只是"淡淡的一层底"，
- * 换成实色视觉上几乎无差，但对要求减少透明度的用户是必需的 */
+ * 换成实色视觉上几乎无差，但对要求减少透明度的用户是必需的。
+ * v8 起这条偏好还管住整屏背景：半透明玻璃换成 v4 那块实色舞台
+ * （背后的模糊由 Features 页自己那条媒体查询撤掉）。 */
 @media (prefers-reduced-transparency: reduce) {
   .screen {
     --ctrl-bg: rgb(46, 57, 70);
+  }
+
+  .screen__backdrop {
+    background: var(--stage);
   }
 }
 

@@ -7,7 +7,7 @@
  *
  * 去掉总览坞：删掉带 [HARNESS-DOCK] 的行，再把下面的 <component :is> 换成固定某一页即可。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import NavBar from './components/NavBar.vue'
 import { useAnimationStore } from '@/stores/animation'
@@ -40,6 +40,17 @@ const frame = (() => {
   const m = /^(\d{3,4})x(\d{3,4})$/.exec(params.get('frame') || '')
   return m ? { width: Number(m[1]), height: Number(m[2]) } : null
 })()
+
+/* 顶栏不想直接碰宿主的 activeId：它只广播 natb:tab，这里校验后落到注册表里 */
+const TAB_IDS = new Set(DOCK_TABS.map((tab) => tab.id))
+
+function onTabRequest(event) {
+  const id = event?.detail
+  if (typeof id === 'string' && TAB_IDS.has(id)) activeId.value = id
+}
+
+onMounted(() => window.addEventListener('natb:tab', onTabRequest))
+onBeforeUnmount(() => window.removeEventListener('natb:tab', onTabRequest))
 </script>
 
 <template>
@@ -53,8 +64,8 @@ const frame = (() => {
       <NavBar />
     </div>
 
-    <!-- [HARNESS-DOCK] ④ 背景层：整屏渲染当前标签页；功能页放大状态暂行预览 的 close 回到首页 -->
-    <component :is="activeTab.comp" :key="activeId" v-bind="activeTab.props || {}" @close="activeId = DOCK_HOME" />
+    <!-- [HARNESS-DOCK] ④ 背景层：整屏渲染当前标签页 -->
+    <component :is="activeTab.comp" :key="activeId" />
 
     <!-- 底部控制条：切换 + Ctrl+K 显隐 + 顶栏开关 -->
     <HarnessDock v-model="activeId" v-model:nav="navOpen" />
