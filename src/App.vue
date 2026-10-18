@@ -10,6 +10,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import NavBar from './components/NavBar.vue'
+import DraggableGlass from './components/DraggableGlass.vue'
 import { useAnimationStore } from '@/stores/animation'
 // [HARNESS-DOCK] ① 注册表（唯一数据源就在 HarnessDock.vue 里，这里只引用）
 import HarnessDock, { DOCK_TABS, DOCK_HOME } from './components/HarnessDock.vue'
@@ -69,6 +70,9 @@ onBeforeUnmount(() => window.removeEventListener('natb:tab', onTabRequest))
 
     <!-- 底部控制条：切换 + Ctrl+K 显隐 + 顶栏开关 -->
     <HarnessDock v-model="activeId" v-model:nav="navOpen" />
+
+    <!-- 可拖动的液态玻璃：挂在这里，四个页面共用同一枚（位置不持久化） -->
+    <DraggableGlass />
   </template>
 </template>
 
