@@ -2,6 +2,7 @@
 import FeatureCard from '@/components/FeatureCard.vue'
 import FeatureBigScreen from '@/components/FeatureBigScreen.vue'
 import { useAnimationStore } from '@/stores/animation'
+import { whenIdle } from '@/gl/idleWork'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 // 图标沿用 solar 的 bold-duotone：两路同色不同明度，压成单色后层次还在
@@ -199,6 +200,8 @@ const bigIndex = ref(0)
 const origins = ref(null)
 // 当前被藏起来的那一格：起手时藏掉、退出时放回来。不是响应式的 —— 它只是 DOM 交接的把手
 let sourceEl = null
+// 退场途中被点下的那一格：等这次退场收完再开，不打断动画
+let pendingPick = null
 
 const gridEl = ref(null)
 const wallEl = ref(null)
@@ -214,7 +217,40 @@ const pay = ref(0)
 const TILT_MAX = 9
 let tiltCell = null
 
+/* 指针事件的账：一个 move 事件读一次 getBoundingClientRect，就是逼一次样式重算 + 布局
+ * （真机 pointerover 累计 284ms）。所以几何一律缓存 —— 指针跨进一格才量一次，墙量一次；
+ * 写样式也合帧，一次事件循环最多写一次。
+ */
+let wallRect = null
+let tiltRect = null
+let ptr = null
+let tiltRaf = 0
+
+/** 一次只写一遍：视差与倾斜都在这里落地 */
+function flushPointer() {
+  tiltRaf = 0
+  const p = ptr
+  if (!p) return
+  const wall = wallEl.value
+  if (wall) {
+    if (!wallRect) wallRect = wall.getBoundingClientRect()
+    pax.value = (0.5 - (p.x - wallRect.left) / wallRect.width) * 14
+    pay.value = (0.5 - (p.y - wallRect.top) / wallRect.height) * 10
+  }
+  if (!tiltCell || !tiltRect) return
+  const nx = (p.x - tiltRect.left) / tiltRect.width - 0.5
+  const ny = (p.y - tiltRect.top) / tiltRect.height - 0.5
+  tiltCell.style.setProperty('--tilt-y', `${(nx * TILT_MAX * 2).toFixed(2)}deg`)
+  tiltCell.style.setProperty('--tilt-x', `${(-ny * TILT_MAX * 2).toFixed(2)}deg`)
+}
+
 function clearTilt() {
+  if (tiltRaf) {
+    cancelAnimationFrame(tiltRaf)
+    tiltRaf = 0
+  }
+  ptr = null
+  tiltRect = null
   if (!tiltCell) return
   tiltCell.style.removeProperty('--tilt-x')
   tiltCell.style.removeProperty('--tilt-y')
@@ -223,28 +259,24 @@ function clearTilt() {
 
 function onPointerMove(event) {
   if (reduceMotion || bigOpen.value) return
-  const wall = wallEl.value
-  if (wall) {
-    const r = wall.getBoundingClientRect()
-    pax.value = (0.5 - (event.clientX - r.left) / r.width) * 14
-    pay.value = (0.5 - (event.clientY - r.top) / r.height) * 10
-  }
   const cell = event.target instanceof Element ? event.target.closest('.cell') : null
   if (!cell) {
     clearTilt()
     return
   }
-  if (cell !== tiltCell) clearTilt()
-  tiltCell = cell
-  const r = cell.getBoundingClientRect()
-  const nx = (event.clientX - r.left) / r.width - 0.5
-  const ny = (event.clientY - r.top) / r.height - 0.5
-  cell.style.setProperty('--tilt-y', `${(nx * TILT_MAX * 2).toFixed(2)}deg`)
-  cell.style.setProperty('--tilt-x', `${(-ny * TILT_MAX * 2).toFixed(2)}deg`)
+  if (cell !== tiltCell) {
+    clearTilt()
+    tiltCell = cell
+    // 每跨进一格只量这一次，后面的 move 复用它
+    tiltRect = cell.getBoundingClientRect()
+  }
+  ptr = { x: event.clientX, y: event.clientY }
+  if (!tiltRaf) tiltRaf = requestAnimationFrame(flushPointer)
 }
 
 function onPointerLeave() {
   clearTilt()
+  wallRect = null
   pax.value = 0
   pay.value = 0
 }
@@ -336,47 +368,76 @@ function getLiveOrigin(index) {
  * 这里只负责量、开门、把真格交接出去。
  */
 function pickCard(event) {
-  if (bigOpen.value) return
   const el = event.target instanceof Element ? event.target.closest('.cell') : null
   if (!el || !gridEl.value?.contains(el)) return
   const index = Number(el.dataset.index)
   if (!Number.isInteger(index) || index < 0 || index >= FEATURES.length) return
 
+  if (bigOpen.value) {
+    // 退场还没收尾（缩回要 460ms）时又点了同一格：别丢掉这次点击，也别打断退场 ——
+    // 记下来，等这次退场自己收完再照常打开。
+    if (bigClosing.value) pendingPick = index
+    return
+  }
+  openCard(el, index)
+}
+
+/** 真正开门：量这一格、交给大屏 */
+function openCard(el, index) {
   // 倾斜是"贴着指针那一格"的姿态，量几何之前先回正，退出时也不留残余
   clearTilt()
   // 入场还没跑完就点：直接收尾，卡片墙停在与大屏退场一致的终态
   if (entering.value) finishEntrance()
 
   const cells = [...gridEl.value.querySelectorAll('.cell[data-index]')]
-  // 入场起点要跟"当下眼睛看到的卡"一致：指针通常还悬在卡上，所以先量 hover 态
+  // 这一帧只量被点的那一格：入场起点要跟"当下眼睛看到的卡"一致，指针通常还悬在卡上，
+  // 量的是 hover 态。其余 15 格（连这一格的静止几何）只有退场缩回才用得到 ——
+  // 16 格全量再强制回流一次，量的是用户根本看不见的东西，全在点击帧里付账。
   const entryGeometry = measureCell(el)
-  // 退场终点必须是非 hover 的静止尺寸。临时挂类、强制回流量完再撤掉；
-  // 这些样式变更都发生在同一次任务里，浏览器不会把中间态画出来。
-  const wasRestLocked = cells.map((cell) => cell.classList.contains('is-rest-measure'))
-  cells.forEach((cell) => cell.classList.add('is-rest-measure'))
-  void gridEl.value.offsetWidth
-  const restGeometry = Object.fromEntries(
-    cells.map((cell) => [Number(cell.dataset.index), measureCell(cell)]),
-  )
-  cells.forEach((cell, i) => {
-    if (!wasRestLocked[i]) cell.classList.remove('is-rest-measure')
-  })
-
-  // 每个面都带一份 rest 几何：大屏里翻到哪一面，退出就缩回那一面的静止卡。
-  // 被点的那一面额外保留 hover 几何，仅用于入场起手。
+  // 数据形状不变，只是先占位：{ cell, parts, rest }；rest 由 fillRestOrigins 补齐。
+  // 大屏退场本来就逐帧现量（getLiveOrigin），rest 缺失只是少一层保险，不会画错。
   origins.value = Object.fromEntries(
     cells.map((cell) => {
       const i = Number(cell.dataset.index)
-      const entry = i === index ? entryGeometry : restGeometry[i]
-      return [i, { ...entry, rest: restGeometry[i] }]
+      return [i, i === index ? { ...entryGeometry, rest: null } : { cell: null, parts: null, rest: null }]
     }),
   )
+  fillRestOrigins(cells)
 
   sourceEl = el
   bigIndex.value = index
   bigClosing.value = false
   glassMs.value = 600
   bigOpen.value = true
+}
+
+/* ===== 补量其余格：交给空闲时 =====
+ * 大屏退场要把自己缩回某一格的静止卡，那需要每格非 hover 的几何；点击那一刻
+ * 用户只看得见被点的那一格。所以剩下的量挪到 rIC 里补 —— 迟到了也没关系。
+ */
+let restIdle = 0
+
+function fillRestOrigins(cells) {
+  if (restIdle) restIdle()
+  restIdle = whenIdle(() => {
+    restIdle = 0
+    const grid = gridEl.value
+    // 这一轮已经收场（或页面走了）：补出来的几何没人用，别再花一次回流
+    if (!grid || !origins.value || !bigOpen.value) return
+    const locked = cells.map((cell) => cell.classList.contains('is-rest-measure'))
+    cells.forEach((cell) => cell.classList.add('is-rest-measure'))
+    void grid.offsetWidth
+    cells.forEach((cell) => {
+      const i = Number(cell.dataset.index)
+      const m = measureCell(cell)
+      const slot = origins.value[i]
+      if (slot) slot.rest = m
+      else origins.value[i] = { ...m, rest: m }
+    })
+    cells.forEach((cell, i) => {
+      if (!locked[i]) cell.classList.remove('is-rest-measure')
+    })
+  }, 600)
 }
 
 /** 大屏开始退出：把卡片墙锁在非 hover 姿态，避免退场终点跟着指针放大 */
@@ -443,6 +504,15 @@ function closeBig() {
   glassMs.value = 600
   restoreSource()
   releaseRestAfterPointerMove()
+  // 退场期间攒下的那次点击：等这一帧状态落定（大屏先回到关）再照常开一次
+  if (pendingPick != null) {
+    const index = pendingPick
+    pendingPick = null
+    requestAnimationFrame(() => {
+      const el = gridEl.value?.querySelector(`.cell[data-index="${index}"]`)
+      if (el && !bigOpen.value) openCard(el, index)
+    })
+  }
 }
 
 /* ===== 入场的开关 =====
@@ -511,6 +581,8 @@ watch(bigOpen, (open) => {
 onBeforeUnmount(() => {
   clearTilt()
   clearRestLock()
+  if (restIdle) restIdle()
+  restIdle = 0
   if (restReleaseHandler) {
     window.removeEventListener('pointermove', restReleaseHandler)
     restReleaseHandler = null

@@ -96,9 +96,6 @@ const geo = ref({ pitch: 132, push: 0, step: 0.6, depth: 48 })
 // 整组外推另由 push 管，动这两个只影响组内。
 const GAP_NEAR = 1.6
 const GAP_STEP = 0.6
-// 卡小的时候要留宽，否则后面几张只剩一条缝
-const GAP_STEP_NARROW = 1.1
-const GAP_STEP_NARROW_W = 420
 // 组内间距只认卡宽，容器拉宽不再撑开它
 const PITCH_K = 0.3
 // 与 .log-track 的 perspective 同值：算可用宽度要按透视缩放反推
@@ -353,8 +350,6 @@ function measure() {
   if (!stage) return
   const card = stage.querySelector('.log-card')
   const cardW = card?.offsetWidth || 360
-  // 卡小的时候堆叠留宽，免得后面几张只剩一条缝
-  const unit = cardW < GAP_STEP_NARROW_W ? GAP_STEP_NARROW : GAP_STEP
   // 横版卡很宽，直接按卡宽推深度会退得太夸张，封顶到竖版的量级
   const depth = Math.round(Math.min(cardW * 0.16, 80))
   const outer = outerOf(index.value)
@@ -365,14 +360,14 @@ function measure() {
   const k = PERSPECTIVE / (PERSPECTIVE + outer * depth - half * Math.abs(Math.sin(rad)))
   const room = Math.max(0, (window.innerWidth / 2 - EDGE_GAP) / k - half * Math.abs(Math.cos(rad)))
   // 最外侧那位的组内倍数，不含外推
-  const outerBase = GAP_NEAR + Math.max(0, outer - 1) * unit
+  const outerBase = GAP_NEAR + Math.max(0, outer - 1) * GAP_STEP
   const cap = room / Math.max(1, TOTAL.value - 1)
   const pitch = Math.max(1, Math.round(Math.min(cardW * PITCH_K, Math.max(cardW * 0.18, cap))))
   geo.value = {
     pitch,
     // 组内收紧省下的宽度全归外推，最外侧那位继续贴着屏幕边
     push: Math.max(0, room / pitch - outerBase),
-    step: unit,
+    step: GAP_STEP,
     depth,
   }
   measuredOuter = outer
@@ -779,6 +774,8 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   --dur-run: calc(var(--dur) * var(--dur-k));
   --card-w: clamp(232px, 32vw, 460px);
   --card-h: clamp(300px, 46vh, 480px);
+  /* 倾角倍数全站只此一档：横版卡很宽，同样的角度会被透视拉得夸张，三态匹配器都乘它 */
+  --tilt-k: 0.55;
 
   position: relative;
   min-height: 100dvh;
@@ -1521,8 +1518,6 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
     /* 尺寸按内容定：横版卡再大也只是把空白撑开，不解决问题 */
     --card-w: min(680px, 50vw);
     --card-h: clamp(270px, 34vh, 315px);
-    /* 横版卡很宽，倾角收一半，透视才不会把两侧拉开 */
-    --tilt-k: 0.55;
   }
 
   /* 电脑：底纹摆到屏幕正中，并放到最大 */
@@ -1595,7 +1590,6 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   .log-page {
     --card-w: min(72vw, 300px);
     --card-h: clamp(296px, 48vh, 420px);
-    --dur: 520ms;
   }
 
   .log-head {
