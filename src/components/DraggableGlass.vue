@@ -15,14 +15,14 @@
  *
  * 挂在 App.vue 的页面宿主里，所以四个页面共享同一枚玻璃。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import GlassSurface from './vue-bits/GlassSurface.vue'
 
 /* 玻璃本体尺寸与默认落点（右下角、底栏上方，避开顶部 dock 与底部控制条） */
 const WIDTH = 176
 const HEIGHT = 64
-const RADIUS = 999
+const RADIUS = 50
 const MARGIN = 12
 const EDGE_RIGHT = 28
 const EDGE_BOTTOM = 96
@@ -72,11 +72,27 @@ function onPointerDown(event) {
   event.preventDefault()
 }
 
+/* 指针事件可能一帧来好几次：位置先攒着，每帧只写一次响应式状态。
+ * 首页背后是视频 + WebGPU 两层动态源，每多一次样式写入就多一次 backdrop 重采样。 */
+let frame = 0
+let pending = null
+
+function flushMove() {
+  frame = 0
+  if (!pending) return
+  x.value = pending.x
+  y.value = pending.y
+  pending = null
+}
+
 function onPointerMove(event) {
   if (!dragging.value || event.pointerId !== pointerId) return
 
-  x.value = clamp(startX + event.clientX - startClientX, MARGIN, maxX())
-  y.value = clamp(startY + event.clientY - startClientY, MARGIN, maxY())
+  pending = {
+    x: clamp(startX + event.clientX - startClientX, MARGIN, maxX()),
+    y: clamp(startY + event.clientY - startClientY, MARGIN, maxY()),
+  }
+  if (!frame) frame = requestAnimationFrame(flushMove)
   event.preventDefault()
 }
 
@@ -125,6 +141,11 @@ function onResize() {
   y.value = clamp(y.value, MARGIN, maxY())
 }
 
+/* 拖动状态广播出去：首页据此给背景降载（视频帧 + WebGPU 每帧重绘会让玻璃的 backdrop 采样变贵） */
+watch(dragging, (on) => {
+  window.dispatchEvent(new CustomEvent('natb:glass-drag', { detail: on }))
+})
+
 onMounted(() => {
   resetPosition()
   window.addEventListener('resize', onResize)
@@ -136,6 +157,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  if (frame) cancelAnimationFrame(frame)
 })
 </script>
 
@@ -159,13 +181,13 @@ onBeforeUnmount(() => {
         :width="WIDTH"
         :height="HEIGHT"
         :border-radius="RADIUS"
-        :border-width="0.12"
-        :displace="0.6"
-        :distortion-scale="-170"
-        :background-opacity="0.02"
-        :saturation="1.25"
-        :blur="9"
-        :brightness="68"
+        :border-width="0.07"
+        :displace="0.5"
+        :distortion-scale="-180"
+        :background-opacity="0.1"
+        :saturation="1"
+        :blur="11"
+        :brightness="50"
         :style="{ width: '100%', height: '100%' }"
       >
         <span class="draggable-glass__label">

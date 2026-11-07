@@ -18,13 +18,14 @@
  *
  * 现在顶上是一条真正的版心行 .screen__top，与 .screen__inner 共用同一档左右
  * padding 与同一条顶端基线 —— 左端是刊头式小字，右端是退出控件，两端对拉扯出
- * 版心宽度。三枚控件（退出 / 上一面 / 下一面）共用同一套语言：
- *   尺寸  --ctrl 见方，与顶栏同高；形状 8px 方角，不再有圆；描边 1px 墨发丝；
- *   底色是舞台上的淡淡一层玻璃；悬浮只把明度与底色翻过来（退出钮落成实纸底 +
- *   墨字，像按下一枚白键），不做任何缩放 —— 放大是"贴纸"的动作，不是版面的动作；
- *   焦点环统一用 --accent。
- * 退出钮还多一枚等宽小字标签「退出」：只靠一枚 X 图标，没人知道它是关闭还是全屏；
- * 窄到 600px 以下再退回纯图标（aria-label 与 title 一直都在，读屏与悬浮提示不受影响）。
+ * 版心宽度。三枚控件（退出 / 上一面 / 下一面）共用同一套语言（v9 改版）：
+ *   尺寸  --ctrl-round 见圆，比顶栏行高大一档；形状 正圆，背衬一块液态玻璃
+ *         （GlassSurface，与首页按钮同款材质）；外面补一道 1px 白 26% 的发丝；
+ *   悬浮只把玻璃上的薄白与描边提亮一档，不做任何缩放 —— 放大是"贴纸"的动作，
+ *   不是版面的动作；焦点环统一用 --accent。
+ * 退出钮不再挂「退出」小字：title 与 aria-label 一直在，悬停有提示、读屏有名称。
+ * v9：大屏的 z-index 抬到站点 chrome 之上（导航坞 2147483000 / 顶栏 2147482000），
+ * 左钮因此贴回版心左缘，不必再为导航坞让位。
  * 这一条上刻意不画横贯的发丝线：它的 y 与站点顶栏胶囊同处一条带上（顶栏是全局 fixed
  * 槽位，压在所有页面之上），横线会正好从胶囊底下穿过去、像一道划痕 ——
  * 版心关系改由两端对齐与同一档基线承担。
@@ -51,7 +52,7 @@
  *          阴影只两级且收紧：静止一层浅影，正对镜头才给一层柔影；侧面板零阴影。
  *          一卡一纸色（沿用八色纸感色），墨字四档全部按 WCAG AA 反推。
  *          微交互只做"状态确认"，从不遮蔽内容（要点与参数在八面上都看得见）。
- *          控件（顶栏与三枚）是同一套方角语言：等尺寸、1px 发丝、只翻明度不缩放。
+ *          控件（顶栏与三枚）是同一套圆形玻璃语言：等直径、1px 发丝、只提亮不缩放。
  * D2 网格  横版刊页：卡片 ≥ 80vw × 70vh。左「正文栏」/ 右「图版栏」；
  *          v5 起两栏之间不再画竖发丝（图版满幅，它自己的边就是分界），
  *          且分界线比原先靠左一档（--plate-w 60%：图版占右 60%）。
@@ -165,7 +166,6 @@
  * "换面期间切成正圆"确实能到满帧，但看得到角形跳变，**已回滚**。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { predecodeImages, whenIdle } from '@/gl/idleWork'
 
 // 图标沿用 solar 的 bold-duotone：两路同色不同明度，压成单色后层次还在
 import IconShieldKeyhole from '~icons/solar/shield-keyhole-bold-duotone'
@@ -183,8 +183,8 @@ import IconX from '~icons/lucide/x'
 
 // 指针跟随的 3D 倾斜壳：套在每一面「里面」，只让正对镜头的那一面跟着指针仰
 import TiltCard from './3dcard.vue'
-// 位图管线（v9.3）：封面模糊 + 背面截图改由 WebGL 烘/解一次，贴进每面自带的画布
-import { pipelineOn, onFaceBitmap, faceRecord, requestWash, requestShot, paintBitmap, disposePipelineAll } from '@/gl/pipeline'
+// 液态玻璃背景（与首页按钮、之前那枚可拖动玻璃同一套材质）
+import GlassSurface from './vue-bits/GlassSurface.vue'
 
 const props = defineProps({
   /** 大屏模式开着没有。模式本身不自持状态：由 features 页说了算 */
@@ -431,124 +431,6 @@ function noteSwitch(force = false) {
 /* ===== 换面 ===== */
 const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 
-/* ===== v9.3 · 位图管线接入（src/gl/*）=====
- * 八面位图（封面模糊 + 背面截图）改由 WebGL 烘一次 / createImageBitmap 解一次，
- * 贴进每面自带的 <canvas> 常驻：换面期间页面上只剩「贴已经存在的位图」这一件事。
- *
- * 只有两种状态，没有「本轮是否用管线」这种悬着的一半：
- *   ① 管线全程生效 —— glOn 为真，.screen 挂 is-gl，非正面那一圈用画布；
- *   ② 整轮回退 —— 能力探测不过 / prefers-reduced-motion：不挂 is-gl，
- *      模板原样走 CSS filter + <img>（旧路径一行没删）。
- *
- * 保真退让：**正面那一面永远走原路径**（.face__wash 的 CSS blur + 原 <img>）。
- * 理由是实测的：canvas 与 img / CSS 滤镜的重采样链不同，正面整块图版差 20~40%、
- * 封面模糊层差 30.9%（上一版实现实测），必然过不了 ≤1.5% 的静止门；
- * 其余七面永远斜置、缩小、压着暗纱，画布那点重采样差看不出来。
- * 正面是 DOM 里既有的一档状态（.face.is-front），不是为管线新加的开关。 */
-const glOn = pipelineOn()
-const washEls = new Map()
-const shotEls = new Map()
-/** 画布已经真的画上位图的面（画布在画之前是 300×150 的透明空盒，不能当版面用） */
-const washPainted = new Set()
-const shotPainted = new Set()
-/** 画布重新贴过一次位图：翻牌期正面切画布的判定要跟着重算（见 flipCanvasOn） */
-const shotRev = ref(0)
-
-function paintWash(i) {
-  const el = washEls.get(i)
-  const rec = faceRecord(i)
-  if (!el || !rec?.wash) return false
-  if (!paintBitmap(el, rec.wash)) return false
-  washPainted.add(i)
-  return true
-}
-
-function paintShot(i) {
-  const el = shotEls.get(i)
-  const rec = faceRecord(i)
-  if (!el || !rec?.shot) return false
-  if (!paintBitmap(el, rec.shot)) return false
-  shotPainted.add(i)
-  shotRev.value += 1
-  return true
-}
-
-/* 八张大位图的首次上传不挤进点击那一帧：正面的画布本来就不参与渲染（正面走 <img>），
-   其余七面起手时在侧面看不见 —— 摊到下一帧里贴完，一个任务都不留给用户看得见的那一刻。 */
-const pendingPaint = new Set()
-let paintRaf = 0
-
-function paintSoon(i) {
-  pendingPaint.add(i)
-  if (paintRaf) return
-  paintRaf = requestAnimationFrame(() => {
-    paintRaf = 0
-    const queue = [...pendingPaint]
-    pendingPaint.clear()
-    queue.forEach((n) => {
-      paintWash(n)
-      paintShot(n)
-    })
-  })
-}
-
-/* 画布用的是函数 ref（按面序号建一次，身份稳定）：挂上就补画一次，
-   之后位图到货由 onFaceBitmap 催。没有观察者、没有 watch 链。 */
-const washRefs = FEATURES.map((_, i) => (el) => {
-  if (!el) {
-    washEls.delete(i)
-    return
-  }
-  washEls.set(i, el)
-  if (!paintWash(i)) paintSoon(i)
-})
-
-/* 翻牌期正面改贴画布：<img> 在 740ms 的连续放大里每帧按新尺寸重采样一遍，画布是
-   已经烘好的位图，放大交给合成器、不重采样。只在画布真的贴着全分辨率位图
-   （宽 >=1200，即源图那一档）时生效 —— 没备好就照旧用 <img>，动画不等它。
-   flipping 落下当帧就切回 <img>，静止帧像素与改动前一字不差。 */
-const flipCanvasOn = computed(() => {
-  if (!glOn || !flipping.value) return false
-  shotRev.value
-  const el = shotEls.get(face.value)
-  return !!el && el.width >= 1200
-})
-
-const shotRefs = FEATURES.map((_, i) => (el) => {
-  if (!el) {
-    shotEls.delete(i)
-    return
-  }
-  shotEls.set(i, el)
-  if (!paintShot(i)) paintSoon(i)
-})
-
-/** 备齐八面位图（幂等：已烘过 / 已解过的直接命中缓存） */
-function warmFaces() {
-  if (!glOn) return
-  FEATURES.forEach((item, i) => {
-    requestWash(i, item)
-    // 正面那一面翻牌期间改贴画布，它要的是源图那一档，不是背面 400 档
-    requestShot(i, item, i === face.value)
-  })
-}
-
-const offFaceBitmap = glOn
-  ? onFaceBitmap(() => {
-      FEATURES.forEach((_, i) => paintSoon(i))
-    })
-  : null
-
-if (glOn) {
-  // 开屏那一刻就把位图提上日程；关大屏不收回（常驻，下次开屏直接贴）
-  watch(
-    () => props.open,
-    (open) => {
-      if (open) warmFaces()
-    },
-  )
-}
-
 /* ── v7 · 换面期间冻结指针跟随 ──────────────────────────────────────────
  * TiltCard 每帧往宿主上写一次 transform；而换面时那个宿主正在整圈转动里，
  * 这一次写入就让整面内容重新光栅化一遍 —— 与转动叠加，正是最坏的那一帧。
@@ -575,9 +457,6 @@ function step(delta) {
   // 接续 / 缩回期间整圈不许动：正面正被 FLIP 拿着，转一下几何就对不上了
   if (flipping.value) return
   finishEntrance()
-  // 换面之前先把八块皮肤上的历史内联样式清掉：将要变成正面的那一面若带着上一轮的残留
-  // transform，翻过去就是一个缩小 / 错位的卡（它不会跑 flip，没人给它复位）
-  clearSkinInline()
   noteSwitch()
   holdPointer()
   index.value += delta
@@ -706,11 +585,8 @@ function flipTarget(origin, end, skinWidth, restSX = 1, restSY = 1) {
 }
 
 /** 一次量齐从卡片到大屏所需的几何，进出两个方向共用 */
-function flipGeometry(skin, origin, end) {
-  // 守卫必须在前：闭合时 .face__skin 可能还没进 DOM，
-  // 默认参数会在守卫之前就去调 flipMid(undefined) 并抛错。
+function flipGeometry(skin, origin, end = flipMid(skin)) {
   if (!skin) return null
-  end = end == null ? flipMid(skin) : end
   const rest = getComputedStyle(skin).transform
   let restSX = 1
   let restSY = 1
@@ -761,21 +637,14 @@ const easeFlip = makeCubicBezier(0.25, 0.1, 0.25, 1)
 
 /** 有起点几何、且不是少动效，才走一镜到底；否则退回原来那套整圈摆入 */
 function startFlipOrEntrance() {
-  // 上一轮就地写在皮肤上的 transform / 圆角必须先清掉：树现在常驻，
-  // 不清的话量到的还是上一轮的终点，画出来的是上一轮的残留（关掉立刻再开就卡在起始帧）。
-  resetScreenState()
-  const snap = props.origins?.[face.value]
-  // 缓存缺席（空闲补量还没到、或宿主没量到这一格）就用现量几何顶上 ——
-  // 退回整圈摆入既丢掉一镜到底，又会把上一轮的残留样式留在皮肤上。
-  const live = snap?.cell ? null : props.getOrigin?.(face.value)
-  const cell = snap?.cell || live?.cell
-  if (reduceMotion || !cell) {
+  const o = props.origins?.[face.value]?.cell
+  if (reduceMotion || !o) {
     startEntrance()
     return
   }
   entering.value = false
   flipping.value = true
-  runFlipIn(snap?.cell ? snap : { cell, parts: null })
+  runFlipIn()
 }
 
 /**
@@ -783,17 +652,11 @@ function startFlipOrEntrance() {
  * 几何一次量齐再起动画：起手之后每一次 getBoundingClientRect 都会把刚写的
  * transform 逼着同步重排一次，散着量就是每量一次卡一下。
  */
-function runFlipIn(origin = props.origins?.[face.value]) {
+function runFlipIn() {
   const front = screenEl.value?.querySelector('.face.is-front')
   const skin = front?.querySelector('.face__skin')
-  // 量几何可能在这一帧的 DOM 里摸不到东西（快速连开时皮肤还没挂上）：
-  // 抛错也走既有的退路，绝不让异常冒到 Vue（那会把 .screen 留在半死状态）
-  let g = null
-  try {
-    g = flipGeometry(skin, origin)
-  } catch {
-    g = null
-  }
+  const origin = props.origins?.[face.value]
+  const g = flipGeometry(skin, origin)
   if (!front || !skin || !g) {
     // 起点几何不在：退回整圈摆入
     flipping.value = false
@@ -885,17 +748,8 @@ async function runFlipOut() {
   const screen = screenEl.value
   const front = screen?.querySelector('.face.is-front')
   const skin = front?.querySelector('.face__skin')
-  // rest 是空闲时补量的；还没补上（或这一格从没被量过）就用当下的现量几何兜底：
-  // 退场本来就逐帧现量，起点不该因为少一份缓存就退回"短淡出"。
-  const snap = props.origins?.[face.value]
-  const origin =
-    snap?.rest || (snap?.cell ? snap : props.getOrigin?.(face.value) || snap)
-  let g = null
-  try {
-    g = flipGeometry(skin, origin)
-  } catch {
-    g = null
-  }
+  const origin = props.origins?.[face.value]?.rest || props.origins?.[face.value]
+  const g = flipGeometry(skin, origin)
 
   if (!screen || !front || !skin || !g || flipping.value || turning.value) {
     const duration = reduceMotion ? 1 : 180
@@ -1047,29 +901,15 @@ watch(
   () => props.open,
   (on) => {
     if (!on) {
-      visible.value = false
       finishEntrance()
       // 宿主收掉大屏：这一轮接续的动画与状态一并清掉，下次从干净的开
       stopFlip()
       return
     }
-    // 树在空闲时就挂上了，这里只做两件事：变可见、起翻牌。
-    // 顺序不能反 —— 量几何必须发生在可见之后，否则量到的可能是上一轮藏起来时的姿态。
-    mounted.value = true
-    visible.value = true
     unflipping.value = false
     wheelAcc = 0
     index.value = props.initial || 0
-    nextTick(() => {
-      try {
-        resetScreenState()
-        startFlipOrEntrance()
-      } catch {
-        // 起手失败也要把状态复位：下次点击必须还能打开
-        stopFlip()
-        startEntrance()
-      }
-    })
+    nextTick(startFlipOrEntrance)
   },
 )
 
@@ -1080,83 +920,13 @@ watch(
   },
 )
 
-/* ===== 空闲挂载：点击帧里不再搭这棵树 =====
- * .screen 整棵子树（八面柱体 + 顶栏 + 图版）原来在点击那一刻才 v-if 建出来，
- * 建 + 首次 layout + 解码图全记在点击那一帧的账上。现在改成进页面后空闲时挂上，
- * 用 visibility 藏住：既保留布局（于是量得到真几何），又不参与绘制（于是不花钱）。
- * 不能用 display:none —— 那样量到的全是 0；也不能给 .prism / .face 落 opacity、
- * filter —— preserve-3d 会掉进平面合成。
- */
-const mounted = ref(false)
-const visible = ref(false)
-let idleMount = 0
-let idlePredecode = 0
-let idleWarm = 0
-
-/**
- * 上一次开合就地写上去的样式：皮肤层的 transform / 圆角是逐帧直接写的，
- * 不清掉下一次量到的还是上一轮的终点（关掉立刻再开、动画中退出再开，
- * 翻牌停在起始帧就是这个）。树常驻之后必须自己收尾。
- */
-/** 皮肤上的内联样式只属于"上一轮那一次开合"：清掉，别让它跟到下一次 */
-function clearSkinInline() {
-  const screen = screenEl.value
-  if (!screen) return
-  screen.querySelectorAll('.face__skin').forEach((skin) => {
-    skin.style.transition = ''
-    skin.style.transform = ''
-    skin.style.borderRadius = ''
-  })
-}
-
-function resetScreenState() {
-  const screen = screenEl.value
-  if (!screen) return
-  screen.getAnimations({ subtree: true }).forEach((anim) => anim.cancel())
-  // 退场的逐帧循环是往"当时那一面"的皮肤上写 transform 的：关掉之后那一面已经不是正面，
-  // 只清正面会把它的内联小尺寸永久留在那儿 —— 翻到这一面就按残留尺寸显示（变小 / 错位）。
-  clearSkinInline()
-}
-
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
-  if (props.open) {
-    mounted.value = true
-    visible.value = true
-    resetScreenState()
-    startFlipOrEntrance()
-    return
-  }
-  idleMount = whenIdle(() => {
-    idleMount = 0
-    if (!props.open) mounted.value = true
-  }, 1200)
-  // 八张封面 + 八张图版：只把解码提前做掉，动画窗口里不再解码
-  idlePredecode = whenIdle(() => {
-    idlePredecode = 0
-    predecodeImages(FEATURES.flatMap((item) => [item.cover, item.plate]))
-  }, 2000)
-  // 位图管线：页面空闲时把八面位图（封面烘焙 + 400 档截图）先备好，开屏时直接贴。
-  // 常驻：关大屏不收回 —— 下次开屏不用再解码、不用再烘焙
-  if (glOn) idleWarm = whenIdle(() => { idleWarm = 0; warmFaces() }, 1600)
+  if (props.open) startFlipOrEntrance()
 })
 
 onBeforeUnmount(() => {
   stopFlip()
-  // 离开 features 页才释放：位图 close、纹理销毁、GL 上下文丢掉
-  if (glOn) {
-    if (paintRaf) cancelAnimationFrame(paintRaf)
-    paintRaf = 0
-    pendingPaint.clear()
-    offFaceBitmap?.()
-    disposePipelineAll()
-  }
-  if (idleWarm) idleWarm()
-  idleWarm = 0
-  if (idleMount) idleMount()
-  if (idlePredecode) idlePredecode()
-  idleMount = 0
-  idlePredecode = 0
   if (enterTimer) clearTimeout(enterTimer)
   if (turnTimer) clearTimeout(turnTimer)
   if (liveTimer) clearTimeout(liveTimer)
@@ -1192,23 +962,16 @@ watch(
   <!-- Teleport 到 body：整屏模式不受 features 页那个 fixed + overflow 的祖先连累 -->
   <Teleport to="body">
     <div
-      v-if="mounted"
+      v-if="open"
       ref="screenEl"
       class="screen"
       :class="{
         'is-entering': entering,
         'is-turning': turning,
         'is-flipping': flipping,
-      'is-flipgl': flipCanvasOn,
         'is-unflipping': unflipping,
-        'is-gl': glOn,
       }"
-      :style="[
-        ringVars,
-        enterVars,
-        flipVars,
-        { '--dur-k': combo ? COMBO_K : 1, visibility: visible ? 'visible' : 'hidden' },
-      ]"
+      :style="[ringVars, enterVars, flipVars, { '--dur-k': combo ? COMBO_K : 1 }]"
       role="dialog"
       aria-modal="true"
       aria-label="特色功能大屏模式"
@@ -1266,11 +1029,7 @@ watch(
                       class="face__wash"
                       :style="{ backgroundImage: `url(${item.cover})` }"
                       aria-hidden="true"
-                    >
-                      <!-- v9.3：WebGL 烘出来的封面模糊位图贴在这里（管线关着时这枚画布是空的，
-                           底下的 CSS blur 照旧出图；正面这一面按保真退让不显示画布） -->
-                      <canvas :ref="washRefs[i]" class="face__washgl" aria-hidden="true"></canvas>
-                    </span>
+                    ></span>
 
                     <!-- ── 左：正文栏。编辑版式四段，自上而下：眉标 → 标题块 → 要点 → 参数 ── -->
                     <span class="face__main">
@@ -1321,10 +1080,7 @@ watch(
                          留下的是"一整块屏幕"。图注改成压在画面底部的署名条。 ── -->
                     <span class="face__plate">
                       <span class="face__shotwrap">
-                        <!-- v9.3：背面截图位图（400 宽那一档）贴在这枚画布上，画布沿用
-                             .face__shot 的全套几何（同 width / 同裁切偏移），所以两块完全重合 -->
-                        <canvas :ref="shotRefs[i]" class="face__shot face__shotgl" aria-hidden="true"></canvas>
-                        <img class="face__shot face__shotimg" :src="item.plate" alt="" draggable="false" decoding="async" />
+                        <img class="face__shot" :src="item.plate" alt="" draggable="false" decoding="async" />
                       </span>
                       <!-- 图注：只剩这一句，靠右贴在画面下沿（版本号已按要求撤掉） -->
                       <span class="face__caption"><span>实机界面</span></span>
@@ -1338,14 +1094,47 @@ watch(
             </div>
           </div>
 
-          <!-- 与退出控件同一套方角语言：等尺寸、同发丝描边、同底色，
-               悬浮只改明度不放大 —— 三枚控件并排看过去是一条线上的东西 -->
-          <button class="screen__nav screen__nav--prev" type="button" title="上一面（←）" aria-label="上一面" @click="step(-1)">
-            <IconChevronLeft width="20" height="20" aria-hidden="true" />
-          </button>
-          <button class="screen__nav screen__nav--next" type="button" title="下一面（→）" aria-label="下一面" @click="step(1)">
-            <IconChevronRight width="20" height="20" aria-hidden="true" />
-          </button>
+          <!-- 与退出控件同一套语言：同尺寸的圆、同一块液态玻璃，
+               悬浮只改明度不放大 —— 三枚控件并排看过去是一组东西。
+               v9-2：左右两枚的 displace 提到 0.9，边缘折射更明显。 -->
+          <div class="screen__nav screen__nav--prev">
+            <GlassSurface
+              class="screen__nav-glass"
+              width="100%"
+              height="100%"
+              :border-radius="999"
+              :border-width="0.22"
+              :displace="0.9"
+              :distortion-scale="-180"
+              :background-opacity="0.28"
+              :saturation="1"
+              :blur="6"
+              :brightness="90"
+            >
+              <button class="screen__nav-btn" type="button" title="上一面（←）" aria-label="上一面" @click="step(-1)">
+                <IconChevronLeft width="24" height="24" aria-hidden="true" />
+              </button>
+            </GlassSurface>
+          </div>
+          <div class="screen__nav screen__nav--next">
+            <GlassSurface
+              class="screen__nav-glass"
+              width="100%"
+              height="100%"
+              :border-radius="999"
+              :border-width="0.22"
+              :displace="0.9"
+              :distortion-scale="-180"
+              :background-opacity="0.28"
+              :saturation="1"
+              :blur="6"
+              :brightness="90"
+            >
+              <button class="screen__nav-btn" type="button" title="下一面（→）" aria-label="下一面" @click="step(1)">
+                <IconChevronRight width="24" height="24" aria-hidden="true" />
+              </button>
+            </GlassSurface>
+          </div>
         </section>
 
         <!-- ── 页脚：只剩进度条 ── -->
@@ -1368,11 +1157,14 @@ watch(
 
       <!-- ── 退出：版心右端的那枚控件 ──
            绝对定位只为了与版心右缘严格对齐（它在 .screen__inner 的 padding 盒之外），
-           y 与顶栏同一档、尺寸与顶栏同高，所以看上去就是顶栏右端的那一格 -->
-      <button class="screen__exit" type="button" title="退出大屏（Esc）" aria-label="退出大屏模式" @click="close">
-        <IconX width="18" height="18" aria-hidden="true" />
-        <span class="screen__exit-text">退出</span>
-      </button>
+           y 与顶栏同一档、尺寸与切换钮同一直径，所以看上去就是顶栏右端的那一格。
+           v9-2：这枚不走液态折射，换回标准毛玻璃（blur + 半透明白底）——
+           X 压在糊过的背景上始终清楚，不会像液态玻璃那样在深色侧板前失去边界。 -->
+      <div class="screen__exit">
+        <button class="screen__exit-btn" type="button" title="退出大屏（Esc）" aria-label="退出大屏模式" @click="close">
+          <IconX width="20" height="20" aria-hidden="true" />
+        </button>
+      </div>
 
       <p class="screen__sr" aria-live="polite">{{ live }}</p>
     </div>
@@ -1496,22 +1288,17 @@ watch(
   --line: rgba(255, 255, 255, 0.16);
   --accent: #0a59f7;
 
-  /* ── 顶栏与控件（v3）──
-     三枚控件共用同一档尺寸与同一套语言，顶栏自己也走同一档高度：
-     --ctrl 是控件边长、也是顶栏的行高，所以它们天然在同一条水平线上。
-     悬浮是"翻底色"，所以底色只有两级：rest 一层薄玻璃、hover 一层实纸。 */
+  /* ── 顶栏与控件（v9）──
+     顶栏行高仍是 --ctrl；三枚圆钮另走 --ctrl-round。
+     控件材质换成 GlassSurface 之后，原先那组"薄底 + 发丝 + 悬浮翻实纸"
+     的 token 已经没有使用者，一并撤掉 —— 描边改为控件自己的 ::after。
+     --ctrl 仍是控件与顶栏的行高参照，顶栏本身没变。 */
   --top-h: clamp(34px, 4vh, 40px);
   --top-gap: clamp(12px, 1.7vh, 18px);
   --ctrl: var(--top-h);
-  --ctrl-radius: var(--r-sm);
-  --ctrl-bg: rgba(255, 255, 255, 0.055);
-  --ctrl-bg-hover: var(--on-stage);
-  /* v4：0.22 在舞台中段实测约 1.8:1 —— 1.4.11 对"控件的视觉边界"要 3:1，
-     抬到 0.40 得约 3.5:1。悬浮那一档翻成实纸底，本来就有 14:1，不必再抬 */
-  --ctrl-line: rgba(255, 255, 255, 0.4);
-  --ctrl-line-hover: var(--on-stage);
-  /* 悬浮翻成实纸底时的字色：与 features 页的墨黑同值 */
-  --on-accent: #16150f;
+  /* v9 控件：三枚圆钮的直径。
+     直径跟着视口高度走，矮窗不至于顶到卡片。 */
+  --ctrl-round: clamp(46px, 5.6vh, 56px);
 
   /* ── 纸与墨（卡面）：一卡一纸色，墨字三档 ──
      三档都按"最深的那块纸色"（紫藤 #e2deee，L=0.746，八块里最暗的一块）反推 WCAG AA：
@@ -1606,7 +1393,11 @@ watch(
 
   position: fixed;
   inset: 0;
-  z-index: 120;
+  /* v9：大屏是模态层，抬到站点 chrome 之上 ——
+   * 左侧导航坞（HarnessDock，z-index 2147483000）与顶栏槽位（2147482000）
+   * 都压不住它，翻面钮因此不必再为导航坞让位。
+   * 之前是 120，会从导航坞底下穿过去，左钮被压掉半枚。 */
+  z-index: 2147483600;
   overflow: hidden;
   box-sizing: border-box;
   /* v8：底色交给下面那层毛玻璃（.screen__backdrop），这一层必须透 ——
@@ -1952,52 +1743,7 @@ watch(
      换面期间每帧只是把那张缓存好的模糊图贴上去。
      它不会把卡片"锁"在低分辨率上（那是 will-change: transform 的毛病，见 .face__shell）：
      这一层本来就是重模糊，分辨率对它没有意义。 */
-  /* v8：预提升只留给正对镜头那面。
-     八面全挂 will-change: filter，开屏瞬间就是 8 个模糊层 + 16 张卡 + 页面滤镜层
-     一起分层（真机 Layerize 185.7ms，第二大单项），而背面 / 侧面的面根本不进视野。
-     preserve-3d 不受影响：这里动的是 will-change 这条性能声明，不是 opacity / filter。 */
-  will-change: auto;
-}
-
-/* 换面时要重算模糊的只有即将正对镜头的那一张，预提升只给它。
-   但转动期间必须八面全提：新正面是在转动起手那一刻才当上正面的，
-   它的模糊层若此刻才创建，浏览器得当场重光栅化 —— 那就是一闪的黑块 / 错位。
-   转动结束（is-turning 摘掉）立刻回到"只有正面"，开屏的分层收益照旧。 */
-.face.is-front .face__wash,
-.screen.is-turning .face__wash {
   will-change: filter;
-}
-
-/* ── v9.3 · 位图管线生效时（.screen.is-gl）──
-   ［封面槽］画布常驻在 DOM 里（尺寸 = 烘焙位图像素尺寸，见脚本），但不参与绘制：
-   实测把背面封面也换成烘焙位图之后，静止帧与回退路径差 2.533%（>8/255 判）、
-   且全部集中在右缘 x≥1400 那一列（八格单值 35~47%）—— 那一列是相邻一面斜置
-   进视野的窄条，CSS blur 与 WebGL 烘焙的重采样链不同，一条 200px 竖条就把整帧
-   推过 1.5%。所以封面模糊留在 CSS 上（v7 的 will-change: filter 缓存照旧生效），
-   画布让位；位图与画布本身留着，随时可以再打开。 */
-.screen.is-gl .face__washgl {
-  display: none;
-}
-
-/* 正面：截图槽的画布退场 —— 正面那一张仍走原 <img>（保真退让，见脚本里那段注释） */
-.screen.is-gl .face.is-front .face__shotgl {
-  display: none;
-}
-
-/* 翻牌期（.is-flipgl 只在画布已贴源图位图且 flipping 为真时挂上，见脚本）：
-   正面截图槽换成画布，<img> 让位。两者同一个 .face__shot 类 = 同一套几何，完全重合；
-   切换发生在 flipping 起落的那一帧里，看不出。静止时不挂 is-flipgl = 仍是 <img>。 */
-.screen.is-gl.is-flipgl .face.is-front .face__shotgl {
-  display: block;
-}
-.screen.is-gl.is-flipgl .face.is-front .face__shotimg {
-  visibility: hidden;
-}
-
-/* 背面：截图位图画布已经垫在下面，<img> 不再绘制。反过来说，位图还没贴上的那一面
-   <img> 照旧可见 —— 没烘好就用 img 顶着，不需要任何分支去判"这一面好了没有" */
-.screen.is-gl .face:not(.is-front) .face__shotimg {
-  visibility: hidden;
 }
 
 /* 纸色暗纱：压在封面上，把墨字拉回 AA。再叠一道自上而下的光 —— 这是"光从上面来"
@@ -2469,29 +2215,18 @@ watch(
 }
 
 /* ===== 左右切换 =====
- * 与退出控件同一套语言：--ctrl 见方、8px 方角、1px 发丝、一层薄玻璃。
- * 位置照旧是版心两端的竖直中线（左右各一枚，夹住舞台），
- * 只是从"深色圆钮 + 白描边"换成了版面上的方角控件。 */
+ * v9：三枚控件换成同一档圆形液态玻璃（GlassSurface，与首页按钮同款材质）。
+ * 直径 --ctrl-round 比原来的方钮大一档；大屏的 z-index 已抬到导航坞之上，
+ * 左钮贴回版心左缘（left: 0），不再被压住。
+ * 位置照旧是版心两端的竖直中线（左右各一枚，夹住舞台）。 */
 .screen__nav {
   position: absolute;
   top: 50%;
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
-  width: var(--ctrl);
-  height: var(--ctrl);
-  padding: 0;
+  width: var(--ctrl-round);
+  height: var(--ctrl-round);
   translate: 0 -50%;
-  border: 1px solid var(--ctrl-line);
-  border-radius: var(--ctrl-radius);
-  background: var(--ctrl-bg);
-  color: var(--on-stage);
-  cursor: pointer;
-  transition:
-    background-color var(--t-2) ease,
-    border-color var(--t-2) ease,
-    color var(--t-2) ease,
-    scale var(--t-1) var(--ease-out);
+  border-radius: var(--r-full);
+  transition: scale var(--t-1) var(--ease-out);
 }
 
 .screen__nav--prev {
@@ -2502,26 +2237,67 @@ watch(
   right: 0;
 }
 
-/* 悬浮：翻成实纸底 + 墨字 —— 与退出控件同一个动作，三枚控件手感一致。
-   不放大：放大是"贴纸"的动作，版面上的控件只换明度。 */
-.screen__nav:hover {
-  background: var(--ctrl-bg-hover);
-  border-color: var(--ctrl-line-hover);
-  color: var(--on-accent);
+/* 左右圆钮自己的一圈发丝：玻璃在深色舞台上边界偏软，补一道 1px 才立得住。
+   ::after 盖在玻璃之上、不接指针 —— 悬浮只提亮这道线。
+   退出钮不用 ::after：它自己就是标准毛玻璃，边框写在元素本身上。 */
+.screen__nav::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: inherit;
+  pointer-events: none;
+  transition: border-color var(--t-2) ease;
 }
 
-/* 按下：轻收一下给按感，收回来的幅度比原来小一档（版面控件不表演） */
-.screen__nav:active {
-  scale: 0.94;
+.screen__nav:hover::after {
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
-.screen__nav:focus-visible {
+/* 玻璃里只放一枚按钮：铺满整块圆、透明底。
+   悬浮是在玻璃上叠一层薄白（材质本身不跟着变色），按下整枚控件轻收一下 */
+.screen__nav-btn,
+.screen__exit-btn {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--on-stage);
+  cursor: pointer;
+  transition: background-color var(--t-2) ease;
+}
+
+.screen__nav-btn:hover,
+.screen__exit-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.screen__nav-btn:focus-visible,
+.screen__exit-btn:focus-visible {
   outline: var(--ring-w) solid var(--ring);
   outline-offset: var(--ring-gap);
 }
 
-.screen__nav svg {
+/* 按下：轻收一下给按感，收回来的幅度比原来小一档（版面控件不表演） */
+.screen__nav:active,
+.screen__exit:active {
+  scale: 0.94;
+}
+
+.screen__nav svg,
+.screen__exit svg {
   display: block;
+}
+
+/* GlassSurface 的内容层自带 8px 内距；圆钮要贴着玻璃边，这里收掉 */
+.screen__nav :deep(.glass-surface__content) {
+  padding: 0;
+  border-radius: inherit;
 }
 
 /* ===== 页脚 =====
@@ -2606,56 +2382,37 @@ watch(
 /* ===== 退出控件 =====
  * 它在 .screen__inner 的 padding 盒之外，所以必须自己去量那两档百分比
  * —— 但量的是同一个 clamp()，右缘因此与版心右缘严格同一条竖线（实测 0px 偏差）。
- * 纵向：与顶栏共用同一个 padding 起点、同一档高度，所以两者的上下沿与中线
- * 天然重合（实测 0px 偏差）—— 看上去就是顶栏右端的那一格，不需要再补任何偏移。
- * 形状与左右切换钮完全一致，只是宽一点：多了一枚「退出」小字标签。 */
+ * 纵向：与顶栏共用同一个 padding 起点，直径与切换钮同一档，三枚控件因此是一组。
+ * v9：圆形，里面只剩一枚 X ——「退出」两字与 title / aria-label 重复，
+ * 挂在大钮上会把这枚圆撑破；读屏与悬浮提示不受影响。
+ * v9-2：液体折射只留给左右两枚；这枚换回标准毛玻璃 ——
+ * blur + 半透明白底 + 1px 描边，X 在任何背景上都清楚。 */
 .screen__exit {
   position: absolute;
   top: clamp(18px, 3.4vh, 40px);
   right: clamp(18px, 4vw, 64px);
   z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55em;
   box-sizing: border-box;
-  height: var(--ctrl);
-  padding: 0 clamp(12px, 1.05vw, 16px);
-  border: 1px solid var(--ctrl-line);
-  border-radius: var(--ctrl-radius);
-  background: var(--ctrl-bg);
-  color: var(--on-stage);
-  font-family: var(--mono);
-  font-size: var(--fs-ctrl);
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  cursor: pointer;
+  width: var(--ctrl-round);
+  height: var(--ctrl-round);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.14);
+  -webkit-backdrop-filter: blur(14px) saturate(1.8);
+  backdrop-filter: blur(14px) saturate(1.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(6, 10, 18, 0.22);
   transition:
+    scale var(--t-1) var(--ease-out),
     background-color var(--t-2) ease,
-    border-color var(--t-2) ease,
-    color var(--t-2) ease,
-    scale var(--t-1) var(--ease-out);
+    border-color var(--t-2) ease;
 }
 
-.screen__exit svg {
-  display: block;
-}
-
-/* 悬浮：翻成实纸底 + 墨字（与切换钮同一个动作）。
-   退出是这块版面上唯一的"离场"动作，明度对比给足，一眼认得出按得动 */
 .screen__exit:hover {
-  background: var(--ctrl-bg-hover);
-  border-color: var(--ctrl-line-hover);
-  color: var(--on-accent);
-}
-
-.screen__exit:active {
-  scale: 0.94;
-}
-
-.screen__exit:focus-visible {
-  outline: var(--ring-w) solid var(--ring);
-  outline-offset: var(--ring-gap);
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.55);
 }
 
 /* 读屏用：换面时把"现在看的是哪一项"播报出去 */
@@ -3017,20 +2774,9 @@ watch(
   }
 }
 
-/* 再窄一档：退出控件退回纯图标（版面已经没有地方放那两个字了）。
-   尺寸跟着变成正方，与切换钮一模一样；aria-label 与 title 一直都在，
-   读屏与悬浮提示不受影响。 */
+/* 再窄一档：版面已经没有地方放多余的字了（退出钮本来就只有一枚 X）。
+   小字刊头收掉，发丝线留住。 */
 @media (max-width: 600px) {
-  .screen__exit {
-    width: var(--ctrl);
-    gap: 0;
-    padding: 0;
-  }
-
-  .screen__exit-text {
-    display: none;
-  }
-
   .screen__label {
     /* 小字在这里会折行、会跟退出钮挤在一起，整条收掉，发丝线留住 */
     display: none;
@@ -3221,14 +2967,6 @@ watch(
   animation-delay: calc(360ms + var(--m-i, 0) * 20ms);
 }
 
-/* 退场这 460ms 里，这一层正在化开，却仍铺满整屏（fixed + inset: 0 + z-index: 120）：
-   它会把落在卡片墙上的那一下全吃掉 —— 而那一下正是"关掉又立刻再点"要记下来的
-   pendingPick（Features 等 emit('close') 之后补开）。退场期间这一层不接指针，
-   点击落回墙上的真格，补开才有得开。 */
-.screen.is-unflipping {
-  pointer-events: none;
-}
-
 .screen.is-unflipping .screen__backdrop,
 .screen.is-unflipping .screen__top,
 .screen.is-unflipping .screen__exit,
@@ -3269,8 +3007,6 @@ watch(
     --ink-mute: #38342c;
     --on-stage-2: rgba(244, 247, 250, 0.94);
     --on-stage-3: rgba(244, 247, 250, 0.84);
-    --ctrl-line: rgba(255, 255, 255, 0.72);
-    --ctrl-bg: rgba(255, 255, 255, 0.12);
   }
 
   .face__veil {
@@ -3279,6 +3015,16 @@ watch(
 
   .face__shotwrap::after {
     opacity: 0.5;
+  }
+
+  /* 圆钮那圈发丝也抬亮一档 —— 玻璃的边界在深色舞台上由它承担 */
+  .screen__nav::after {
+    border-color: rgba(255, 255, 255, 0.72);
+  }
+
+  /* 退出钮本来就是毛玻璃，描边再实一档 */
+  .screen__exit {
+    border-color: rgba(255, 255, 255, 0.72);
   }
 
   /* 毛玻璃也压实一档：提高对比度的用户要的是"层次清楚"，
@@ -3291,11 +3037,22 @@ watch(
 /* ===== 减少透明（v4）=====
  * 控件那层薄玻璃换成一块实底。玻璃在深色舞台上本来就只是"淡淡的一层底"，
  * 换成实色视觉上几乎无差，但对要求减少透明度的用户是必需的。
+ * v9 起三枚圆钮是 GlassSurface，背景写在它的内联样式里 ——
+ * 只有 !important 才压得住，同时把 backdrop-filter 一并撤掉。
  * v8 起这条偏好还管住整屏背景：半透明玻璃换成 v4 那块实色舞台
  * （背后的模糊由 Features 页自己那条媒体查询撤掉）。 */
 @media (prefers-reduced-transparency: reduce) {
-  .screen {
-    --ctrl-bg: rgb(46, 57, 70);
+  .screen__nav :deep(.glass-surface) {
+    background: rgb(46, 57, 70) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  /* 退出钮的毛玻璃同样退回实底 */
+  .screen__exit {
+    background: rgb(46, 57, 70) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
   }
 
   .screen__backdrop {

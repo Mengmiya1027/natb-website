@@ -8,7 +8,7 @@ import Components from 'unplugin-vue-components/vite'
 import IconsResolver from 'unplugin-icons/resolver'
 
 // 已安装的 Iconify 图标集：@iconify-json/{solar,lucide,ph}
-const ICON_COLLECTIONS = ['solar', 'lucide', 'ph', 'logos']
+const ICON_COLLECTIONS = ['solar', 'lucide', 'ph', 'logos', 'simple-icons']
 
 // 项目站点在子路径，用户站点与本地 dev 用根路径
 function pagesBase() {

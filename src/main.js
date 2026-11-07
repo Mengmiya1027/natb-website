@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
+import './styles/fonts.css'
 import App from './App.vue'
 import { IconifyPlugin } from '@/utils/iconify'
 

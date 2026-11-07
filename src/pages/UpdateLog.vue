@@ -39,7 +39,7 @@ const SOON = {
   folio: 'next',
   count: '筹备中',
   items: [
-    { kind: 'soon', tag: '预告', text: '下一版还在打磨，清单没定稿' },
+    { kind: 'soon', tag: '预告', text: '下一版还在打磨，加紧制作中~' },
     { kind: 'soon', tag: '计划', text: '继续加厚机型兼容性与 ROOT 成功率' },
     { kind: 'soon', tag: '待定', text: '想加什么功能，去官网留言就行' },
   ],
@@ -914,6 +914,8 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 /* ===== 舞台：透视挂在卡片父级 ===== */
 .log-stage {
   position: relative;
+  /* 只有卡片区给左侧导航坞让出一点，刊头不动 */
+  padding-left: var(--dock-gutter, 0px);
   flex: 1 1 auto;
   min-height: clamp(280px, 42vh, 520px);
 }
@@ -933,11 +935,19 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 .log-card {
   --tilt: 0deg;
   --card-scale: 1;
+  /* 放大的定义就写在这里：grow 是四边各外扩的百分比。
+   * 不用 transform: scale —— 缩放是合成层的位图拉伸，字会糊；
+   * 这里改的是真实布局尺寸，浏览器按放大后的尺寸排版渲染，笔画是锐的。
+   * grow 1 ↔ 1.02，grow 3 ↔ 1.06（与原来的 scale 倍数一一对应）。 */
+  --card-grow: 0;
   --card-surface: var(--paper);
   --card-ink: var(--ink);
 
   position: absolute;
-  inset: 0;
+  left: calc(var(--card-grow, 0) * -1%);
+  top: calc(var(--card-grow, 0) * -1%);
+  width: calc(100% + var(--card-grow, 0) * 2%);
+  height: calc(100% + var(--card-grow, 0) * 2%);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -955,18 +965,16 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   box-shadow: var(--card-shadow);
   /* 位移由脚本写 translate，这里只负责姿态 */
   rotate: y var(--tilt);
-  scale: var(--card-scale);
   /* 悬浮 / 按下的缩放另走 transform，跟三态的 scale 分开：
      挤在同一个属性里的话，两者只能共享同一条过渡时长，
      悬浮反馈会被切换的 620ms 拖成"飘"过去的。 */
   transform: scale(var(--card-hover, 1));
-  will-change: translate, rotate, scale, transform;
+  will-change: translate, rotate, transform;
   /* 带角形的层，每帧重画阴影的代价最大：box-shadow 故意不进过渡列表，
      换状态时阴影直接切换（位移动效遮得住），省掉的是每帧一次的路径+模糊重算 */
   transition:
     translate var(--dur-run) var(--ease),
     rotate var(--dur-run) var(--ease),
-    scale var(--dur-run) var(--ease),
     /* 悬浮与按下是自己的一档快节奏，不跟着切换时长走 */
     transform 160ms var(--ease),
     background-color 420ms ease;
@@ -991,6 +999,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   /* 倾角可被版式整体缩放：横版卡很宽，同样的 18° 会被透视拉得夸张 */
   --tilt: calc(-120deg * var(--tilt-k, 1));
   --card-scale: 1.02;
+  --card-grow: 1;
   --card-surface: var(--paper);
   --card-ink: var(--ink);
   --signal: var(--ink-3);
@@ -1002,6 +1011,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 .log-card[data-state='reading'] {
   --tilt: 0deg;
   --card-scale: 1.06;
+  --card-grow: 3;
   --card-surface: var(--paper);
   --card-ink: var(--ink);
   --signal: var(--accent);
@@ -1015,6 +1025,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   --tilt: calc(120deg * var(--tilt-k, 1));
   /* 与没看过同放大倍数：两侧不等会让一边贴边、一边收回一截 */
   --card-scale: 1.02;
+  --card-grow: 1;
   --card-surface: var(--paper-2);
   --card-ink: var(--ink);
   --signal: var(--ink-3);
@@ -1299,6 +1310,9 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 /* 类名只表方位，行为由模板绑，交换按钮作用时不必跟着改名 */
 .log-nav--left {
   left: 0;
+  /* 左侧导航坞占住了视口左边（右边界到 79px），这枚翻页键原本正好被它压住。
+   * 往右推出一段安全距离，两个圆不再叠在一起。 */
+  margin-left: calc(var(--dock-gutter, 0px) + 32px);
 }
 
 .log-nav--right {

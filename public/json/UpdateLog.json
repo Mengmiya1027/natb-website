@@ -2,6 +2,18 @@
   "$comment": "NATB 官网唯一的版本数据源。「更新日志」页逐版渲染这份清单，「项目信息」页的最新版本号取的也是它——releases 的第一条即最新版本（前端还会按 date 倒序再归一一次，顺序写反也不会串版）。换版本只改这一个文件，页面代码一行都不用动。kind 只认 new / opt / fix / soon 四种。",
   "releases": [
     {
+      "version": "v1.1.0",
+      "date": "2026-10-17",
+      "items": [
+        { "kind": "fix", "tag": "修复", "text": "修复界面显示错乱的问题" },
+        { "kind": "opt", "tag": "优化", "text": "优化了ROOT的逻辑" },
+        { "kind": "opt", "tag": "优化", "text": "以鼠标点击优化部分操作逻辑" },
+        { "kind": "opt", "tag": "优化", "text": "改善界面显示效果" },
+        { "kind": "new", "tag": "新增", "text": "安卓8.1更换为LSP框架" },
+        { "kind": "new", "tag": "新增", "text": "安卓7.1免ROOT安装软件" }
+      ]
+    },
+    {
       "version": "v1.0.3",
       "date": "2026-09-12",
       "items": [

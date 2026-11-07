@@ -23,9 +23,9 @@ const BASE_ROWS = [
   {
     no: '04',
     label: '邮箱',
-    value: 'taa2231486624@163.com',
-    copy: 'taa2231486624@163.com',
-    href: 'mailto:taa2231486624@163.com',
+    value: '2231486624@qq.com',
+    copy: '2231486624@qq.com',
+    href: 'mailto:2231486624@qq.com',
     data: true,
   },
   { no: '05', label: '官网', value: 'natb.top', href: 'https://natb.top', out: true, data: true },
@@ -474,7 +474,7 @@ onBeforeUnmount(() => {
               >
                 <span class="info-btn__text">{{ row.out ? '前往' : '写信' }}</span>
                 <i-lucide-arrow-up-right v-if="row.out" width="14" height="14" aria-hidden="true" />
-                <i-lucide-mail v-else width="14" height="14" aria-hidden="true" />
+                <i-lucide-mail v-else width="14" height="14" class="info-btn__mail" aria-hidden="true" />
               </a>
             </div>
           </div>
@@ -708,6 +708,8 @@ onBeforeUnmount(() => {
 /* ===== 版心 ===== */
 .info-sheet {
   position: relative;
+  /* 正文给左侧导航坞让出一段（比 3 页再宽一点点） */
+  padding-left: calc(var(--dock-gutter, 0px) + 12px);
   z-index: 1;
   display: grid;
   gap: calc(clamp(34px, 5vw, 84px) * var(--fit));
@@ -1061,8 +1063,9 @@ onBeforeUnmount(() => {
   border-radius: 999px;
 }
 
-/* 外链箭头微交互：指向右上，悬浮时顺着那个方向挪一点 */
-.info-btn--link:hover svg {
+/* 外链箭头微交互：指向右上，悬浮时顺着那个方向挪一点。
+   「写信」的邮件图标没有方向含义，不参与这条位移，只跟着链接换色。 */
+.info-btn--link:hover svg:not(.info-btn__mail) {
   translate: 1px -1px;
 }
 
@@ -1078,6 +1081,8 @@ onBeforeUnmount(() => {
  */
 .info-foot {
   position: relative;
+  /* 与正文对齐，同样让出左侧那一小段 */
+  padding-left: calc(var(--dock-gutter, 0px) + 12px);
   z-index: 1;
   display: grid;
   /* 免责正文更长，给它多一点宽度；两张卡 align-items:stretch 自动等高 */

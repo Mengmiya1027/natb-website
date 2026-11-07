@@ -1,0 +1,16 @@
+/* 标题字体：Archive（public/fonts/archive.otf，只有 Regular 一个字重）。
+ * font-weight 声明成 100 900 是故意的：让浏览器把这个 face 当成"全字重可用"，
+ * 标题上的 font-weight: 900 就不会被合成出一层伪粗体，渲染出来的始终是字体原字形。
+ * 文件缺席时回退到 --font-display 里排在后面的系统字体，正文不受影响。 */
+@font-face {
+  font-family: 'Archive';
+  src: url('/fonts/archive.otf') format('opentype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* 只给大标题用；Archive 缺席时退回原来的 HarmonyOS Sans SC / Arial 栈 */
+  --font-display: 'Archive', 'HarmonyOS Sans SC', 'Arial', system-ui, sans-serif;
+}

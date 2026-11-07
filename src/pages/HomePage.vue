@@ -7,6 +7,7 @@
  */
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 
+import GlassSurface from '@/components/vue-bits/GlassSurface.vue'
 import WebThreads from '@/components/vue-bits/WebThreads.vue'
 import { useAnimationStore } from '@/stores/animation'
 import { useUpdateLog } from '@/utils/updateLog'
@@ -78,7 +79,18 @@ function goTab(id) {
 
 const videoRef = ref(null)
 
+/* 玻璃被拖动时把首页的动态背景停帧：拖拽期间玻璃每帧都要重采样 backdrop，
+ * 视频解码 + WebGPU 重绘叠在一起会把它拖到 40fps 以下；松手立即恢复。
+ * 可拖动的液态玻璃（components/DraggableGlass.vue）目前未挂载，
+ * 这段监听先留着：把那枚玻璃恢复挂载后无需改动这里。 */
+const glassDragging = ref(false)
+
+function onGlassDrag(event) {
+  glassDragging.value = event?.detail === true
+}
+
 onMounted(() => {
+  window.addEventListener('natb:glass-drag', onGlassDrag)
   // 首页不再有粒子开场，但顶栏仍靠 isLanded 滑进来
   anim.land()
   document.documentElement.classList.add('home-is-dark')
@@ -92,6 +104,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('natb:glass-drag', onGlassDrag)
   document.documentElement.classList.remove('home-is-dark')
 })
 </script>
@@ -119,7 +132,7 @@ onBeforeUnmount(() => {
             :fps="aeroFps"
             shard-color="#6d5cff"
             accent-color="#a98bff"
-            :paused="reduceMotion"
+            :paused="reduceMotion || glassDragging"
           />
           <WebThreads
             v-else
@@ -141,7 +154,7 @@ onBeforeUnmount(() => {
             :mouse-interaction="!reduceMotion"
             :mouse-strength="0.22"
             :dpr="1.5"
-            :paused="reduceMotion"
+            :paused="reduceMotion || glassDragging"
           />
         </div>
         <div class="hero__veil"></div>
@@ -166,16 +179,30 @@ onBeforeUnmount(() => {
         <p class="hero__tagline">小天才手表，一个窗口全部搞定。</p>
         <p class="hero__lead">把 ROOT、刷机、装应用、投屏收进一套顺手的工作流。</p>
 
-        <div class="hero__actions">
-          <a class="btn btn--primary" :href="QQ_URL" target="_blank" rel="noopener">
+        <GlassSurface
+          class="hero__actions-glass"
+          width="auto"
+          height="auto"
+          :border-radius="999"
+          :border-width="0.22"
+          :displace="0.5"
+          :distortion-scale="-180"
+          :background-opacity="0.28"
+          :saturation="1"
+          :blur="6"
+          :brightness="90"
+        >
+          <div class="hero__actions">
+            <a class="btn btn--primary" :href="QQ_URL" target="_blank" rel="noopener">
             <i-lucide-download width="17" height="17" aria-hidden="true" />
             <span>立即下载</span>
           </a>
-          <a class="btn btn--ghost" href="#" @click.prevent="goTab('features')">
-            <i-lucide-layout-grid width="17" height="17" aria-hidden="true" />
-            <span>了解功能</span>
-          </a>
-        </div>
+            <a class="btn btn--ghost" href="#" @click.prevent="goTab('features')">
+              <i-lucide-layout-grid width="17" height="17" aria-hidden="true" />
+              <span>了解功能</span>
+            </a>
+          </div>
+        </GlassSurface>
         <ul class="hero__tags" aria-label="核心能力">
           <li v-for="tag in TAGS" :key="tag" class="tag">{{ tag }}</li>
         </ul>
@@ -353,12 +380,19 @@ onBeforeUnmount(() => {
 
 .hero__title {
   margin: 26px 0 0;
+  font-family: var(--font-display);
   font-size: clamp(3.3rem, 8.8vw, 7.6rem);
   font-weight: 900;
   line-height: 0.88;
   letter-spacing: -0.055em;
   text-wrap: balance;
-  filter: drop-shadow(0 12px 46px rgba(103, 84, 255, 0.24));
+  /* 辉光：近处一层冷白勾出字形边缘，中景紫蓝撑起体量，远处一层压暗收边；
+   * 三段半径都远小于字号，避免糊成一团。 */
+  filter:
+    drop-shadow(0 0 15px rgba(176, 192, 255, 0.34))
+    drop-shadow(0 0 42px rgba(122, 138, 255, 0.3))
+    drop-shadow(0 2px 0 rgba(6, 8, 18, 0.26))
+    drop-shadow(0 14px 52px rgba(103, 84, 255, 0.3));
 }
 
 .hero__title-line {
@@ -368,19 +402,36 @@ onBeforeUnmount(() => {
 
 .hero__title-line:first-child {
   animation-delay: 0.14s;
+  /* 立体感：上端接近纯白、下端压到淡紫灰，再各带一点 alpha —— 字像是从背景里浮出来，
+   * 而不是一张贴纸。alpha 写在颜色里而不是给元素 opacity，辉光强度不受影响。 */
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(234, 239, 255, 0.87) 58%,
+    rgba(198, 208, 242, 0.79) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero__title-line--accent {
   padding-right: 0.04em;
   color: transparent;
-  background: linear-gradient(100deg, #f3f5ff 0%, #c8d2ff 26%, #a58dff 56%, #65e0ff 100%);
+  background: linear-gradient(
+    100deg,
+    rgba(243, 245, 255, 0.95) 0%,
+    rgba(200, 210, 255, 0.91) 26%,
+    rgba(165, 141, 255, 0.89) 56%,
+    rgba(101, 224, 255, 0.92) 100%
+  );
   -webkit-background-clip: text;
   background-clip: text;
   animation-delay: 0.24s;
 }
 
 .hero__tagline {
-  margin: 28px 0 0;
+  margin: 18px 0 0;
   font-size: clamp(1.02rem, 1.5vw, 1.3rem);
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -400,18 +451,18 @@ onBeforeUnmount(() => {
 /* ============================================================
  * 按钮
  * ========================================================== */
+.hero__actions-glass {
+  width: auto;
+  margin-top: 30px;
+  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both;
+}
+
 .hero__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: color-mix(in srgb, rgb(217,217,217) 50%, transparent);
-  padding: 4px;
-  border-radius: 999px;
-  corner-shape:superellipse(1.25);
-  margin-top: 30px;
-  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both;
 }
 
 .btn {
@@ -465,8 +516,6 @@ onBeforeUnmount(() => {
   color: #eef1ff;
   background: rgb(0 0 0 / 0.5);
   border-color: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
@@ -573,7 +622,7 @@ onBeforeUnmount(() => {
   }
 
   .hero__tagline {
-    margin-top: 22px;
+    margin-top: 14px;
     letter-spacing: 0.05em;
   }
 
@@ -584,9 +633,11 @@ onBeforeUnmount(() => {
   }
 
   .hero__actions {
-    width: 100%;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .hero__actions-glass {
     margin-top: 26px;
   }
 
@@ -634,7 +685,7 @@ onBeforeUnmount(() => {
   }
 
   .hero__tagline {
-    margin-top: 20px;
+    margin-top: 12px;
   }
 
   .hero__tags {
