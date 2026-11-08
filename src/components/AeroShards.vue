@@ -974,7 +974,7 @@ const QUALITY = {
   // 背景是装饰，不是主角：整页交互掉帧的根因是它在抢 GPU，所以这里压基础占用
   // （dpr 1→0.9 = 像素 −19%、bloom 3→2、count 1300→1000 = 模拟与上传 −23%），
   // 配合下面「交互让路」——用户操作页面时它一帧都不画。
-  rich: { dpr: 0.9, fps: 30, bloomLevels: 2, layerScales: LAYER_SCALES, count: 1000 },
+  rich: { dpr: 0.9, fps: 60, bloomLevels: 2, layerScales: LAYER_SCALES, count: 1000 },
   mid: { dpr: 1, fps: 45, bloomLevels: 3, layerScales: LAYER_SCALES, count: 1100 },
   high: { dpr: 1.5, fps: 60, bloomLevels: BLOOM_LEVELS, layerScales: LAYER_SCALES, count: 1300 },
 }

@@ -1,8 +1,21 @@
 <script setup>
-import { computed } from 'vue'
+/**
+ * 站内顶栏。外壳只负责三件事 —— 定位、入场翻入、点击穿透交给胶囊自己；
+ * 胶囊本体、hover 弹簧、选中墨点、窄屏折叠面板全部来自 vue-bits 的 PillNav
+ * （React Bits 版 Pill Nav 的 Vue 移植，见 ./vue-bits/PillNav.vue）。
+ *
+ * 顶栏不直接碰宿主的 activeId：条目点击只广播 natb:tab，由 App.vue 校验后落表。
+ */
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useAnimationStore } from '@/stores/animation'
+import PillNav from './vue-bits/PillNav.vue'
 
-const QQ_URL = 'https://qm.qq.com/q/Cb2vLZtsZ4'
+const props = defineProps({
+  /** 当前站内页，用来给对应条目点亮墨点 */
+  activeId: { type: String, default: 'home' }
+})
+
+const DOWNLOAD_URL = 'https://qm.qq.com/q/Cb2vLZtsZ4'
 
 // 跟随 base，子路径部署也能取到 public 下的图标
 const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
@@ -12,47 +25,83 @@ const store = useAnimationStore()
 // 首页已经换成常驻顶栏：挂载即显示，不再等粒子上台
 const shown = computed(() => store.isFlying || store.isLanded)
 
-/**
- * 首页只做一屏，顶栏不再有页内锚点可跳。
- * 这里只广播站内页面切换请求（介绍 → 功能 / 关于 → 项目信息），
- * 由 App.vue 统一决定展示哪一页；下载直接进 QQ 群。
- */
+/* 入场那一下是 3D 翻转（translateY + rotateX + 父级 perspective）。翻完之后还留着
+ * 恒等的 transform，会让整个顶栏一直待在 3D 渲染上下文里，多付一层合成开销。
+ * 这里在动画结束后落一个 is-settled，把 perspective 和 transform 一起撤掉。 */
+const settled = ref(false)
+let settleTimer = 0
+watch(
+  shown,
+  (visible) => {
+    window.clearTimeout(settleTimer)
+    if (!visible) {
+      settled.value = false
+      return
+    }
+    settleTimer = window.setTimeout(() => {
+      settled.value = true
+    }, 1400)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => window.clearTimeout(settleTimer))
+
+const items = [
+  { label: '介绍', href: '#features' },
+  { label: '下载', href: DOWNLOAD_URL, target: '_blank', rel: 'noopener' },
+  { label: '关于', href: '#projectinfo' }
+]
+
+const activeHref = computed(() => '#' + props.activeId)
+
 function goTab(id) {
   window.dispatchEvent(new CustomEvent('natb:tab', { detail: id }))
+}
+
+/** 站内条目走 tab 广播，外链（下载）交给浏览器自己开 */
+function onItemClick(item, index, event) {
+  if (!item.href?.startsWith('#')) return
+  event.preventDefault()
+  goTab(item.href.slice(1))
+}
+
+/** 品牌圆和条目同源：点它回首页 */
+function onLogoClick(event) {
+  if (!event.target.closest?.('.pill-nav__logo-link')) return
+  event.preventDefault()
+  goTab('home')
 }
 </script>
 
 <template>
   <header
     class="navbar"
-    :class="{ 'is-shown': shown }"
+    :class="{ 'is-shown': shown, 'is-settled': settled }"
     :aria-hidden="shown ? undefined : 'true'"
     :inert="!shown"
+    @click.capture="onLogoClick"
   >
     <div class="dock">
-      <!-- 左：圆形图标 + 字样 -->
-      <a class="brand" href="#" @click.prevent="goTab('home')">
-        <img class="brand-icon" :src="brandIcon" alt="NATB" />
-        <span class="brand-text">NATB</span>
-      </a>
-
-      <nav class="links" aria-label="主导航">
-        <a class="link" href="#" @click.prevent="goTab('features')">介绍</a>
-        <a class="link" :href="QQ_URL" target="_blank" rel="noopener">下载</a>
-        <a class="link" href="#" @click.prevent="goTab('projectinfo')">关于</a>
-      </nav>
-
-      <!-- 右：QQ 交流群入口 -->
-      <a
-        class="action"
-        :href="QQ_URL"
-        target="_blank"
-        rel="noopener"
-        aria-label="加入 QQ 交流群"
-        title="加入 QQ 交流群"
+      <PillNav
+        :logo="brandIcon"
+        logo-alt="NATB"
+        logo-text="NATB"
+        logo-href="#home"
+        :items="items"
+        :active-href="activeHref"
+        bar-color="rgba(12, 12, 14, 0.92)"
+        :intro="false"
+        collapse="auto"
+        aria-label="主导航"
+        @item-click="onItemClick"
       >
-        <i-lucide-message-circle width="17" height="17" aria-hidden="true" />
-      </a>
+        <template #trailing>
+          <!-- 右侧圆形占位：位置先留着，将来换图只改这一段 -->
+          <span class="nav-placeholder">
+            <img :src="brandIcon" alt="" draggable="false" />
+          </span>
+        </template>
+      </PillNav>
     </div>
   </header>
 </template>
@@ -80,137 +129,63 @@ function goTab(id) {
   opacity: 1;
 }
 
-/* 灵动岛式黑胶囊 */
+/* 这一层只剩翻入动画：胶囊的底色/描边/投影由 PillNav 自己画。
+ * 宽度得给足 —— PillNav 的 collapse="auto" 按父容器可用宽度决定要不要收起条目，
+ * 父容器若是 shrink-to-fit，它量到的可用宽度就永远不够。 */
 .dock {
-  pointer-events: auto;
   display: flex;
-  align-items: center;
-  /* 两端贴边，中间三个按钮分掉剩余空间 */
-  justify-content: space-between;
-  gap: 4px;
-  max-width: calc(100vw - 24px);
-  padding: 4px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 999px;
-  background: rgba(12, 12, 14, 0.78);
-  /* 绕顶边翻：起点立起来并抬到屏幕上方之外 */
+  justify-content: center;
+  width: 100%;
+  pointer-events: auto;
+  max-width: 100%;
   transform-origin: center top;
   transform: translateY(-160%) rotateX(-180deg);
   transition: transform 1.2s ease;
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 8px 24px rgba(0, 0, 0, 0.35);
-  user-select: none;
-  min-width: 50vw;
 }
 
 .navbar.is-shown .dock {
   transform: translateY(0) rotateX(0);
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-  text-decoration: none;
+/* 翻入结束：撤掉 3D 上下文，子层合成更省 */
+.navbar.is-settled {
+  perspective: none;
 }
 
-.brand-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex: none;
-  background: #1c1c1e;
+.navbar.is-settled .dock {
+  transform: none;
+  will-change: auto;
 }
 
-.brand-text {
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-
-.links {
-  display: flex;
-  align-items: center;
-  justify-content: space-evenly;
-  flex: 1;
-  min-width: 0;
-  gap: 2px;
-}
-
-.link {
-  padding: 4px 16px;
-  font-weight: 700;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.72);
-  font-family: inherit;
-  font-size: 17px;
-  text-decoration: none;
-  cursor: pointer;
-  transition: color 0.2s ease, background 0.2s ease, scale 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.link:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.link:active {
-  scale: 0.94;
-}
-
-/* 圆形图片位 */
-.action {
-  width: 32px;
-  height: 32px;
-  flex: none;
+/* 右侧占位圆：尺寸与 logo 圆同源（--pn-h），玻璃底 + 一圈内高光也与 logo 胶囊一致 */
+.nav-placeholder {
+  position: relative;
   display: grid;
   place-items: center;
-  padding: 0;
-  overflow: hidden;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.72);
-  text-decoration: none;
-  cursor: pointer;
-  transition: background 0.2s ease, scale 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  width: var(--pn-h, 44px);
+  height: var(--pn-h, 44px);
+  border-radius: 999px;
+  background: var(--pn-surface, rgba(38, 35, 46, 0.66));
+  box-shadow: var(--pn-shadow, none);
+  /* 占位圆里没有文字、图标又占满，再叠一层 backdrop 模糊只是白付采样成本 */
 }
 
-.action:hover {
-  background: rgba(255, 255, 255, 0.22);
+.nav-placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px var(--pn-edge, rgba(255, 255, 255, 0.08)),
+    inset 0 1px 0 var(--pn-rim, rgba(255, 255, 255, 0.07));
+  pointer-events: none;
 }
 
-.action:active {
-  scale: 0.92;
-}
-
-.action svg {
+.nav-placeholder img {
   display: block;
-}
-
-.action-icon {
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  border-radius: 999px;
   object-fit: cover;
-}
-
-/* 窄屏收紧，保住一行 */
-@media (max-width: 480px) {
-  .brand-text {
-    display: none;
-  }
-
-  .link {
-    padding: 7px 10px;
-    font-size: 13px;
-  }
 }
 </style>

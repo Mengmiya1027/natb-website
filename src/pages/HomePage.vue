@@ -304,8 +304,16 @@ onBeforeUnmount(() => {
   width: min(1120px, 96vw);
   height: min(640px, 72vh);
   transform: translate(-50%, -48%);
-  background: radial-gradient(closest-side, rgba(5, 6, 10, 0.58), rgba(5, 6, 10, 0.24) 58%, transparent 78%);
-  filter: blur(18px);
+  /* 原本是 radial-gradient + blur(18px)：1120×640 的一整片高斯模糊，
+   * 在 GPU 上是每帧一次的重型 pass。渐变本身已经是柔和衰减，
+   * 这里把衰减区间和收边点各放宽一档，抵掉去模糊后边缘变硬的那一点点。 */
+  background: radial-gradient(
+    closest-side,
+    rgba(5, 6, 10, 0.58),
+    rgba(5, 6, 10, 0.4) 42%,
+    rgba(5, 6, 10, 0.18) 62%,
+    transparent 82%
+  );
   pointer-events: none;
 }
 
@@ -386,13 +394,14 @@ onBeforeUnmount(() => {
   line-height: 0.88;
   letter-spacing: -0.055em;
   text-wrap: balance;
-  /* 辉光：近处一层冷白勾出字形边缘，中景紫蓝撑起体量，远处一层压暗收边；
-   * 三段半径都远小于字号，避免糊成一团。 */
+  /* 辉光：近处一层冷白勾出字形边缘，中景紫蓝撑起体量。
+   * 原先是 4 层 drop-shadow（含 52px 巨半径那层），GPU 每帧一片大 pass，是首页掉帧主因。
+   * 这里只保留观感上真正起作用的这两层：半径越大越贵，去掉 52px 那层几乎看不出差别。
+   * 注：不能换成 text-shadow —— 标题是 background-clip: text 的渐变字，
+   * 阴影会透过透明字形显示，整行字会被光晕填满。 */
   filter:
     drop-shadow(0 0 15px rgba(176, 192, 255, 0.34))
-    drop-shadow(0 0 42px rgba(122, 138, 255, 0.3))
-    drop-shadow(0 2px 0 rgba(6, 8, 18, 0.26))
-    drop-shadow(0 14px 52px rgba(103, 84, 255, 0.3));
+    drop-shadow(0 0 42px rgba(122, 138, 255, 0.3));
 }
 
 .hero__title-line {

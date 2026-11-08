@@ -62,7 +62,7 @@ onBeforeUnmount(() => window.removeEventListener('natb:tab', onTabRequest))
   <template v-else>
     <!-- [HARNESS-DOCK] 顶部 dock 栏：首页交给开场动画自己管，其余页面由上面那个 watch 拉下来 -->
     <div class="nav-layer">
-      <NavBar />
+      <NavBar :active-id="activeId" />
     </div>
 
     <!-- [HARNESS-DOCK] ④ 背景层：整屏渲染当前标签页 -->
