@@ -284,7 +284,7 @@ function resetAll() {
         </SelectContent>
       </Select>
 
-      <Button v-if="activeFilterCount" variant="ghost" class="h-9 gap-1 text-sm" @click="resetAll">
+      <Button v-if="activeFilterCount" class="h-9 gap-1 text-sm" @click="resetAll">
         <IconX class="size-3.5" />
         重置
       </Button>

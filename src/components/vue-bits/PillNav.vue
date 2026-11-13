@@ -945,7 +945,7 @@ onBeforeUnmount(() => {
               @click="choose(item, index, $event)"
             >
               <span v-if="fill" :class="FILL" aria-hidden="true" />
-              <span :class="FACE">
+              <span :class="[FACE, item.latin && 'pill-nav__face--latin']">
                 <component :is="item.icon" v-if="item.icon" />
                 {{ item.label }}
               </span>
@@ -1299,6 +1299,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.45em;
   transition: transform 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 系统里装的 Archive 字体只有大写字形，英文项会被渲染成 "ISSUE"。
+   这里单独给拉丁文字项换字体；中文项保持 Archive,serif 的宋体观感不变。 */
+.pill-nav__face--latin {
+  font-family: 'HarmonyOS Sans SC', Arial, system-ui, sans-serif;
+  letter-spacing: 0.01em;
 }
 
 .pill-nav__face svg {

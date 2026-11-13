@@ -14,7 +14,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
-import { githubApi, githubWriteApi } from '@/api/github'
+import { clearApiCache, githubApi, githubWriteApi } from '@/api/github'
 import { ISSUE_REPO_FULL, ISSUE_REPO_URL } from '@/config/github'
 
 import { Button } from '@/components/ui/button'
@@ -108,6 +108,8 @@ const statCards = computed(() => [
 ])
 
 async function loadOverview() {
+  // 手动刷新 / 重试要拿最新数据，先作废存在 60 秒的 GET 缓存
+  clearApiCache()
   overview.value.loading = true
   overview.value.error = ''
   try {
@@ -154,6 +156,7 @@ const allSelected = computed(
 const selectedCount = computed(() => selectedNumbers.value.length)
 
 async function loadIssues() {
+  clearApiCache()
   issuesLoading.value = true
   issuesError.value = ''
   try {

@@ -14,7 +14,8 @@ import { toast } from 'vue-sonner'
 import '@/styles/issue.css'
 import { useIssueStore } from '@/stores/issue'
 import { useAnimationStore } from '@/stores/animation'
-import { githubApi } from '@/api/github'
+import { clearApiCache, githubApi } from '@/api/github'
+import ScrollIndicator from '@/components/issue/ScrollIndicator.vue'
 import { ISSUE_REPO_FULL, ISSUE_REPO_URL } from '@/config/github'
 
 const brandIcon = import.meta.env.BASE_URL + 'natb-icon.png'
@@ -98,6 +99,9 @@ const filters = ref({
 
 const listVersion = ref(0)
 function refreshList() {
+  // 不先清缓存的话，重新请求仍会命中 60 秒内的 GET 缓存，
+  // 点刷新等于什么都没发生。
+  clearApiCache()
   listVersion.value += 1
 }
 
@@ -179,12 +183,18 @@ function onIssueCreated(number) {
       <div
         class="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 pt-[68px] pb-3 lg:px-6 md:h-[68px] md:pt-0 md:pb-0"
       >
-        <div class="flex min-w-0 items-center gap-3">
+        <!-- 整块（logo + 标题）点一下回 Issue 列表；里面的 GitHub 链接单独 stop -->
+        <div
+          class="flex min-w-0 items-center gap-3"
+          :class="view === 'list' ? '' : 'cursor-pointer'"
+          :title="view === 'list' ? undefined : '返回 Issue 列表'"
+          @click="view !== 'list' && goList()"
+        >
           <Button
             v-if="view === 'new'"
             variant="ghost"
             size="icon"
-            class="size-8 shrink-0"
+            class="hover:bg-foreground/10 hover:text-foreground size-8 shrink-0 transition-colors duration-150"
             @click="goList"
           >
             <IconArrowLeft class="size-[18px]" />
@@ -192,9 +202,23 @@ function onIssueCreated(number) {
 
           <img :src="brandIcon" alt="NATB" class="size-8 shrink-0 rounded-md" />
 
-          <h1 class="text-2xl font-bold tracking-tight whitespace-nowrap">
-            {{ view === 'new' ? '新建 Issue' : view === 'detail' ? `#${currentNumber}` : 'Issues' }}
-          </h1>
+          <!-- 详情页把标题拆成面包屑：Issues ｜ #12 -->
+          <div class="flex min-w-0 items-center gap-2">
+            <h1 class="text-2xl font-bold tracking-tight whitespace-nowrap">
+              {{ view === 'new' ? '新建 Issue' : 'Issues' }}
+            </h1>
+            <Separator
+              v-if="view === 'detail'"
+              orientation="vertical"
+              class="hidden data-[orientation=vertical]:h-5 sm:block"
+            />
+            <span
+              v-if="view === 'detail'"
+              class="text-2xl font-bold tracking-tight whitespace-nowrap"
+            >
+              #{{ currentNumber }}
+            </span>
+          </div>
 
           <Separator
             orientation="vertical"
@@ -206,6 +230,7 @@ function onIssueCreated(number) {
             rel="noopener"
             class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-1.5 text-sm transition-colors"
             :title="ISSUE_REPO_FULL"
+            @click.stop
           >
             <IconGitHub class="size-[18px]" />
           </a>
@@ -267,45 +292,54 @@ function onIssueCreated(number) {
     <main class="mx-auto w-full max-w-6xl px-4 py-8 lg:px-6">
       <!-- SectionCards：官方 dashboard block 的统计卡区 -->
       <div v-if="view === 'list'" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card class="gap-1.5 py-5 shadow-xs">
-          <CardContent class="px-5">
-            <div class="text-foreground flex items-center gap-2 text-base font-semibold">
-              <IconCircleDot class="size-4" />
-              未关闭
+        <!-- 左：标题 + 说明；右：大号数字上下居中靠右。高度锁定 130px 与改版前一致 -->
+        <Card class="h-[130px] gap-1.5 py-5 shadow-xs">
+          <CardContent class="flex flex-1 items-center justify-between gap-4 pr-9 pl-5">
+            <div class="min-w-0">
+              <div class="text-foreground flex items-center gap-2 text-base font-semibold">
+                <IconCircleDot class="size-4 shrink-0" />
+                未关闭
+              </div>
+              <p class="text-muted-foreground mt-1 text-sm">处于 Open 状态的 issue</p>
             </div>
-            <div class="mt-1 text-3xl font-semibold tabular-nums">
-              <Skeleton v-if="!stats.loaded" class="h-8 w-12" />
+            <div class="shrink-0 text-5xl font-bold tracking-tight tabular-nums">
+              <Skeleton v-if="!stats.loaded" class="h-10 w-12" />
               <template v-else>{{ stats.open }}</template>
             </div>
-            <p class="text-muted-foreground mt-1 text-sm">处于 Open 状态的 issue</p>
           </CardContent>
         </Card>
 
-        <Card class="gap-1.5 py-5 shadow-xs">
-          <CardContent class="px-5">
-            <div class="text-foreground flex items-center gap-2 text-base font-semibold">
-              <IconTag class="size-4" />
-              标签
+        <!-- 左：标题 + 说明；右：大号数字上下居中靠右。高度锁定 130px 与改版前一致 -->
+        <Card class="h-[130px] gap-1.5 py-5 shadow-xs">
+          <CardContent class="flex flex-1 items-center justify-between gap-4 pr-9 pl-5">
+            <div class="min-w-0">
+              <div class="text-foreground flex items-center gap-2 text-base font-semibold">
+                <IconTag class="size-4 shrink-0" />
+                标签
+              </div>
+              <p class="text-muted-foreground mt-1 text-sm">仓库可用的分类标签</p>
             </div>
-            <div class="mt-1 text-3xl font-semibold tabular-nums">
-              <Skeleton v-if="!stats.loaded" class="h-8 w-12" />
+            <div class="shrink-0 text-5xl font-bold tracking-tight tabular-nums">
+              <Skeleton v-if="!stats.loaded" class="h-10 w-12" />
               <template v-else>{{ stats.labels }}</template>
             </div>
-            <p class="text-muted-foreground mt-1 text-sm">仓库可用的分类标签</p>
           </CardContent>
         </Card>
 
-        <Card class="gap-1.5 py-5 shadow-xs">
-          <CardContent class="px-5">
-            <div class="text-foreground flex items-center gap-2 text-base font-semibold">
-              <IconMilestone class="size-4" />
-              里程碑
+        <!-- 左：标题 + 说明；右：大号数字上下居中靠右。高度锁定 130px 与改版前一致 -->
+        <Card class="h-[130px] gap-1.5 py-5 shadow-xs">
+          <CardContent class="flex flex-1 items-center justify-between gap-4 pr-9 pl-5">
+            <div class="min-w-0">
+              <div class="text-foreground flex items-center gap-2 text-base font-semibold">
+                <IconMilestone class="size-4 shrink-0" />
+                里程碑
+              </div>
+              <p class="text-muted-foreground mt-1 text-sm">按版本归拢的计划</p>
             </div>
-            <div class="mt-1 text-3xl font-semibold tabular-nums">
-              <Skeleton v-if="!stats.loaded" class="h-8 w-12" />
+            <div class="shrink-0 text-5xl font-bold tracking-tight tabular-nums">
+              <Skeleton v-if="!stats.loaded" class="h-10 w-12" />
               <template v-else>{{ stats.milestones }}</template>
             </div>
-            <p class="text-muted-foreground mt-1 text-sm">按版本归拢的计划</p>
           </CardContent>
         </Card>
       </div>
@@ -361,5 +395,8 @@ function onIssueCreated(number) {
       :offset="{ top: '84px' }"
       :mobile-offset="{ top: '136px' }"
     />
+
+    <!-- 页面滚动条改成浮在内容上的指示条，不再占横向空间 -->
+    <ScrollIndicator />
   </div>
 </template>

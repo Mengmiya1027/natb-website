@@ -355,7 +355,14 @@ async function onSidebarChanged() {
     <div v-else-if="issue" class="natb-detail__grid natb-rise">
       <div class="natb-detail__main">
         <header class="natb-detail__head">
-          <Button variant="ghost" size="icon-sm" class="natb-detail__back" title="返回列表" @click="emit('back')">
+          <!-- 微交互：悬停时浮起一层底色 -->
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="natb-detail__back hover:bg-foreground/10 hover:text-foreground transition-colors duration-150"
+            title="返回列表"
+            @click="emit('back')"
+          >
             <IconArrowLeft class="size-4" />
           </Button>
 

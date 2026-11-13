@@ -368,3 +368,15 @@
 .dark [data-slot='select-viewport']::-webkit-scrollbar-thumb {
   background-color: #525252;
 }
+
+/* ---------- 页面滚动条 ----------
+ * 原生滚动条在 Windows 上实占约 15px 横向空间，内容区因此变窄；
+ * 浏览器又不允许网页把它改成 overlay。所以本页隐藏原生条，
+ * 由 ScrollIndicator.vue 画一条 fixed 指示条浮在右侧。 */
+html:has(.natb-issue) {
+  scrollbar-width: none;
+}
+
+html:has(.natb-issue)::-webkit-scrollbar {
+  display: none;
+}
