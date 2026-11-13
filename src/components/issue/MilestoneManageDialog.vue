@@ -5,7 +5,7 @@
  * 与 LabelManageDialog 一样，作为 IssueAdminPanel 的 Tab 内容渲染，不再嵌一层 Dialog。
  * 列表用 state=all，关掉（closed）的里程碑也要能改标题 / 删掉。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { githubApi, githubWriteApi } from '@/api/github'
@@ -35,7 +35,7 @@ import IconLoader from '~icons/lucide/loader-circle'
 import IconRefresh from '~icons/lucide/refresh-cw'
 import IconCalendar from '~icons/lucide/calendar'
 
-const emit = defineEmits(['changed'])
+const emit = defineEmits(['changed', 'update:formOpen'])
 
 const milestones = ref([])
 const loading = ref(false)
@@ -45,6 +45,29 @@ const deleting = ref(false)
 
 /** originalNumber 为 null 表示新建 */
 const formOpen = ref(false)
+
+// 表单一打开就把状态送上去，让管理面板右栏整块滑动
+watch(formOpen, (open) => emit('update:formOpen', open))
+
+/**
+ * 表单的实际挂载开关。关闭时不能立刻卸载，否则退场动画还没播完内容就没了：
+ * 这里先让 v-if 保持为 true，等 300ms 的滑出 + 渐隐结束再真正卸载。
+ */
+const formMounted = ref(false)
+let unmountTimer = 0
+
+watch(formOpen, (open) => {
+  window.clearTimeout(unmountTimer)
+  if (open) {
+    formMounted.value = true
+    return
+  }
+  unmountTimer = window.setTimeout(() => {
+    if (!formOpen.value) formMounted.value = false
+  }, 320)
+})
+
+onBeforeUnmount(() => window.clearTimeout(unmountTimer))
 const originalNumber = ref(null)
 const form = ref({ title: '', description: '', due: '' })
 
@@ -175,11 +198,11 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-3">
+  <div class="flex h-full min-h-0 flex-col gap-3">
     <!-- 工具条 -->
     <div class="flex items-center justify-between gap-2">
       <p class="text-xs text-muted-foreground">
-        共 {{ milestones.length }} 个里程碑（含已关闭）。进度按已完成 issue 占比计算。
+        共 {{ milestones.length }} 个里程碑（含已关闭）。进度按已完成占比计算。
       </p>
       <div class="flex items-center gap-1.5">
         <Button variant="ghost" size="sm" :disabled="loading" title="刷新" @click="load">
@@ -192,132 +215,148 @@ async function confirmDelete() {
       </div>
     </div>
 
-    <!-- 新建 / 编辑表单 -->
-    <div v-if="formOpen" class="rounded-xl border border-border bg-card p-4">
-      <div class="flex items-center justify-between">
-        <h4 class="text-sm font-semibold">{{ originalNumber ? '编辑里程碑' : '新建里程碑' }}</h4>
-        <Button variant="ghost" size="icon-xs" title="收起" @click="cancelForm">
-          <IconX class="size-3.5" />
-        </Button>
+    <!-- 列表 -->
+    <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div
+        v-if="loading && !milestones.length"
+        class="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-6 text-sm text-muted-foreground"
+      >
+        <IconLoader class="size-4 animate-spin" />
+        正在读取里程碑…
       </div>
 
-      <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
-        <div class="flex flex-col gap-1.5">
-          <Label for="milestone-title">标题</Label>
-          <Input
-            id="milestone-title"
-            v-model="form.title"
-            placeholder="例如 v1.2 发布"
-            maxlength="120"
-            @keydown.enter.prevent="submit"
-          />
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label for="milestone-due">截止日期</Label>
-          <Input id="milestone-due" v-model="form.due" type="date" />
-        </div>
+      <div
+        v-else-if="loadError"
+        class="flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-xs text-destructive"
+      >
+        <span>{{ loadError }}</span>
+        <Button variant="outline" size="xs" @click="load">重试</Button>
       </div>
 
-      <div class="mt-3 flex flex-col gap-1.5">
-        <Label for="milestone-desc">描述</Label>
-        <Textarea
-          id="milestone-desc"
-          v-model="form.description"
-          class="min-h-16"
-          placeholder="这个里程碑要解决什么（可留空）"
-        />
+      <div
+        v-else-if="!milestones.length"
+        class="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"
+      >
+        还没有里程碑，新建一个来归类 issue 吧。
       </div>
 
-      <div class="mt-3 flex items-center justify-between gap-2">
-        <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <IconCalendar class="size-3.5" />
-          {{ form.due || '不设截止日期' }}
-        </span>
-        <div class="flex items-center gap-2">
-          <Button variant="ghost" size="sm" :disabled="saving" @click="cancelForm">取消</Button>
-          <Button size="sm" :disabled="saving" @click="submit">
-            <IconLoader v-if="saving" class="size-4 animate-spin" />
-            <IconCheck v-else class="size-4" />
-            保存
+      <ul v-else class="flex flex-col gap-1.5">
+        <li
+          v-for="milestone in milestones"
+          :key="milestone.number"
+          class="rounded-lg border border-border bg-card px-3 py-2.5"
+        >
+          <div class="flex items-start gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="truncate text-sm font-medium">{{ milestone.title }}</span>
+                <Badge
+                  :variant="milestone.state === 'closed' ? 'secondary' : 'outline'"
+                  class="text-[10px]"
+                >
+                  {{ milestone.state === 'closed' ? '已关闭' : '进行中' }}
+                </Badge>
+                <span
+                  class="inline-flex items-center gap-1 text-[11px]"
+                  :class="isOverdue(milestone) ? 'text-destructive' : 'text-muted-foreground'"
+                >
+                  <IconCalendar class="size-3" />
+                  {{ formatDue(milestone.due_on) }}
+                </span>
+              </div>
+
+              <p v-if="milestone.description" class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {{ milestone.description }}
+              </p>
+
+              <!-- 进度条 -->
+              <div class="mt-2 flex items-center gap-2">
+                <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div
+                    class="h-full rounded-full bg-primary transition-all"
+                    :style="{ width: progressOf(milestone).percent + '%' }"
+                  />
+                </div>
+                <span class="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                  {{ progressOf(milestone).closed }} / {{ progressOf(milestone).total }}（{{
+                    progressOf(milestone).percent
+                  }}%）
+                </span>
+              </div>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-1">
+              <Button variant="ghost" size="icon-xs" title="编辑" @click="openEdit(milestone)">
+                <IconPencil class="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                class="text-destructive hover:text-destructive"
+                title="删除"
+                @click="deleteTarget = milestone"
+              >
+                <IconTrash2 class="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 表单投放到管理面板右栏的同级滑板，与 Tabs 整块互换位置 -->
+    <Teleport to="#admin-form-slot" v-if="formMounted">
+      <div class="rounded-xl border border-border bg-card p-4">
+        <div class="flex items-center justify-between">
+          <h4 class="text-sm font-semibold">{{ originalNumber ? '编辑里程碑' : '新建里程碑' }}</h4>
+          <Button variant="ghost" size="icon-xs" title="返回列表" @click="cancelForm">
+            <IconX class="size-3.5" />
           </Button>
         </div>
-      </div>
-    </div>
 
-    <!-- 加载 / 错误 / 空态 -->
-    <div v-if="loading && !milestones.length" class="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
-      <IconLoader class="size-4 animate-spin" />
-      正在读取里程碑…
-    </div>
-
-    <div v-else-if="loadError" class="flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-xs text-destructive">
-      <span>{{ loadError }}</span>
-      <Button variant="outline" size="xs" @click="load">重试</Button>
-    </div>
-
-    <div v-else-if="!milestones.length" class="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-      还没有里程碑，新建一个来归类 issue 吧。
-    </div>
-
-    <!-- 列表 -->
-    <ul v-else class="flex flex-col gap-1.5">
-      <li
-        v-for="milestone in milestones"
-        :key="milestone.number"
-        class="rounded-lg border border-border bg-card px-3 py-2.5"
-      >
-        <div class="flex items-start gap-3">
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="truncate text-sm font-medium">{{ milestone.title }}</span>
-              <Badge :variant="milestone.state === 'closed' ? 'secondary' : 'outline'" class="text-[10px]">
-                {{ milestone.state === 'closed' ? '已关闭' : '进行中' }}
-              </Badge>
-              <span
-                class="inline-flex items-center gap-1 text-[11px]"
-                :class="isOverdue(milestone) ? 'text-destructive' : 'text-muted-foreground'"
-              >
-                <IconCalendar class="size-3" />
-                {{ formatDue(milestone.due_on) }}
-              </span>
-            </div>
-
-            <p v-if="milestone.description" class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-              {{ milestone.description }}
-            </p>
-
-            <!-- 进度条 -->
-            <div class="mt-2 flex items-center gap-2">
-              <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                <div
-                  class="h-full rounded-full bg-primary transition-all"
-                  :style="{ width: progressOf(milestone).percent + '%' }"
-                />
-              </div>
-              <span class="shrink-0 tabular-nums text-[11px] text-muted-foreground">
-                {{ progressOf(milestone).closed }} / {{ progressOf(milestone).total }}
-                （{{ progressOf(milestone).percent }}%）
-              </span>
-            </div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+          <div class="flex flex-col gap-1.5">
+            <Label for="milestone-title">标题</Label>
+            <Input
+              id="milestone-title"
+              v-model="form.title"
+              placeholder="例如 v1.2 发布"
+              maxlength="120"
+              @keydown.enter.prevent="submit"
+            />
           </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="milestone-due">截止日期</Label>
+            <Input id="milestone-due" v-model="form.due" type="date" />
+          </div>
+        </div>
 
-          <div class="flex shrink-0 items-center gap-1">
-            <Button variant="ghost" size="icon-xs" title="编辑" @click="openEdit(milestone)">
-              <IconPencil class="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              class="text-destructive hover:text-destructive"
-              title="删除"
-              @click="deleteTarget = milestone"
-            >
-              <IconTrash2 class="size-3.5" />
+        <div class="mt-3 flex flex-col gap-1.5">
+          <Label for="milestone-desc">描述</Label>
+          <Textarea
+            id="milestone-desc"
+            v-model="form.description"
+            class="min-h-16"
+            placeholder="这个里程碑要解决什么（可留空）"
+          />
+        </div>
+
+        <div class="mt-3 flex items-center justify-between gap-2">
+          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <IconCalendar class="size-3.5" />
+            {{ form.due || '不设截止日期' }}
+          </span>
+          <div class="flex items-center gap-2">
+            <Button variant="ghost" size="sm" :disabled="saving" @click="cancelForm">取消</Button>
+            <Button size="sm" class="font-semibold" :disabled="saving" @click="submit">
+              <IconLoader v-if="saving" class="size-4 animate-spin" />
+              <IconCheck v-else class="size-4" />
+              保存
             </Button>
           </div>
         </div>
-      </li>
-    </ul>
+      </div>
+    </Teleport>
 
     <!-- 删除二次确认 -->
     <AlertDialog v-model:open="deleteOpen">
@@ -331,7 +370,7 @@ async function confirmDelete() {
         <AlertDialogFooter>
           <AlertDialogCancel :disabled="deleting">取消</AlertDialogCancel>
           <AlertDialogAction
-            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            class="bg-destructive hover:bg-destructive/90 font-semibold text-white"
             :disabled="deleting"
             @click.prevent="confirmDelete"
           >

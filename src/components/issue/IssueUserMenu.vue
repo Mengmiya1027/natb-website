@@ -33,6 +33,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -130,13 +140,12 @@ let copiedTimer = 0
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text)
-    // 图标即时换成对勾并弹一下，比只弹 toast 更直接
+    // 图标换成对勾并弹一下就是全部反馈，不再额外弹 toast
     copied.value = true
     window.clearTimeout(copiedTimer)
     copiedTimer = window.setTimeout(() => {
       copied.value = false
     }, 1600)
-    toast.success('已复制')
   } catch {
     toast.error('复制失败，请手动选择文本')
   }
@@ -203,6 +212,16 @@ async function saveProxy() {
   await testProxy(proxyInput.value)
 }
 
+/** 退出登录的二次确认开关：下拉菜单和设置面板都走它 */
+const logoutConfirmOpen = ref(false)
+
+
+function requestLogout() {
+  // 从设置面板点进来时先收起面板，避免两层弹窗叠在一起
+  settingsOpenModel.value = false
+  logoutConfirmOpen.value = true
+}
+
 function logout() {
   store.logout()
   toast.success('已退出登录')
@@ -253,7 +272,7 @@ onBeforeUnmount(resetFlow)
           </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" @select="logout">
+        <DropdownMenuItem variant="destructive" @select="requestLogout">
           <IconLogOut class="size-4" />
           <span>退出登录</span>
         </DropdownMenuItem>
@@ -385,17 +404,19 @@ onBeforeUnmount(resetFlow)
                   />
                 </Button>
               </div>
+              <!-- flex-1 吃掉按钮上方的全部余量，把等待信息撑在这块空隙的垂直正中 -->
+              <div class="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+                <IconLoader class="size-3.5 animate-spin" />
+                等待授权… 还剩 {{ secondsLeft }} 秒
+              </div>
+              <!-- 按钮组自然被挤到栏底，取消的底边与左侧权限说明框下边缘齐平 -->
               <Button as-child variant="outline" class="w-full gap-2">
                 <a :href="flow.verificationUri" target="_blank" rel="noopener">
                   <IconExternalLink class="size-4" />
                   打开 GitHub 验证页面
                 </a>
               </Button>
-              <div class="text-muted-foreground flex items-center justify-center gap-2 text-xs">
-                <IconLoader class="size-3.5 animate-spin" />
-                等待授权… 还剩 {{ secondsLeft }} 秒
-              </div>
-              <Button variant="secondary" size="sm" class="mt-auto w-full" @click="resetFlow">取消</Button>
+              <Button variant="secondary" size="sm" class="w-full" @click="resetFlow">取消</Button>
             </div>
 
             <div v-else-if="flowState === 'success'" class="flex items-center justify-center gap-2 py-6 text-sm">
@@ -486,13 +507,43 @@ onBeforeUnmount(resetFlow)
 
         <DialogFooter v-if="store.isLoggedIn" class="sm:justify-between">
           <span class="text-muted-foreground text-xs">已登录：{{ store.user?.login }}</span>
-          <Button variant="destructive" size="sm" class="gap-2" @click="logout">
+          <Button variant="destructive" size="sm" class="gap-2 font-semibold text-white" @click="requestLogout">
             <IconLogOut class="size-4" />
             退出登录
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- 退出登录二次确认 -->
+    <AlertDialog v-model:open="logoutConfirmOpen">
+      <AlertDialogContent class="gap-0 overflow-hidden p-0 sm:max-w-[460px] sm:rounded-2xl">
+        <div class="px-6 pt-6 pb-5">
+          <AlertDialogHeader class="gap-2 text-left">
+            <AlertDialogTitle class="text-2xl font-semibold tracking-tight">
+              确认退出登录？
+            </AlertDialogTitle>
+            <AlertDialogDescription class="text-[15px] leading-relaxed">
+              退出后会清除这台设备上保存的 GitHub 授权凭据。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <p
+            class="border-border text-muted-foreground mt-6 rounded-xl border px-4 py-3.5 text-[13px] leading-relaxed"
+          >
+            只影响这台设备的登录状态，账号与仓库权限不受任何影响。
+          </p>
+        </div>
+
+        <!-- 按钮尺寸对齐页头的「新建 Issue」：shadcn sm = h-8 / px-3 / gap-1.5 / text-sm -->
+        <AlertDialogFooter class="border-border bg-muted/60 gap-2.5 border-t px-6 py-4">
+          <AlertDialogCancel class="h-8 gap-1.5 px-3 text-sm">取消</AlertDialogCancel>
+          <AlertDialogAction class="h-8 gap-1.5 px-3 text-sm font-semibold" @click="logout">
+            退出登录
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 <style scoped>

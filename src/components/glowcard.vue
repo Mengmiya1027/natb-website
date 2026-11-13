@@ -190,8 +190,10 @@ function unbind() {
 let mq = null
 
 onMounted(() => {
-  // 触屏 / 无精确指针：没有鼠标可跟，光斑既没意义又费电，整体不启动
-  if (window.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches === false) return
+  /* 故意不做"有没有鼠标"的判断，与 3dcard.vue（TiltCard）同一处理：
+   * (hover: hover) and (pointer: fine) 在触摸屏本、远程桌面、虚拟机里可能整体报假，
+   * 用户明明在用鼠标，光斑却被静默关掉。不判断的代价接近于零——真没有指针设备时
+   * pointermove 不会发生，循环一帧都不跑。 */
   mq = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null
   reduced = mq?.matches ?? false
   measure()

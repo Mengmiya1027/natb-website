@@ -10,7 +10,7 @@
  *   里程碑管理 -> MilestoneManageDialog（同上）
  *   批量操作   -> 对当前 open issue 批量关闭 / 重开 / 加标签
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
@@ -50,10 +50,51 @@ const store = useIssueStore()
 
 const tab = ref('labels')
 
-/** 面板由宿主控制挂载，内部恒为打开；任何关闭请求都交回宿主 */
-function onOpenChange(open) {
-  if (!open) emit('close')
+/**
+ * 批量操作里「选择标签」下拉的最大高度：
+ * 取 Issue 页头下沿到选择框顶部之间的距离，超出的选项交给下拉自身滚动。
+ */
+const batchLabelOpen = ref(false)
+const batchLabelTriggerRef = ref(null)
+const batchLabelMaxHeight = ref(280)
+
+function measureBatchLabelSpace() {
+  const el = batchLabelTriggerRef.value?.$el || batchLabelTriggerRef.value
+  if (!el?.getBoundingClientRect) return
+  const top = el.getBoundingClientRect().top
+  const headerBottom = Math.max(
+    0,
+    ...[...document.querySelectorAll('header')].map((h) => h.getBoundingClientRect().bottom),
+  )
+  batchLabelMaxHeight.value = Math.max(160, Math.round(top - headerBottom))
 }
+
+watch(batchLabelOpen, (open) => {
+  if (open) measureBatchLabelSpace()
+})
+
+/** 子组件把「新建表单是否打开」送上来，右栏据此整块横向滑动 */
+const labelFormOpen = ref(false)
+const milestoneFormOpen = ref(false)
+const sheetOpen = computed(() => labelFormOpen.value || milestoneFormOpen.value)
+
+/** 面板由宿主控制挂载，内部恒为打开；任何关闭请求都交回宿主 */
+/**
+ * 弹层自身维护开关：关闭时先把 open 置 false 让 reka-ui 播退场动画，
+ * 等动画播完再通知宿主卸载。之前写死 :open="true" 并立即 emit('close')，
+ * 父组件的 v-if 会当场销毁整个组件，动画来不及出现。
+ */
+const dialogOpen = ref(true)
+let closeTimer = 0
+
+function onOpenChange(open) {
+  dialogOpen.value = open
+  if (open) return
+  window.clearTimeout(closeTimer)
+  closeTimer = window.setTimeout(() => emit('close'), 240)
+}
+
+onBeforeUnmount(() => window.clearTimeout(closeTimer))
 
 /* ---------------- 仓库概览 ---------------- */
 
@@ -207,9 +248,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <Dialog :open="true" @update:open="onOpenChange">
+  <Dialog :open="dialogOpen" @update:open="onOpenChange">
     <DialogContent
-      class="flex h-[min(86vh,880px)] w-[min(1120px,94vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+      class="flex h-[min(60vh,520px)] w-[min(760px,92vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
     >
       <!-- 头部 -->
       <div class="flex items-start justify-between gap-3 border-b border-border px-6 py-4 pr-14">
@@ -238,37 +279,42 @@ onMounted(() => {
         </p>
       </div>
 
-      <template v-else>
-        <!-- 概览 -->
-        <div class="px-6 pt-4">
-          <div class="grid grid-cols-3 gap-3">
-            <div
-              v-for="card in statCards"
-              :key="card.key"
-              class="rounded-xl border border-border bg-card px-4 py-3"
-            >
-              <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <component :is="card.icon" class="size-3.5" />
-                {{ card.label }}
-              </div>
-              <div class="mt-1 text-xl font-semibold tabular-nums">
-                <IconLoader v-if="overview.loading" class="size-4 animate-spin text-muted-foreground" />
-                <span v-else>{{ card.value }}</span>
-              </div>
+      <div v-else class="flex min-h-0 flex-1 gap-5 px-6 py-4">
+        <!-- 左栏：概览卡竖排 -->
+        <div class="flex w-52 shrink-0 flex-col gap-3 overflow-y-auto pr-1">
+          <div
+            v-for="card in statCards"
+            :key="card.key"
+            class="flex flex-1 flex-col justify-center gap-1.5 rounded-xl border border-border bg-card px-4 py-3"
+          >
+            <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <component :is="card.icon" class="size-3.5" />
+              {{ card.label }}
+            </div>
+            <div class="text-3xl leading-none font-semibold tracking-tight tabular-nums">
+              <IconLoader v-if="overview.loading" class="size-4 animate-spin text-muted-foreground" />
+              <span v-else>{{ card.value }}</span>
             </div>
           </div>
 
           <div
             v-if="overview.error"
-            class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
+            class="flex flex-col items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
           >
             <span>{{ overview.error }}</span>
             <Button variant="outline" size="xs" @click="loadOverview">重试</Button>
           </div>
         </div>
 
-        <!-- Tab -->
-        <Tabs v-model="tab" class="mt-3 flex min-h-0 flex-1 flex-col px-6 pb-5">
+        <!-- 右栏滑板：Tabs 整块左移出视口，新建板块从右侧滑入，两者同级 -->
+        <div class="relative flex min-h-0 flex-1 overflow-hidden">
+          <!-- Tailwind v4 的 translate-x-* 走的是独立 translate 属性，
+               只写 transform 的话位移不参与过渡，会变成瞬间跳变 -->
+          <div
+            class="absolute inset-0 flex flex-col transition-[transform,translate,opacity] duration-300 ease-[ease]"
+            :class="sheetOpen ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'"
+          >
+            <Tabs v-model="tab" class="flex min-h-0 flex-1 flex-col">
           <TabsList class="grid w-full grid-cols-3">
             <TabsTrigger value="labels">
               <IconTag class="size-4" />
@@ -284,15 +330,21 @@ onMounted(() => {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="labels" class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-            <LabelManageDialog @changed="loadOverview" />
+          <TabsContent value="labels" class="mt-2 min-h-0 flex-1 overflow-hidden">
+            <LabelManageDialog
+              @changed="loadOverview"
+              @update:form-open="labelFormOpen = $event"
+            />
           </TabsContent>
 
-          <TabsContent value="milestones" class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-            <MilestoneManageDialog @changed="loadOverview" />
+          <TabsContent value="milestones" class="mt-2 min-h-0 flex-1 overflow-hidden">
+            <MilestoneManageDialog
+              @changed="loadOverview"
+              @update:form-open="milestoneFormOpen = $event"
+            />
           </TabsContent>
 
-          <TabsContent value="issues" class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+          <TabsContent value="issues" class="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
             <div class="flex flex-col gap-3">
               <!-- 工具条 -->
               <div class="flex flex-wrap items-center justify-between gap-2">
@@ -310,12 +362,16 @@ onMounted(() => {
 
                 <div class="flex flex-wrap items-center gap-2">
                   <div class="flex items-center gap-2">
-                    <Select v-model="batchLabel">
-                      <SelectTrigger size="sm" class="w-[150px]">
+                    <Select v-model="batchLabel" v-model:open="batchLabelOpen">
+                      <SelectTrigger ref="batchLabelTriggerRef" size="sm" class="w-[150px]">
                         <SelectValue placeholder="选择标签" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent :style="{ maxHeight: batchLabelMaxHeight + 'px' }">
                         <SelectItem v-for="label in labels" :key="label.name" :value="label.name">
+                          <span
+                            class="size-2 shrink-0 rounded-full"
+                            :style="{ backgroundColor: '#' + label.color }"
+                          />
                           {{ label.name }}
                         </SelectItem>
                       </SelectContent>
@@ -425,8 +481,18 @@ onMounted(() => {
               </ul>
             </div>
           </TabsContent>
-        </Tabs>
-      </template>
+            </Tabs>
+          </div>
+
+          <!-- 新建板块：与 Tabs 同级，滑到右栏占满 -->
+          <div
+            class="absolute inset-0 overflow-y-auto pr-1 transition-[transform,translate,opacity] duration-300 ease-[ease]"
+            :class="sheetOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'"
+          >
+            <div id="admin-form-slot"></div>
+          </div>
+        </div>
+      </div>
     </DialogContent>
   </Dialog>
 </template>

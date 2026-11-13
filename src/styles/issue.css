@@ -18,6 +18,9 @@
 
 @import "tailwindcss";
 @import "tw-animate-css";
+/* vue-sonner 的 JS 入口不 import 自己的样式，必须手动引一次，
+ * 否则 toast 没有 position: fixed，会掉进文档流末尾挤在左下角。 */
+@import "vue-sonner/style.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -286,4 +289,82 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ---------- toast 浮层（DESIGN.md 4.1 浮层档 / 4.3 双层阴影） ----------
+ * sonner 自带的是单层 0 4 12 rgba(0,0,0,.1)，层级感不够；这里换成规范里
+ * 的 contact + ambient 两层。特异性压过 [data-sonner-toast][data-styled]。 */
+.natb-issue [data-sonner-toast][data-styled='true'] {
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.08),
+    0 16px 40px -12px rgb(0 0 0 / 0.16);
+}
+
+/* 深色下阴影被背景吃掉，alpha 按规范 ×2 */
+.dark [data-sonner-toast][data-styled='true'] {
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.16),
+    0 16px 40px -12px rgb(0 0 0 / 0.32);
+}
+
+/* ---------- toast 内容排布 ----------
+ * 参考 shadcn 块状卡片：左边是标题文案，右侧实心深色圆角块收状态图标。
+ * 关闭按钮不参与这里的换位，仍留在 sonner 默认的左上角。 */
+.natb-issue [data-sonner-toast][data-styled='true'] [data-content] {
+  order: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 标题加粗，和正文的描述文字拉开一档 */
+.natb-issue [data-sonner-toast][data-styled='true'] [data-title] {
+  font-weight: 600;
+}
+
+/* 深色块配白色图标；深色主题下 --foreground/--background 自动互换，仍然成立。
+ * 必须用 flex + justify-content: center —— sonner 自带 justify-content: flex-start，
+ * 换成 grid 时它管的是网格轨道分布，图标会贴左。 */
+.natb-issue [data-sonner-toast][data-styled='true'] [data-icon] {
+  order: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  /* 上下各 -2px：视觉上放大到 28，但布局占用仍是 24，整条 toast 不会被撑高 */
+  margin: -2px 0;
+  border-radius: 7px;
+  background: var(--foreground);
+  color: var(--background);
+}
+
+/* sonner 给 svg 挂了 -1px 的左外边距，在居中的方块里会让图标整体左偏 */
+.natb-issue [data-sonner-toast][data-styled='true'] [data-icon] svg {
+  margin: 0;
+}
+
+/* ---------- select 下拉滚动条 ----------
+ * Chrome 默认用 overlay 滚动条（滚动时才浮出），选项溢出时看着像"没有滚动条"。
+ * 这里显式声明宽度与颜色，让它在打开时就常显。不带作用域：Select 会 portal 到 body。 */
+[data-slot='select-viewport'] {
+  overflow-y: scroll !important;
+}
+
+[data-slot='select-viewport']::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+
+[data-slot='select-viewport']::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-slot='select-viewport']::-webkit-scrollbar-thumb {
+  background-color: #c9c9c9;
+  border-radius: 9999px;
+}
+
+.dark [data-slot='select-viewport']::-webkit-scrollbar-thumb {
+  background-color: #525252;
 }

@@ -2,7 +2,7 @@
 import FeatureCard from '@/components/FeatureCard.vue'
 import FeatureBigScreen from '@/components/FeatureBigScreen.vue'
 import { useAnimationStore } from '@/stores/animation'
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 
 // 图标沿用 solar 的 bold-duotone：两路同色不同明度，压成单色后层次还在
 import IconShieldKeyhole from '~icons/solar/shield-keyhole-bold-duotone'
@@ -107,6 +107,25 @@ const FEATURES = [
   shot: SHOT_DIR + item.shot,
 }))
 
+/* ===== 图片预热 =====
+ * 大屏要用的 16 张 webp（8 张封面 + 8 张截图）原先要等第一次展开才开始解码：
+ * 实测三个 ImageDecodeTask 分别 69 / 35 / 21ms，正好压在起手那几帧上；
+ * 而大屏是 v-if 挂载，重开一次也未必还热着。
+ * 页面空闲时先解一遍，打开时就只剩贴图。 */
+let warmed = false
+function warmFeatureArt() {
+  if (warmed) return
+  warmed = true
+  for (const item of FEATURES) {
+    for (const url of [item.art, item.shot]) {
+      const img = new Image()
+      img.decoding = 'async'
+      img.src = url
+      img.decode?.().catch(() => {})
+    }
+  }
+}
+
 /* ===== 装饰插画 =====
  * 插画格四面围一圈：顶行六张、底行六张（复用顶行）、左右各两张。
  * 卡片与装饰格共用同一批画报 —— 整面墙只有一套画报语言。
@@ -194,9 +213,12 @@ const bigClosing = ref(false)
 const glassMs = ref(600)
 // 大屏开场正对第几面（0 起）。关闭后留着不清：下次从另一格进，覆盖的就是新值
 const bigIndex = ref(0)
-// 八格的几何都量下来：大屏里翻过面再退出时，要缩回当前那一面自己的卡，
-// 不能再先绕回 initial 那一面（那会平白多出 720ms）。
-const origins = ref(null)
+/* 八格的几何都量下来：大屏里翻过面再退出时，要缩回当前那一面自己的卡，
+ * 不能再先绕回 initial 那一面（那会平白多出 720ms）。
+ * 用 shallowRef：这八份几何是量给大屏的纯数据，大屏只在脚本里读它（模板里不出现），
+ * 所以不需要深响应式 —— 补量时原地 Object.assign 就让大屏读到新值，
+ * 不必换一次引用、把那个 140KB 的大屏组件在动画第一帧里重渲染一遍。 */
+const origins = shallowRef(null)
 // 当前被藏起来的那一格：起手时藏掉、退出时放回来。不是响应式的 —— 它只是 DOM 交接的把手
 let sourceEl = null
 
@@ -256,18 +278,41 @@ function onPointerLeave() {
  * 量的时候这一格必须已经回正：倾斜是"贴着指针那一格"的临时姿态。
  */
 
+/* ── 几何测量的记忆 ────────────────────────────────────────────────
+ * 退场缩回每帧都要重取这一格的几何（大屏每帧问一次 getLiveOrigin），而
+ * getComputedStyle 每读一次就把当帧的样式重算推一遍 —— 角度、圆角、字号这三次
+ * 读取实测占了缩回动画里 3.5–4.3ms/帧，正好是主线程忙时的一半。
+ * 这三样只在断点 / 窗口尺寸变化时才改（见样式里各断点的 --wall-rot），
+ * 所以量一次记住，resize、入场落位、测完把测量类撤掉时作废。 */
+let rotCache = 0
+let rotReady = false
+// .is-rest-measure 把圆角钉在 2px：退场那一段所有格都挂着这个类，每格量一次就够
+let radiusCache = new WeakMap()
+// 字号同理：它跟着断点走，不跟着指针走
+let fontCache = new WeakMap()
+
+function invalidateMeasureCache() {
+  rotReady = false
+  radiusCache = new WeakMap()
+  fontCache = new WeakMap()
+}
+
 // 倾斜角度由样式给，脚本要用时现读 —— 断点改了角度这里跟着变，不会两处写死
 function wallRotation() {
+  if (rotReady) return rotCache
+  rotReady = true
+  rotCache = 0
   const el = wallEl.value?.querySelector('.wall__tilt')
-  if (!el) return 0
+  if (!el) return rotCache
   const t = getComputedStyle(el).transform
-  if (!t || t === 'none') return 0
+  if (!t || t === 'none') return rotCache
   try {
     const m = new DOMMatrixReadOnly(t)
-    return (Math.atan2(m.b, m.a) * 180) / Math.PI
+    rotCache = (Math.atan2(m.b, m.a) * 180) / Math.PI
   } catch {
-    return 0
+    rotCache = 0
   }
+  return rotCache
 }
 
 /**
@@ -289,11 +334,23 @@ function quadOrigin(el, rot) {
   }
 }
 
+/** 圆角：挂着测量类时（退场那一段全都是）读一次就记住，其余情形照旧现读 */
+function cellRadius(el) {
+  const locked = el.classList.contains('is-rest-measure')
+  if (locked) {
+    const hit = radiusCache.get(el)
+    if (hit !== undefined) return hit
+  }
+  const r = parseFloat(getComputedStyle(el).borderRadius) || 0
+  if (locked) radiusCache.set(el, r)
+  return r
+}
+
 /** 只量整格外框：退场跟随每帧调用，不重复读标题 / 描述与字号 */
 function measureCellShape(el) {
   const rot = wallRotation()
   const cell = quadOrigin(el, rot)
-  cell.radius = parseFloat(getComputedStyle(el).borderRadius) || 0
+  cell.radius = cellRadius(el)
   return cell
 }
 
@@ -307,7 +364,12 @@ function measureCell(el) {
   }
   const font = (sel) => {
     const node = el.querySelector(sel)
-    return node ? parseFloat(getComputedStyle(node).fontSize) : null
+    if (!node) return null
+    const hit = fontCache.get(node)
+    if (hit !== undefined) return hit
+    const size = parseFloat(getComputedStyle(node).fontSize) || 0
+    fontCache.set(node, size)
+    return size
   }
   return {
     cell,
@@ -350,27 +412,34 @@ function pickCard(event) {
   const cells = [...gridEl.value.querySelectorAll('.cell[data-index]')]
   // 入场起点要跟"当下眼睛看到的卡"一致：指针通常还悬在卡上，所以先量 hover 态
   const entryGeometry = measureCell(el)
-  // 退场终点必须是非 hover 的静止尺寸。临时挂类、强制回流量完再撤掉；
-  // 这些样式变更都发生在同一次任务里，浏览器不会把中间态画出来。
+
+  /* 退场终点必须是非 hover 的静止尺寸：临时挂上测量类，量完就撤。
+   * 只有被点这一格赶在起手之前量 —— 大屏第一帧就是从它长出来的；
+   * 其余七格是"翻到那一面再退出"时才用得上，挪到下一帧量。 */
   const wasRestLocked = cells.map((cell) => cell.classList.contains('is-rest-measure'))
   cells.forEach((cell) => cell.classList.add('is-rest-measure'))
   void gridEl.value.offsetWidth
-  const restGeometry = Object.fromEntries(
-    cells.map((cell) => [Number(cell.dataset.index), measureCell(cell)]),
-  )
-  cells.forEach((cell, i) => {
-    if (!wasRestLocked[i]) cell.classList.remove('is-rest-measure')
-  })
-
+  const selfRest = measureCell(el)
   // 每个面都带一份 rest 几何：大屏里翻到哪一面，退出就缩回那一面的静止卡。
   // 被点的那一面额外保留 hover 几何，仅用于入场起手。
-  origins.value = Object.fromEntries(
-    cells.map((cell) => {
-      const i = Number(cell.dataset.index)
-      const entry = i === index ? entryGeometry : restGeometry[i]
-      return [i, { ...entry, rest: restGeometry[i] }]
-    }),
-  )
+  origins.value = { [index]: { ...entryGeometry, rest: selfRest } }
+
+  const rest = cells.filter((cell) => Number(cell.dataset.index) !== index)
+  requestAnimationFrame(() => {
+    try {
+      const patch = Object.fromEntries(
+        rest.map((cell) => {
+          const geo = measureCell(cell)
+          return [Number(cell.dataset.index), { ...geo, rest: geo }]
+        }),
+      )
+      if (origins.value) Object.assign(origins.value, patch)
+    } finally {
+      cells.forEach((cell, i) => {
+        if (!wasRestLocked[i]) cell.classList.remove('is-rest-measure')
+      })
+    }
+  })
 
   sourceEl = el
   bigIndex.value = index
@@ -403,6 +472,8 @@ function clearRestLock() {
   gridEl.value?.querySelectorAll('.cell').forEach((cell) => {
     cell.classList.remove('is-rest-measure')
   })
+  // 圆角记忆存的是"挂着测量类时"的值，类撤掉就不再成立
+  invalidateMeasureCache()
 }
 
 /** 大屏预光栅完、即将起手：这一刻才把真格藏掉，交接处不留空白 */
@@ -466,6 +537,8 @@ function finishEntrance() {
   if (!entering.value && !gated.value) return
   entering.value = false
   gated.value = false
+  // 入场动画会把卡片墙推到终态：那之前量到的角度 / 圆角 / 字号从这一刻起才算数
+  invalidateMeasureCache()
 }
 
 /** 从"按住"切到"起跑"：同一帧里换类，各条时间轴都从 0% 开始 */
@@ -476,6 +549,16 @@ function openEntrance() {
 }
 
 onMounted(() => {
+  // 断点换了角度 / 圆角 / 字号就跟着变：缓存的几何尺寸在窗口变化后一律作废
+  window.addEventListener('resize', invalidateMeasureCache)
+
+  // 大屏那 16 张图趁空闲先解码，别等展开那几帧
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(warmFeatureArt, { timeout: 2500 })
+  } else {
+    window.setTimeout(warmFeatureArt, 1200)
+  }
+
   /* ===== 入场 =====
    * 首屏渲染时类就挂上了，动画此刻已在跑，这里只负责按时间表收尾；
    * 若开场还在演，则先等它落位（最多 GATE_MAX），门一开再从 0% 起跑。
@@ -512,6 +595,7 @@ watch(bigOpen, (open) => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', invalidateMeasureCache)
   clearTilt()
   clearRestLock()
   if (restReleaseHandler) {
@@ -681,10 +765,15 @@ onBeforeUnmount(() => {
   background: var(--paper);
   color: var(--ink);
   user-select: none;
-  /* 大屏打开时这一页要退到玻璃后面（见 .is-behind-glass）：模糊与轻微的推近
-     都走这条过渡，退出时原路回来。曲线与大屏那次接续保持同一组数值 */
+  /* 大屏打开时这一页要退到玻璃后面（见 .is-behind-glass），退出时原路回来。
+     同一组曲线，但两条时长分开：
+       · 推近（scale）是合成属性，跟着大屏一镜到底走 600 / 460ms；
+       · blur 每变一档，这一整页都要重算一遍（DPR=2 下是 5088×2536 的离屏表面），
+         而它到位之后就不再变、结果可以整段复用 —— 所以给它一条更短的时长，
+         省掉的是缩回 / 展开各几十帧里最大的一笔帧预算。 */
   --glass-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
-  transition: filter var(--glass-dur, 600ms) var(--glass-ease),
+  --glass-blur-dur: 220ms;
+  transition: filter var(--glass-blur-dur) var(--glass-ease),
     scale var(--glass-dur, 600ms) var(--glass-ease);
 }
 

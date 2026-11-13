@@ -778,11 +778,47 @@ const restartCollapseObserver = () => {
   stopCollapseObserver = setupCollapse() ?? null
 }
 
+/* ===== 品牌字渐变的流动 =====
+ * 见 .pill-nav__brand-text 的注释：background-position 不可合成，交给 CSS 无限动画
+ * 会让主线程每帧标脏这个节点。这里按固定步长推进变量 —— 6s 一圈、20Hz，
+ * 每步位移 3px 出头，缓慢的渐变流动看不出台阶，主线程开销却降到每秒 20 次。
+ * 页面不可见时停表，reduced-motion 下不动（CSS 里也留着 animation: none 兜底）。 */
+const FLOW_STEP_MS = 50
+const FLOW_PERIOD_MS = 6000
+const flowReduce =
+  typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null
+let flowTimer = 0
+let flowPhase = 0
+
+function flowStep() {
+  const el = brandTextRef.value
+  if (!el) return
+  flowPhase = (flowPhase + FLOW_STEP_MS / FLOW_PERIOD_MS) % 1
+  el.style.setProperty('--pn-flow', flowPhase.toFixed(4))
+}
+
+function startFlow() {
+  if (flowTimer || flowReduce?.matches || !brandTextRef.value) return
+  flowTimer = window.setInterval(flowStep, FLOW_STEP_MS)
+}
+
+function stopFlow() {
+  if (!flowTimer) return
+  window.clearInterval(flowTimer)
+  flowTimer = 0
+}
+
+const onFlowVisibility = () => (document.hidden ? stopFlow() : startFlow())
+
 onMounted(async () => {
   await nextTick()
   setupEngine()
   restartCollapseObserver()
   runIntro()
+  startFlow()
+  document.addEventListener('visibilitychange', onFlowVisibility)
 })
 
 watch(
@@ -853,6 +889,8 @@ watch(open, (isOpen, _, onCleanup) => {
 onBeforeUnmount(() => {
   destroyEngine?.()
   stopCollapseObserver?.()
+  stopFlow()
+  document.removeEventListener('visibilitychange', onFlowVisibility)
 })
 </script>
 
@@ -1140,17 +1178,13 @@ onBeforeUnmount(() => {
     -webkit-background-clip: text;
     color: transparent;
     -webkit-text-fill-color: transparent;
-    animation: pn-brand-flow 6s linear infinite;
-  }
-}
-
-@keyframes pn-brand-flow {
-  from {
-    background-position: 0% 50%;
-  }
-  to {
-    /* 150% × (300% - 100%) = 正好一条渐变宽 */
-    background-position: 150% 50%;
+    /* 流动由脚本按 FLOW_STEP_MS 推进这个变量，不用 CSS 无限动画：
+       background-position 不可合成，写成 infinite animation 时主线程会每帧给
+       这一个节点重算一次样式、连带重绘整条顶栏（trace 实测每帧 1ms，
+       16.7s 的采样里正好 1006 次 = 帧数）。150% × (300% - 100%) = 正好一条渐变宽。 */
+    background-position: calc(var(--pn-flow, 0) * 150%) 50%;
+    /* 每一步只重绘这一小片文字所在的层，不牵着整条顶栏一起重画 */
+    will-change: background-position;
   }
 }
 

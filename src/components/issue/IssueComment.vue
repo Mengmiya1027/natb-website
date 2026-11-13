@@ -217,7 +217,10 @@ function requestReply() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction class="bg-destructive text-destructive-foreground hover:bg-destructive/90" @click="requestDelete">
+                <AlertDialogAction
+                  class="bg-destructive hover:bg-destructive/90 font-semibold text-white"
+                  @click="requestDelete"
+                >
                   删除
                 </AlertDialogAction>
               </AlertDialogFooter>

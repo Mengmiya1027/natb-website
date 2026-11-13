@@ -16,6 +16,7 @@ const delegatedProps = reactiveOmit(props, "class")
   <ScrollAreaScrollbar
     data-slot="scroll-area-scrollbar"
     v-bind="delegatedProps"
+    type="always"
     :class="
       cn('flex touch-none p-px transition-colors select-none',
          orientation === 'vertical'

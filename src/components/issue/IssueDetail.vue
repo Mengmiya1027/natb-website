@@ -159,12 +159,15 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [issueData, commentData, timelineData] = await Promise.all([
+    const [issueData, commentData, timelineData, pinned] = await Promise.all([
       githubApi.getIssue(props.number),
       // 评论与时间线失败不该拖垮整页，退化成空即可
       githubApi.listComments(props.number, { per_page: 100 }).catch(() => []),
       githubApi.listTimeline(props.number, { per_page: 100 }).catch(() => []),
+      // REST 不带 pinned 字段，单独用 GraphQL 补；未登录拿不到就算了
+      githubApi.getIssuePinned(props.number).catch(() => null),
     ])
+    if (issueData && pinned !== null) issueData.pinned = pinned
     issue.value = issueData
     comments.value = Array.isArray(commentData) ? commentData : []
     events.value = Array.isArray(timelineData) ? timelineData : []
@@ -303,7 +306,12 @@ async function onCommentSubmitted() {
 
 async function onSidebarChanged() {
   try {
-    issue.value = await githubApi.getIssue(props.number)
+    const [fresh, pinned] = await Promise.all([
+      githubApi.getIssue(props.number),
+      githubApi.getIssuePinned(props.number).catch(() => null),
+    ])
+    if (fresh && pinned !== null) fresh.pinned = pinned
+    issue.value = fresh
     syncSidebar()
   } catch (err) {
     toast.error(err?.message || '刷新 issue 失败')

@@ -20,7 +20,8 @@ export const ISSUE_REPO_URL = `https://github.com/${ISSUE_REPO_FULL}`
 export const OAUTH_CLIENT_ID = 'Ov23liHYdV2VzwEF0q8f'
 
 /** Device Flow 与 PAT 需要的权限：公开仓库读写 + 读用户资料 */
-export const OAUTH_SCOPES = 'public_repo read:user'
+// notifications 是仓库级订阅（watch）必需的；public_repo 不含它。
+export const OAUTH_SCOPES = 'public_repo notifications read:user'
 
 /** 一键创建 PAT 的链接（预填好 scope），用于没有中转时的降级登录 */
 export const PAT_CREATE_URL =

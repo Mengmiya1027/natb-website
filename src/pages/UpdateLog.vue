@@ -344,16 +344,29 @@ function tiltedGeom(stage) {
   }
 }
 
+/* 卡宽与倾角只在视口 / 字体变化时才动，量到就缓存。
+ * 换版那一刻再读 offsetWidth 或 getComputedStyle，等于把一次强制样式 + 布局
+ * 塞进滚轮事件里（trace 实测 5–6ms），正好压在切换起跑的那一帧上。
+ * 缓存只在 scheduleMeasure（resize、字体到位、首次挂载）里作废。 */
+let cardWCache = 0
+let tiltCache = null
+
+function stageGeom(stage) {
+  if (cardWCache && tiltCache) return { cardW: cardWCache, tilt: tiltCache }
+  const card = stage.querySelector('.log-card')
+  cardWCache = card?.offsetWidth || 360
+  tiltCache = tiltedGeom(stage)
+  return { cardW: cardWCache, tilt: tiltCache }
+}
+
 /** 按容器实测算间距：最外侧那张始终顶在屏幕边，组内怎么收都不把整组带回来 */
 function measure() {
   const stage = stageRef.value
   if (!stage) return
-  const card = stage.querySelector('.log-card')
-  const cardW = card?.offsetWidth || 360
+  const { cardW, tilt } = stageGeom(stage)
   // 横版卡很宽，直接按卡宽推深度会退得太夸张，封顶到竖版的量级
   const depth = Math.round(Math.min(cardW * 0.16, 80))
   const outer = outerOf(index.value)
-  const tilt = tiltedGeom(stage)
   const rad = (tilt.deg * Math.PI) / 180
   const half = (cardW / 2) * tilt.scale
   // 斜边近端被透视放大、远端缩小，位移上限从放大后的边缘反解
@@ -374,8 +387,11 @@ function measure() {
 }
 
 let frame = 0
-/** 尺寸变化密集，按帧合并一次测量 */
+/** 尺寸变化密集，按帧合并一次测量；缓存跟着作废，下一次测量重新读 DOM */
 function scheduleMeasure() {
+  cardWCache = 0
+  tiltCache = null
+  folioFontCache = null
   if (frame) return
   frame = requestAnimationFrame(() => {
     frame = 0
@@ -447,16 +463,31 @@ function folioContext() {
   return folioCtx
 }
 
+/* 字体三件套与字距从元素自身读（注意字号要带单位，否则整条 font 作废），
+ * 但这几个值只在视口 / 字体变化时才动：缓存下来，换版时不再为读它做一次样式重算。
+ * 作废点与几何缓存同一个地方 —— scheduleMeasure。 */
+let folioFontCache = null
+
+function folioMetrics(el) {
+  if (folioFontCache) return folioFontCache
+  const cs = getComputedStyle(el)
+  const px = parseFloat(cs.fontSize)
+  if (!px) return null
+  folioFontCache = {
+    px,
+    font: `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`,
+    spacing: cs.letterSpacing,
+  }
+  return folioFontCache
+}
+
 function measureFolio() {
   const el = folioRef.value
   const ctx = folioContext()
   if (!el || !ctx) return
-  const cs = getComputedStyle(el)
-  const px = parseFloat(cs.fontSize)
-  if (!px) return
-  // 字体与字距都从元素自身读，样式改了这里自动跟上（注意字号要带单位，否则整条 font 作废）
-  const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
-  const spacing = cs.letterSpacing
+  const metrics = folioMetrics(el)
+  if (!metrics) return
+  const { px, font, spacing } = metrics
   const text = folio.value
   const key = `${font}|${spacing}|${text}`
   const hit = folioNudgeCache.get(key)
@@ -636,7 +667,7 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
             class="log-card"
             :class="{ 'log-card--dark': card.dark, 'log-card--end': card.end }"
             :data-state="stateOf(i)"
-            :style="[cardStyle(i), { '--enter-i': Math.abs(i - index) }]"
+            :style="[cardStyle(i), entering ? { '--enter-i': Math.abs(i - index) } : null]"
             :aria-current="i === index ? 'true' : undefined"
             @click="goTo(i)"
           >
@@ -931,6 +962,53 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   perspective-origin: 50% 50%;
 }
 
+/* 卡片上的状态令牌只给这张卡自己用（放大百分比、倾角、悬浮缩放、纸面、阴影）。
+ * 全部注册成 inherits: false：换版 / 悬浮时只让这一张卡自己重算样式，
+ * 不再沿继承链把整张卡里的几十个节点一起标脏 —— trace 里那是每次切换 1ms 起、
+ * 鼠标扫过时每帧一次的开销。
+ * 状态灯用的 --signal / --signal-fill / --signal-ring 例外：它们要继承到灯上。 */
+@property --tilt {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --card-scale {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --card-grow {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --card-hover {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --card-surface {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: #fcfcfd;
+}
+
+@property --card-ink {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: #0b0c0e;
+}
+
+@property --card-shadow {
+  syntax: '*';
+  inherits: false;
+  initial-value: none;
+}
+
 /* ===== 卡片基座：状态差异全部读状态令牌 ===== */
 .log-card {
   --tilt: 0deg;
@@ -1151,9 +1229,9 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 .log-card__version {
   margin: 0;
   font-size: clamp(28px, 2.7vw, 42px);
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.075em;
 }
 
 .log-card__date {
@@ -1166,8 +1244,8 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 
 .log-card__count {
   /* 同样带汉字，跟着正文走，只把数字对齐成等宽 */
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 700;
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
@@ -1193,8 +1271,10 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
   border-radius: 50%;
   border: 1.5px solid var(--signal);
   background: var(--signal-fill, transparent);
+  /* 光圈跟着状态换色，但不做过渡：3px 的半透明环逐帧重画，会把整张卡一起标脏
+     （切换后 300ms 内每帧一次全卡绘制）。与卡阴影同一取舍 —— 状态切换时直接切换，
+     位移动效遮得住，省掉的是切版过渡里一半帧的绘制。 */
   box-shadow: 0 0 0 3px var(--signal-ring, transparent);
-  transition: box-shadow 300ms ease;
 }
 
 .log-list {
@@ -1273,7 +1353,9 @@ const backdrop = import.meta.env.BASE_URL + 'images/update-log-bg.webp'
 }
 
 .log-item__text {
-  font-size: clamp(13px, 1.02vw, 15px);
+  font-family: HarmonyOS Sans SC,system-ui;
+  font-weight: 600;
+  font-size: clamp(15px, 1.02vw, 17px);
   line-height: 1.65;
   color: var(--ink);
 }

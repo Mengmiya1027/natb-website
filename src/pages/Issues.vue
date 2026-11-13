@@ -351,6 +351,15 @@ function onIssueCreated(number) {
       <IssueAdminPanel v-if="adminOpen" @close="adminOpen = false" />
     </main>
 
-    <Toaster position="top-center" rich-colors close-button />
+    <!-- 桌面页头实测 69px（68 + 1px 边框），toast 必须落在它下方，否则会跟
+         固定胶囊和页头叠在一起。配色走 shadcn 的中性浮层，不用 rich-colors
+         的彩色底。关闭按钮留在 sonner 默认的左上角，状态图标由 issue.css
+         移到右侧的浅灰圆角块里。见 DESIGN.md 4.1 / 4.3。 -->
+    <Toaster
+      position="top-center"
+      close-button
+      :offset="{ top: '84px' }"
+      :mobile-offset="{ top: '136px' }"
+    />
   </div>
 </template>

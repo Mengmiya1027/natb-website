@@ -5,7 +5,7 @@
  * 预览复用 issue-detail 的 MarkdownView（契约：可 import，不可修改）。
  * 所有插入操作都基于 textarea 的选区，插入后把光标放回可继续输入的位置。
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 
 import { Button } from '@/components/ui/button'
 import MarkdownView from '@/components/issue/MarkdownView.vue'
@@ -39,17 +39,140 @@ const text = computed({
   set: (value) => emit('update:modelValue', value),
 })
 
-/** 写入新值并把光标/选区放到指定位置 */
+/* ------------------------------------------------------------------
+ * 撤销 / 重做
+ * 程序化改写 textarea.value 会清空浏览器原生 undo 栈，工具栏按钮一点
+ * 原生 Ctrl+Z 就废了，所以自己维护一条快照链：historyStack[cursor] 恒等于
+ * 当前内容，连续打字按时间窗口合并成一条，避免每个字符占一格。
+ * ------------------------------------------------------------------ */
+const TYPE_MERGE_MS = 400
+
+let historyStack = []
+let cursor = -1
+let lastKind = ''
+let lastAt = 0
+
+function pushState(value, kind) {
+  const now = Date.now()
+  const merge =
+    kind === 'type' &&
+    lastKind === 'type' &&
+    now - lastAt < TYPE_MERGE_MS &&
+    cursor >= 0 &&
+    cursor === historyStack.length - 1
+
+  if (merge) {
+    historyStack[cursor] = { value }
+  } else {
+    // 在撤销状态下产生新编辑，redo 分支作废
+    if (cursor < historyStack.length - 1) historyStack.length = cursor + 1
+    historyStack.push({ value })
+    cursor = historyStack.length - 1
+  }
+  lastKind = kind
+  lastAt = now
+}
+
+function resetHistory(value) {
+  historyStack = [{ value }]
+  cursor = 0
+  lastKind = ''
+  lastAt = 0
+}
+
+/**
+ * 算出「从 current 变成 target」之后光标该落在哪。
+ * 不能拿快照里存下的选区——用户事后用鼠标或方向键挪过光标，那个位置
+ * 不会触发 input，历史并不知情，照搬就会跳回上一次输入结束的地方。
+ * 用两份内容的公共前缀定位：变短（撤销）就停在差异起点，变长（重做）
+ * 再往里推进新增的长度。
+ */
+function caretFor(target, current) {
+  const limit = Math.min(target.length, current.length)
+  let same = 0
+  while (same < limit && target[same] === current[same]) same += 1
+  const grew = target.length - current.length
+  return grew > 0 ? Math.min(same + grew, target.length) : same
+}
+
+/** 把某个快照写回编辑器，光标落在内容实际变化的位置 */
+function restore(state) {
+  const el = textareaRef.value
+  const caret = caretFor(state.value, el ? el.value : props.modelValue || '')
+  if (tab.value !== 'write') tab.value = 'write'
+  emit('update:modelValue', state.value)
+  nextTick(() => {
+    const node = textareaRef.value
+    if (node) {
+      node.focus({ preventScroll: true })
+      node.setSelectionRange(caret, caret)
+    }
+  })
+}
+
+function undo() {
+  syncExternal()
+  if (cursor <= 0) return
+  cursor -= 1
+  restore(historyStack[cursor])
+  lastKind = ''
+}
+
+function redo() {
+  syncExternal()
+  if (cursor >= historyStack.length - 1) return
+  cursor += 1
+  restore(historyStack[cursor])
+  lastKind = ''
+}
+
+/**
+ * 写入新值并把光标/选区放到指定位置。
+ * textarea 在内容被改写后会被浏览器滚到末尾，聚焦默认也会把页面滚过去，
+ * 所以这里先记住原滚动位置，设完选区再还原，视线不跳。
+ */
 function applyValue(next, selStart, selEnd) {
+  const el = textareaRef.value
+  const prevScrollTop = el ? el.scrollTop : 0
+
+  pushState(next, 'tool')
   emit('update:modelValue', next)
   // 预览态下点工具栏，先回到编辑态才能聚焦 textarea
   if (tab.value !== 'write') tab.value = 'write'
+
   nextTick(() => {
-    const el = textareaRef.value
-    if (!el) return
-    el.focus()
-    el.setSelectionRange(selStart, selEnd)
+    const node = textareaRef.value
+    if (!node) return
+    node.focus({ preventScroll: true })
+    node.setSelectionRange(selStart, selEnd)
+    node.scrollTop = prevScrollTop
+    // 浏览器可能在随后的渲染帧里按光标位置再滚一次，下一帧补校正
+    requestAnimationFrame(() => {
+      if (node.scrollTop !== prevScrollTop) node.scrollTop = prevScrollTop
+    })
   })
+}
+
+function onInput(event) {
+  const el = event.target
+  pushState(el.value, 'type')
+}
+
+onMounted(() => resetHistory(props.modelValue || ''))
+
+/**
+ * 外部把内容整个换掉（提交成功后清空、切换到另一条草稿）时，历史里的旧快照
+ * 已经对不上 DOM 了，先就地重置。
+ *
+ * 不能用 watch 做这件事：实测 watch 会跑在 onInput 的 pushState 之前，把刚记
+ * 下的那条误判成"外部改写"再重置一次，历史退化成两个同值快照，撤销表面上
+ * 毫无反应。所以在撤销/重做真正用历史之前，拿 DOM 现值对齐一次最稳。
+ */
+function syncExternal() {
+  const el = textareaRef.value
+  if (!el) return
+  const top = historyStack[cursor]
+  if (top && top.value !== el.value) resetHistory(el.value)
 }
 
 function currentSelection() {
@@ -152,6 +275,25 @@ const tools = [
 ]
 
 function onKeydown(event) {
+  if (event.isComposing) return
+
+  const mod = event.metaKey || event.ctrlKey
+  const key = event.key.toLowerCase()
+
+  // Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z 与 Ctrl+Y 重做；必须拦下浏览器原生行为，
+  // 否则它会拿自己那条已被程序化改写污染的栈再改一次，两套历史互相打架。
+  if (mod && key === 'z') {
+    event.preventDefault()
+    if (event.shiftKey) redo()
+    else undo()
+    return
+  }
+  if (mod && key === 'y') {
+    event.preventDefault()
+    redo()
+    return
+  }
+
   if (event.key === 'Tab' && !event.shiftKey) {
     event.preventDefault()
     const value = props.modelValue || ''
@@ -162,7 +304,7 @@ function onKeydown(event) {
     applyValue(next, start + 2, start + 2)
     return
   }
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+  if (mod && event.key === 'Enter') {
     event.preventDefault()
     emit('submit')
   }
@@ -205,6 +347,7 @@ function setTab(next) {
           :title="tool.label"
           :aria-label="tool.label"
           class="text-muted-foreground hover:text-foreground"
+          @mousedown.prevent
           @click="tool.run"
         >
           <component :is="tool.icon" class="size-3.5" />
@@ -220,6 +363,7 @@ function setTab(next) {
         :placeholder="placeholder"
         :style="{ minHeight }"
         class="block w-full resize-y bg-transparent px-3 py-2.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
+        @input="onInput"
         @keydown="onKeydown"
       ></textarea>
 

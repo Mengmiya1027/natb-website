@@ -528,6 +528,7 @@ function onWheel(event) {
  *   落位之后 emit('close')         宿主收掉大屏
  * ══════════════════════════════════════════════════════════════════════════ */
 const screenEl = ref(null)
+
 /** 正在接续 / 正在缩回：这一段时间里换面与指针跟随都要停手 */
 const flipping = ref(false)
 /** 缩回中：七面、控件、背景要跟着淡走（见样式里 .is-unflipping 那组） */
@@ -909,7 +910,18 @@ watch(
     unflipping.value = false
     wheelAcc = 0
     index.value = props.initial || 0
-    nextTick(startFlipOrEntrance)
+    /* 改成常挂载之后，大屏不再随关闭卸载，上一轮退出时逐帧写在皮肤上的
+     * 内联 transform / 圆角会原样留到这一次 —— 不擦掉，入场就从"已经缩在卡片里"
+     * 的姿态起跑，整面停在半途（表现：大屏里只剩一张小卡，环也不成形）。 */
+    screenEl.value?.querySelectorAll('.face__skin').forEach((el) => {
+      el.style.transform = ''
+      el.style.borderRadius = ''
+    })
+    // 读一次尺寸：v-show 的 display 刚变过来，几何必须在布局落实之后再量
+    nextTick(() => {
+      void screenEl.value?.offsetWidth
+      startFlipOrEntrance()
+    })
   },
 )
 
@@ -961,8 +973,11 @@ watch(
 <template>
   <!-- Teleport 到 body：整屏模式不受 features 页那个 fixed + overflow 的祖先连累 -->
   <Teleport to="body">
+    <!-- v-show 而不是 v-if：每次展开都重建这五百多个节点，实测要 36–50ms 才出第一帧，
+         而这个组件本来就有 watch(open) 负责起跑（见 startFlipOrEntrance），
+         常挂载并不影响入场时序；display:none 时浏览器不建渲染层，
+         显存与模糊缓存也不会留着。 -->
     <div
-      v-if="open"
       ref="screenEl"
       class="screen"
       :class="{
@@ -971,6 +986,7 @@ watch(
         'is-flipping': flipping,
         'is-unflipping': unflipping,
       }"
+      v-show="open"
       :style="[ringVars, enterVars, flipVars, { '--dur-k': combo ? COMBO_K : 1 }]"
       role="dialog"
       aria-modal="true"
@@ -1011,7 +1027,7 @@ watch(
                      不是把整面晃出去。 -->
                 <TiltCard
                   class="face__shell"
-                  :disabled="face !== i || turning || flipping"
+                  :disabled="face !== i || turning || flipping || !open"
                   :max-tilt="2.5"
                   :perspective="1500"
                   :scale="1"
@@ -2938,6 +2954,17 @@ watch(
  * （纸色与暗纱压在它上面），所以接续期间先收掉模糊、换同一张清晰图：
  * 壳在动的时候那点糊看不出来，落位之后模糊回来（那一刻壳已经停住）。 */
 .screen.is-flipping .face.is-front .face__wash {
+  filter: none;
+}
+
+/* 接续 / 缩回期间，其余七面的封面模糊也一并收掉。
+ * 它们此刻正被 3D 透视压成侧脸、外面还压着一层淡入，模糊与本尊看不出差别；
+ * 而八层 blur(10px) 的离屏表面每帧都要参与合成 —— DPR=2 下一面就是一张
+ * 1500×1000 量级的纹理，这是展开 / 关闭这段 GPU 侧最大的一笔。
+ * 落位之后 is-flipping / is-unflipping 撤掉，模糊自己就回来了。
+ * 换面（is-turning）不动这一条：那一段的手感是实测调过的，不在此轮范围内。 */
+.screen.is-flipping .face:not(.is-front) .face__wash,
+.screen.is-unflipping .face:not(.is-front) .face__wash {
   filter: none;
 }
 

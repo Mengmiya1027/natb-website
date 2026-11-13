@@ -16,9 +16,12 @@ const delegatedProps = reactiveOmit(props, "class")
 </script>
 
 <template>
+  <!-- type 必须写在 v-bind 之后：delegatedProps 里带着未传的 type:undefined，
+       放在前面会被它覆盖掉，Scrollbar 就整个不渲染 -->
   <ScrollAreaRoot
     data-slot="scroll-area"
     v-bind="delegatedProps"
+    type="always"
     :class="cn('relative', props.class)"
   >
     <ScrollAreaViewport

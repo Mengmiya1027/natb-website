@@ -205,6 +205,12 @@ export async function gh(path, { method = 'GET', body, auth = true, headers = {}
   if (!res.ok) {
     throw new GitHubError(res.status, humanize(res.status, payload), payload)
   }
+  // 写请求一旦成功，之前缓存的只读结果就全部作废。否则调用方紧接着重新拉取
+  // 时会命中 60 秒缓存，读回改之前的数据 —— 比如锁定会话后按钮仍显示「锁定会话」，
+  // 要刷新页面（内存缓存清空）才变成「解锁会话」。
+  if (method !== 'GET') {
+    responseCache.clear()
+  }
   if (useCache) {
     responseCache.set(key, { at: Date.now(), data: payload })
   }
@@ -241,6 +247,20 @@ export const githubApi = {
 
   getIssue: (number) => gh(repo(`/issues/${number}`)),
 
+  /**
+   * 是否已置顶。REST 的 issue 对象里没有 pinned 字段（只有 locked），
+   * 只能走 GraphQL 的 isPinned。未登录时调用会失败，交给调用方 catch。
+   */
+  getIssuePinned: async (number) => {
+    const data = await graphql(
+      `query($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) { issue(number: $number) { isPinned } }
+      }`,
+      { owner: ISSUE_REPO.owner, name: ISSUE_REPO.name, number },
+    )
+    return Boolean(data?.repository?.issue?.isPinned)
+  },
+
   listComments: (number, { page = 1, per_page = 30 } = {}) =>
     gh(repo(`/issues/${number}/comments?page=${page}&per_page=${per_page}`)),
 
@@ -266,7 +286,12 @@ export const githubApi = {
   getMe: () => gh('/user'),
 
   /** 当前用户是否已订阅该 issue */
-  getSubscription: (number) => gh(repo(`/issues/${number}/subscription`)),
+  /**
+   * 仓库级订阅（watch）状态。注意 GitHub REST 没有 issue 级的
+   * /issues/{n}/subscription 端点（请求一律 404），订阅只能做到仓库粒度。
+   * 未订阅时返回 404。需要 notifications 或 repo scope。
+   */
+  getSubscription: () => gh(repo('/subscription')),
 
   /** 谁能被指派：GitHub 会返回 404/403，调用方需要容错 */
   listCollaborators: ({ per_page = 100 } = {}) => gh(repo(`/collaborators?per_page=${per_page}`)),
@@ -309,9 +334,9 @@ export const githubWriteApi = {
   removeReaction: (number, reactionId) =>
     gh(repo(`/issues/${number}/reactions/${reactionId}`), { method: 'DELETE' }),
 
-  setSubscription: (number) => gh(repo(`/issues/${number}/subscription`), { method: 'PUT', body: { subscribed: true } }),
+  setSubscription: () => gh(repo('/subscription'), { method: 'PUT', body: { subscribed: true } }),
 
-  deleteSubscription: (number) => gh(repo(`/issues/${number}/subscription`), { method: 'DELETE' }),
+  deleteSubscription: () => gh(repo('/subscription'), { method: 'DELETE' }),
 
   /** 标签管理 */
   createLabel: ({ name, color, description = '' }) =>

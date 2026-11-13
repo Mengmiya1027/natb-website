@@ -24,6 +24,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import IconSearch from '~icons/lucide/search'
 import IconSlidersHorizontal from '~icons/lucide/sliders-horizontal'
+import IconFlag from '~icons/lucide/flag'
+import IconUsersRound from '~icons/lucide/users-round'
+import IconArrowDownWideNarrow from '~icons/lucide/arrow-down-wide-narrow'
 import IconX from '~icons/lucide/x'
 import IconLoader from '~icons/lucide/loader-circle'
 
@@ -92,6 +95,36 @@ function onSearchInput(next) {
 /* ---------------- 标签 ---------------- */
 
 const labelOpen = ref(false)
+const labelTriggerRef = ref(null)
+
+/**
+ * 标签面板列表区的最大高度。
+ * 可用空间 = 标签按钮上沿 − 页头下沿；再扣掉面板自己的标题行（44px）和 12px 呼吸区，
+ * 最后向下取整到 32px 的整数倍，保证永远不把某一行拦腰截断，超出的交给 ScrollArea 滚动。
+ */
+const labelsMaxListHeight = ref(256)
+
+function measureLabelsSpace() {
+  const el = labelTriggerRef.value?.$el || labelTriggerRef.value
+  if (!el?.getBoundingClientRect) return
+  const btnTop = el.getBoundingClientRect().top
+  // 页面里同时有胶囊顶栏（56px）和 Issue 页头（69px），取更靠下的那条作边界
+  const headerBottom = Math.max(
+    0,
+    ...[...document.querySelectorAll('header')].map((h) => h.getBoundingClientRect().bottom),
+  )
+  const usable = btnTop - headerBottom - 8 - 36
+  const cap = Math.max(128, Math.floor(usable / 32) * 32)
+  // 装得下就用内容实际高度，装不下才撑到上限并交给滚动。
+  // 必须是确定值而不是 max-height：ScrollArea 的 viewport 是 height:100%，
+  // 父级只有 max-height（auto 高度）时百分比失效，viewport 会被内容撑开，滚不动。
+  const contentHeight = labels.value.length * 32
+  labelsMaxListHeight.value = Math.min(contentHeight || cap, cap)
+}
+
+watch(labelOpen, (open) => {
+  if (open) measureLabelsSpace()
+})
 
 function toggleLabel(name) {
   const current = value.value.labels || []
@@ -167,13 +200,20 @@ function resetAll() {
 
       <Popover v-model:open="labelOpen">
         <PopoverTrigger as-child>
-          <Button variant="outline" class="h-9 gap-1.5 text-sm">
+          <Button ref="labelTriggerRef" variant="outline" class="h-9 gap-1.5 text-sm">
             <IconSlidersHorizontal class="size-4" />
             标签
             <Badge v-if="value.labels?.length" class="h-4 px-1 text-[10px]">{{ value.labels.length }}</Badge>
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" class="w-64 p-0">
+        <!-- overflow-hidden：ScrollArea 在 max-h 之下没把溢出裁干净，最后一项会漏到面板外
+             collision-padding：向上翻转时避开固定胶囊顶栏，别让面板贴着它 -->
+        <PopoverContent
+          side="top"
+          align="end"
+          class="w-64 overflow-hidden p-0"
+          :collision-padding="{ top: 80, bottom: 16 }"
+        >
           <div class="flex items-center justify-between px-3 py-2">
             <span class="text-xs font-medium">按标签筛选</span>
             <Button v-if="value.labels?.length" variant="ghost" size="sm" class="h-6 px-1.5 text-[11px]" @click="patch({ labels: [] })">
@@ -181,17 +221,19 @@ function resetAll() {
             </Button>
           </div>
           <Separator />
-          <ScrollArea class="max-h-64">
+          <!-- 高度由 measureLabelsSpace() 算出，天花板是「页头下沿 → 标签按钮」这段空间 -->
+          <ScrollArea :style="{ height: labelsMaxListHeight + 'px' }">
             <div v-if="loadingOptions" class="text-muted-foreground flex items-center gap-2 px-3 py-4 text-xs">
               <IconLoader class="size-3.5 animate-spin" />
               加载中…
             </div>
             <div v-else-if="!labels.length" class="text-muted-foreground px-3 py-4 text-xs">这个仓库还没有标签</div>
-            <div v-else class="flex flex-col p-1.5">
+            <!-- 只用水平内边距：上下留白会把整行高度算进滚动区，最后一行就被切一半 -->
+            <div v-else class="flex flex-col px-1.5">
               <label
                 v-for="label in labels"
                 :key="label.name"
-                class="hover:bg-accent flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs"
+                class="hover:bg-accent flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-xs"
               >
                 <Checkbox
                   :model-value="value.labels?.includes(label.name)"
@@ -207,6 +249,7 @@ function resetAll() {
 
       <Select v-model="milestoneModel">
         <SelectTrigger class="h-9 w-auto min-w-[130px] gap-1.5 text-sm">
+          <IconFlag class="size-4 shrink-0 text-foreground" />
           <SelectValue placeholder="里程碑" />
         </SelectTrigger>
         <SelectContent align="end">
@@ -219,6 +262,7 @@ function resetAll() {
 
       <Select v-model="assigneeModel">
         <SelectTrigger class="h-9 w-auto min-w-[120px] gap-1.5 text-sm">
+          <IconUsersRound class="size-4 shrink-0 text-foreground" />
           <SelectValue placeholder="指派" />
         </SelectTrigger>
         <SelectContent align="end">
@@ -229,6 +273,7 @@ function resetAll() {
 
       <Select v-model="sortModel">
         <SelectTrigger class="h-9 w-auto min-w-[120px] gap-1.5 text-sm">
+          <IconArrowDownWideNarrow class="size-4 shrink-0 text-foreground" />
           <SelectValue placeholder="排序" />
         </SelectTrigger>
         <SelectContent align="end">
