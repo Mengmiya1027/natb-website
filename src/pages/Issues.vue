@@ -24,6 +24,7 @@ import IssueFilters from '@/components/issue/IssueFilters.vue'
 import IssueList from '@/components/issue/IssueList.vue'
 import IssueDetail from '@/components/issue/IssueDetail.vue'
 import IssueEditor from '@/components/issue/IssueEditor.vue'
+import IssueIntakeDialog from '@/components/issue/IssueIntakeDialog.vue'
 import IssueUserMenu from '@/components/issue/IssueUserMenu.vue'
 import IssueAdminPanel from '@/components/issue/IssueAdminPanel.vue'
 import { Toaster } from '@/components/ui/sonner'
@@ -98,11 +99,20 @@ const filters = ref({
 })
 
 const listVersion = ref(0)
-function refreshList() {
+const refreshing = ref(false)
+async function refreshList() {
   // 不先清缓存的话，重新请求仍会命中 60 秒内的 GET 缓存，
   // 点刷新等于什么都没发生。
   clearApiCache()
   listVersion.value += 1
+  refreshing.value = true
+  try {
+    // 列表与上面三张统计卡一起刷新，否则只有下面的列表变化。
+    await loadStats()
+  } finally {
+    // 请求太快时图标会一闪而过，看不出点过，兜一个最短旋转时长。
+    setTimeout(() => (refreshing.value = false), 400)
+  }
 }
 
 /* ---------------- 主题 ---------------- */
@@ -155,18 +165,32 @@ const authOpen = ref(false)
 const settingsOpen = ref(false)
 const adminOpen = ref(false)
 
+const intakeOpen = ref(false)
+
 function startCreate() {
   if (!store.isLoggedIn) {
     toast.error('发布 issue 需要先登录 GitHub')
     authOpen.value = true
     return
   }
-  router.push('/issue/new')
+  // 先问清楚对哪个项目、是什么类型的问题，再进编写页
+  intakeOpen.value = true
+}
+
+/* 选择结果通过 query 带到编写页，由那边负责预填里程碑与标签 */
+function onIntakeConfirm({ target, types }) {
+  router.push({
+    name: 'issue-new',
+    query: {
+      target: target?.id || '',
+      type: (types || []).map((item) => item.id).join(','),
+    },
+  })
 }
 
 function onIssueCreated(number) {
+  // refreshList 已包含 loadStats，不要重复请求
   refreshList()
-  loadStats()
   if (number) openIssue(number)
   else goList()
 }
@@ -303,7 +327,8 @@ function onIssueCreated(number) {
               <p class="text-muted-foreground mt-1 text-sm">处于 Open 状态的 issue</p>
             </div>
             <div class="shrink-0 text-5xl font-bold tracking-tight tabular-nums">
-              <Skeleton v-if="!stats.loaded" class="h-10 w-12" />
+              <!-- 刷新时数字位换成骨架条，和下面列表的加载态同一套语言 -->
+              <Skeleton v-if="!stats.loaded || refreshing" class="bg-foreground/15 h-10 w-12" />
               <template v-else>{{ stats.open }}</template>
             </div>
           </CardContent>
@@ -320,7 +345,8 @@ function onIssueCreated(number) {
               <p class="text-muted-foreground mt-1 text-sm">仓库可用的分类标签</p>
             </div>
             <div class="shrink-0 text-5xl font-bold tracking-tight tabular-nums">
-              <Skeleton v-if="!stats.loaded" class="h-10 w-12" />
+              <!-- 刷新时数字位换成骨架条，和下面列表的加载态同一套语言 -->
+              <Skeleton v-if="!stats.loaded || refreshing" class="bg-foreground/15 h-10 w-12" />
               <template v-else>{{ stats.labels }}</template>
             </div>
           </CardContent>
@@ -337,7 +363,8 @@ function onIssueCreated(number) {
               <p class="text-muted-foreground mt-1 text-sm">按版本归拢的计划</p>
             </div>
             <div class="shrink-0 text-5xl font-bold tracking-tight tabular-nums">
-              <Skeleton v-if="!stats.loaded" class="h-10 w-12" />
+              <!-- 刷新时数字位换成骨架条，和下面列表的加载态同一套语言 -->
+              <Skeleton v-if="!stats.loaded || refreshing" class="bg-foreground/15 h-10 w-12" />
               <template v-else>{{ stats.milestones }}</template>
             </div>
           </CardContent>
@@ -354,8 +381,14 @@ function onIssueCreated(number) {
               共 {{ stats.loaded ? stats.open : '—' }} 条未关闭 · {{ filters.search ? '搜索结果按相关度排序' : '按最近活动排列' }}
             </p>
           </div>
-          <Button variant="outline" size="sm" class="h-8 gap-1.5 px-2.5" @click="refreshList()">
-            <IconRefreshCw class="size-3.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8 gap-1.5 px-2.5"
+            :disabled="refreshing"
+            @click="refreshList()"
+          >
+            <IconRefreshCw class="size-3.5" :class="refreshing ? 'animate-spin' : ''" />
             刷新
           </Button>
         </div>
@@ -395,6 +428,9 @@ function onIssueCreated(number) {
       :offset="{ top: '84px' }"
       :mobile-offset="{ top: '136px' }"
     />
+
+    <!-- 新建 Issue 的前置选择：反馈对象 → 反馈类型 -->
+    <IssueIntakeDialog v-model:open="intakeOpen" @confirm="onIntakeConfirm" />
 
     <!-- 页面滚动条改成浮在内容上的指示条，不再占横向空间 -->
     <ScrollIndicator />

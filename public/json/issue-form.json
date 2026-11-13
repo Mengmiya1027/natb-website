@@ -1,0 +1,65 @@
+{
+  "multipleTypes": true,
+  "targets": [
+    {
+      "id": "natb-cli",
+      "title": "NATB-cli",
+      "desc": "命令行版本，跑在终端里的 NATB。",
+      "icon": "terminal",
+      "milestone": "NATB-cli"
+    },
+    {
+      "id": "natb-gui",
+      "title": "NATB-gui",
+      "desc": "图形界面版本，带窗口和按钮的 NATB。",
+      "icon": "app-window",
+      "milestone": "NATB-gui"
+    },
+    {
+      "id": "atb-toolbox",
+      "title": "ATB & NATB 手表工具箱",
+      "desc": "手表端工具、刷机与同步相关的问题。",
+      "icon": "watch",
+      "milestone": "ATB&NATB手表工具箱"
+    },
+    {
+      "id": "other",
+      "title": "其他项目",
+      "desc": "不在上面列表里的项目，或者说不清归属。",
+      "icon": "boxes",
+      "milestone": null
+    }
+  ],
+  "types": [
+    {
+      "id": "bug",
+      "title": "Bug 反馈",
+      "desc": "某个功能没按预期工作。",
+      "label": "bug"
+    },
+    {
+      "id": "feature",
+      "title": "功能建议",
+      "desc": "希望新增或改进某个能力。",
+      "label": "enhancement"
+    },
+    {
+      "id": "question",
+      "title": "使用问题",
+      "desc": "不知道怎么用，需要有人带一下。",
+      "label": "question"
+    },
+    {
+      "id": "docs",
+      "title": "文档问题",
+      "desc": "说明写错了、过时了或者缺失。",
+      "label": "documentation"
+    },
+    {
+      "id": "other",
+      "title": "其他",
+      "desc": "以上都不属于，直接写标题说明。",
+      "label": null
+    }
+  ]
+}
