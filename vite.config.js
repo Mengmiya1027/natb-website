@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 // import vueDevTools from 'vite-plugin-vue-devtools'
 import Icons from 'unplugin-icons/vite'
 import Components from 'unplugin-vue-components/vite'
@@ -22,6 +23,8 @@ export default defineConfig({
   base: pagesBase(),
   plugins: [
     vue(),
+    // Issue 页用的 Tailwind v4；样式入口是 src/styles/issue.css，且刻意不加载 preflight
+    tailwindcss(),
     // vueDevTools(),
     // 自动导入组件，并把 <i-xxx /> 写法解析成图标组件
     Components({

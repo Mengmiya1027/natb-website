@@ -7,6 +7,7 @@
  * 顶栏不直接碰宿主的 activeId：条目点击只广播 natb:tab，由 App.vue 校验后落表。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAnimationStore } from '@/stores/animation'
 import PillNav from './vue-bits/PillNav.vue'
 
@@ -46,30 +47,66 @@ watch(
 )
 onBeforeUnmount(() => window.clearTimeout(settleTimer))
 
+const route = useRoute()
+const router = useRouter()
+
+/* Issue 是独立路由页（/issue），其余仍是首页壳里的 dock 切换 */
+const onIssueRoute = computed(() => route.path.startsWith('/issue'))
+
+/*
+ * tab     首页壳里的 dock 页
+ * route   独立路由页
+ * 都没有  占位项：点了不跳也不动（下载页与关于页尚未制作）
+ */
 const items = [
-  { label: '介绍', href: '#features' },
-  { label: '下载', href: DOWNLOAD_URL, target: '_blank', rel: 'noopener' },
-  { label: '关于', href: '#projectinfo' }
+  { label: '介绍', href: '#home', tab: 'home' },
+  { label: '下载' },
+  { label: 'Issue', href: '/issue', route: true },
+  { label: '关于' }
 ]
 
-const activeHref = computed(() => '#' + props.activeId)
+const activeHref = computed(() => (onIssueRoute.value ? '/issue' : '#' + props.activeId))
 
 function goTab(id) {
   window.dispatchEvent(new CustomEvent('natb:tab', { detail: id }))
 }
 
-/** 站内条目走 tab 广播，外链（下载）交给浏览器自己开 */
+/**
+ * 三种去处：
+ *   route —— 独立路由页（/issue）
+ *   tab   —— 首页壳里的 dock 页，走 natb:tab 广播
+ *   其它  —— 外链，交给浏览器自己开
+ *
+ * 注意：在 Issue 页时 HomeShell 并没有挂载，此时广播出去的 natb:tab 没人听，
+ * 所以要先回到 `/`，等壳挂载后再切 tab。
+ */
 function onItemClick(item, index, event) {
-  if (!item.href?.startsWith('#')) return
+  if (item.route) {
+    event.preventDefault()
+    router.push(item.href)
+    return
+  }
+  if (!item.tab) {
+    // 占位项：吞掉点击，什么都不做
+    event.preventDefault()
+    return
+  }
   event.preventDefault()
-  goTab(item.href.slice(1))
+  if (onIssueRoute.value) {
+    router.push('/').then(() => {
+      window.setTimeout(() => goTab(item.tab), 80)
+    })
+    return
+  }
+  goTab(item.tab)
 }
 
 /** 品牌圆和条目同源：点它回首页 */
 function onLogoClick(event) {
   if (!event.target.closest?.('.pill-nav__logo-link')) return
   event.preventDefault()
-  goTab('home')
+  if (onIssueRoute.value) router.push('/')
+  else goTab('home')
 }
 </script>
 
@@ -136,7 +173,10 @@ function onLogoClick(event) {
   display: flex;
   justify-content: center;
   width: 100%;
-  pointer-events: auto;
+  /* 这一层必须铺满整宽（PillNav 的 collapse="auto" 要量父容器可用宽度），
+   * 但绝不能吃点击：否则它会把整条顶栏高度内的所有内容都盖住。
+   * 只有真正的胶囊（.pill-nav）恢复可点。 */
+  pointer-events: none;
   max-width: 100%;
   transform-origin: center top;
   transform: translateY(-160%) rotateX(-180deg);
@@ -155,6 +195,11 @@ function onLogoClick(event) {
 .navbar.is-settled .dock {
   transform: none;
   will-change: auto;
+}
+
+/* 胶囊本体恢复可点 */
+.dock :deep(.pill-nav) {
+  pointer-events: auto;
 }
 
 /* 右侧占位圆：尺寸与 logo 圆同源（--pn-h），玻璃底 + 一圈内高光也与 logo 胶囊一致 */

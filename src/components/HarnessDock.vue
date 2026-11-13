@@ -12,6 +12,7 @@ import HomePage from '@/pages/HomePage.vue'
 import Features from '@/pages/Features.vue'
 import UpdateLog from '@/pages/UpdateLog.vue'
 import ProjectInfo from '@/pages/ProjectInfo.vue'
+import Issues from '@/pages/Issues.vue'
 
 /* 图标走 unplugin-icons 构建期按需编译：不联网请求，也不把整套图标集打进包。
  * 统一用 solar 的 bold —— 描边约 2px，比线性图标粗一倍，小尺寸下仍然清楚。
@@ -20,11 +21,14 @@ import IconHome from '~icons/solar/home-2-bold'
 import IconFeatures from '~icons/solar/widget-4-bold'
 import IconUpdateLog from '~icons/solar/document-text-bold'
 import IconProjectInfo from '~icons/solar/info-circle-bold'
+import IconIssue from '~icons/solar/chat-round-dots-bold'
 
 export const DOCK_TABS = [
   { id: 'home', short: '首页', file: 'HomePage.vue', desc: '粒子汇聚 / 标题起飞', comp: HomePage, icon: IconHome },
   { id: 'features', short: '功能', file: 'Features.vue', desc: '卡片网格 / 大屏模式', comp: Features, icon: IconFeatures },
   { id: 'updatelog', short: '更新', file: 'UpdateLog.vue', desc: '3D 卡片轴', comp: UpdateLog, icon: IconUpdateLog },
+  /* dockless: 这一页是独立全屏页，从左下角导航坞里隐藏，只留顶栏入口 */
+  { id: 'issue', short: 'Issue', file: 'Issues.vue', desc: '问题反馈 / 讨论', comp: Issues, icon: IconIssue, dockless: true },
   { id: 'projectinfo', short: '关于', file: 'ProjectInfo.vue', desc: '项目说明 / 二维码', comp: ProjectInfo, icon: IconProjectInfo },
 ]
 
@@ -47,7 +51,9 @@ export const DOCK_HOME = DOCK_TABS[0].id
  *   2. 删除 App.vue 里带 [HARNESS-DOCK] 的行（import / activeId / navOpen / <HarnessDock />）。
  * 页面本体一行都不用动。
  */
+import { onBeforeUnmount, ref } from 'vue'
 import GlassSurface from './vue-bits/GlassSurface.vue'
+import DockBurst from './DockBurst.vue'
 import IconQQ from '~icons/simple-icons/qq'
 
 const QQ_URL = 'https://qm.qq.com/q/Cb2vLZtsZ4'
@@ -57,13 +63,56 @@ const activeId = defineModel({ type: String, default: DOCK_HOME })
 
 
 // 模板只能引用 <script setup> 的绑定，这里把注册表接进来
-const TABS = DOCK_TABS
+/* dockless 的页面只是注册在表里供 App.vue 渲染，不进导航坞 */
+const TABS = DOCK_TABS.filter((tab) => !tab.dockless)
+
+/* 点击回响：每次按下都把 { id, seq } 换成新对象，seq 进 :key，
+ * 于是 DockBurst 被整个重建一次 —— CSS 动画天然从头播，不需要手动 reset。
+ * 动画最长的 qq 是 900ms + 5×65ms ≈ 1.2s，留 1.4s 再摘掉节点：
+ * 播完的层是 opacity: 0 的幽灵节点，留在 DOM 里只会白占合成层。 */
+const FX_LIFETIME = 1400
+const fx = ref({ id: '', seq: 0 })
+let seq = 0
+let fxTimer = 0
+
+function fire(id) {
+  window.clearTimeout(fxTimer)
+  fx.value = { id, seq: ++seq }
+  fxTimer = window.setTimeout(() => {
+    fx.value = { id: '', seq: 0 }
+  }, FX_LIFETIME)
+}
+
+/* 回响先行、换页后退两帧。
+ * 页面首次挂载实测要 70–120ms（features 92 / home 118），全部压在点击那一帧上 ——
+ * 这就是"点下去卡一下"的来源，且与回响无关（去掉回响仍是 71ms）。
+ * 先把回响交出去，它只动 transform / opacity，由合成线程播放，主线程随后被页面
+ * 挂载占住也不影响它继续跑；用户看到的是"立刻有反馈，页面随后换"。
+ * pending 令牌保证连点多个按钮时只有最后一次落地。 */
+/** 鼠标刚移上按钮就把目标页交给宿主预热，真正按下时那一页已经是"热"的 */
+function warm(id) {
+  window.dispatchEvent(new CustomEvent('natb:warm', { detail: id }))
+}
+
+let pending = 0
+function select(id) {
+  fire(id)
+  if (id === activeId.value) return
+  const token = ++pending
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      if (token === pending) activeId.value = id
+    }),
+  )
+}
+
+onBeforeUnmount(() => window.clearTimeout(fxTimer))
 </script>
 
 <template>
   <!-- 两层：底下是一块液态玻璃（边缘用 SVG 位移贴图折射背景、中间清透），
        上面照旧是那组圆形图标按钮。玻璃只做背景，不参与任何按钮样式。 -->
-  <div class="hd">
+  <div class="hd" :class="{ 'is-on-light': activeId === 'features' }">
     <GlassSurface
       class="hd__glass"
       width="100%"
@@ -88,9 +137,11 @@ const TABS = DOCK_TABS
         :aria-current="tab.id === activeId ? 'page' : undefined"
         :aria-label="tab.short"
         :title="`${tab.short} · ${tab.file} · ${tab.desc}`"
-        @click="activeId = tab.id"
+        @click="select(tab.id)"
+        @pointerenter="warm(tab.id)"
       >
         <component :is="tab.icon" class="hd__icon" aria-hidden="true" />
+        <DockBurst :kind="tab.id" :seq="fx.id === tab.id ? fx.seq : 0" />
       </button>
 
       <span
@@ -106,8 +157,10 @@ const TABS = DOCK_TABS
         rel="noopener"
         aria-label="加入 QQ 交流群"
         title="加入 QQ 交流群"
+        @click="fire('qq')"
       >
         <IconQQ class="hd__icon" aria-hidden="true" />
+        <DockBurst kind="qq" :seq="fx.id === 'qq' ? fx.seq : 0" />
       </a>
     </nav>
   </div>
@@ -154,6 +207,11 @@ const TABS = DOCK_TABS
     inset 1px 1px 1px -0.5px rgba(255, 255, 255, 0.06), inset -1px -1px 1px -0.5px rgba(255, 255, 255, 0.03),
     inset 0 0 10px rgba(255, 255, 255, 0.02);
   --bew-ease-emphasized: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  /* 点击回响的墨色（rgb 三元组）。白胶囊上是白；选中态那枚是纯白底，白粒子会整片
+   * 消失，所以 is-active 换墨色。不用 mix-blend-mode：那会让整层失去合成缓存，
+   * 实测每次点击多付 60ms 以上的重绘。 */
+  --fx-ink: 255 255 255;
 }
 
 /* 背景层：只负责玻璃材质，铺满整条胶囊，永远不吃指针 */
@@ -221,6 +279,7 @@ const TABS = DOCK_TABS
 
 /* .dock-item.active：!dark:bg-white !dark:text-black + dark:shadow-$shadow-dark */
 .hd__btn.is-active {
+  --fx-ink: 18 18 20;
   background: #fff;
   color: #000;
   box-shadow: 0 4px 30px 4px rgba(255, 255, 255, 0.6);
@@ -257,6 +316,11 @@ const TABS = DOCK_TABS
   margin: 2px 12px;
   background: var(--bew-border-color);
   border-radius: 9999px;
+}
+
+/* 功能页的卡片墙整体偏亮：白粒子在那上面几乎看不见，整条 dock 换成墨色回响。 */
+.hd.is-on-light {
+  --fx-ink: 18 18 20;
 }
 
 /* 第二页（功能）的卡片墙整体偏亮，16% 白线在那里会糊掉 ——

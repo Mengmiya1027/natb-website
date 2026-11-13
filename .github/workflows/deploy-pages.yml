@@ -27,6 +27,9 @@ jobs:
       - run: npm ci
       # GITHUB_REPOSITORY 由 Actions 注入，vite.config.js 用它推断子路径 base
       - run: npm run build
+      # GitHub Pages 是静态托管：直接访问 /issue/12 会 404，
+      # 把 index.html 复制成 404.html 让前端路由接管
+      - run: cp dist/index.html dist/404.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,0 +1,10 @@
+name = "natb-issue-proxy"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+# 允许的站点来源，逗号分隔。留空则用脚本内的默认列表。
+[vars]
+ALLOWED_ORIGINS = "https://mengmiya1027.github.io,http://localhost:5173"
+
+# 可选：给匿名访客用的只读 token（强烈建议创建一个只勾 public_repo 的细粒度 token）
+# 用 wrangler secret put GITHUB_READ_TOKEN 写入，不要写在这个文件里

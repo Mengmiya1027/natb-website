@@ -1,0 +1,289 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* ---break---
+ */
+
+/* shadcn-vue 样式入口（按官方 Vite 安装文档配置）
+ *
+ *   @import "tailwindcss";          官方要求
+ *   @custom-variant dark            官方 dark 变体
+ *   @theme inline + :root + .dark   官方 token 结构
+ *
+ * 配色来自官方 preset a326wSQq（style=reka-nova / baseColor=neutral / radius=0.625rem / font=Inter）。
+ *
+ * 与官方的唯一偏差：本项目的旧页面（首页/功能/更新/关于）早于 Tailwind 存在，
+ * 所以 base 层里的通用规则被收敛到 .natb-issue 作用域内，避免动到旧页面的边框与背景。
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC',
+    'HarmonyOS Sans SC', 'Helvetica Neue', Arial, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-brand: var(--natb-brand);
+  --color-brand-2: var(--natb-brand-2);
+
+  --radius-sm: calc(var(--radius) * 0.55);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.25);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-3xl: calc(var(--radius) * 2);
+  --radius-4xl: calc(var(--radius) * 2.4);
+}
+
+:root {
+  /* preset a326wSQq 原值是 0.625rem(10px)，在卡片与控件上偏硬；
+   * 提到 0.875rem(14px)：卡片约 20px、按钮/输入框约 11px，圆角过渡更柔。 */
+  --radius: 0.875rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  /* 站点品牌色，不属于 shadcn 主题 */
+  --natb-brand: oklch(0.62 0.2 292);
+  --natb-brand-2: oklch(0.65 0.17 255);
+
+  /* 组件内部使用的别名，全部指向上面的官方 token，深色自动跟随 */
+  --natb-background: var(--background);
+  --natb-foreground: var(--foreground);
+  --natb-card: var(--card);
+  --natb-muted: var(--muted);
+  --natb-muted-foreground: var(--muted-foreground);
+  --natb-accent: var(--accent);
+  --natb-accent-foreground: var(--accent-foreground);
+  --natb-primary: var(--primary);
+  --natb-border: var(--border);
+  --natb-ring: var(--ring);
+  --natb-destructive: var(--destructive);
+  --natb-glass: color-mix(in oklch, var(--card) 82%, transparent);
+  --natb-glass-border: var(--border);
+  --natb-shadow-card: 0 1px 2px oklch(0 0 0 / 0.04), 0 10px 28px -18px oklch(0 0 0 / 0.22);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+
+  --natb-brand: oklch(0.7 0.18 292);
+  --natb-brand-2: oklch(0.72 0.15 255);
+}
+
+@layer base {
+  /* 官方规则，收敛到 Issue 页作用域，避免改到旧页面的边框色 */
+  .natb-issue *,
+  .natb-issue *::before,
+  .natb-issue *::after {
+    @apply border-border outline-ring/50;
+  }
+
+  .natb-issue {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer components {
+  .natb-glass {
+    background: var(--natb-glass);
+    border: 1px solid var(--natb-glass-border);
+    box-shadow: var(--natb-shadow-card);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .natb-rise {
+    animation: natb-rise 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+/* Markdown 正文排版（GitHub issue 内容的阅读样式） */
+  .natb-md {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    word-break: break-word;
+  }
+
+  .natb-md > * + * { margin-top: 0.85em; }
+
+  .natb-md h1, .natb-md h2, .natb-md h3,
+  .natb-md h4, .natb-md h5, .natb-md h6 {
+    font-size: 1rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin-top: 1.4em;
+  }
+
+  .natb-md h1 { font-size: 1.35rem; }
+  .natb-md h2 { font-size: 1.2rem; }
+  .natb-md h3 { font-size: 1.05rem; }
+  .natb-md ul, .natb-md ol { padding-left: 1.4em; }
+  .natb-md ul { list-style: disc; }
+  .natb-md ol { list-style: decimal; }
+  .natb-md li + li { margin-top: 0.25em; }
+
+  .natb-md a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .natb-md blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 0.9em;
+    color: var(--muted-foreground);
+  }
+
+  .natb-md code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    padding: 0.15em 0.38em;
+    border-radius: 6px;
+    background: var(--muted);
+  }
+
+  .natb-md pre {
+    overflow-x: auto;
+    padding: 0.9rem 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklch, var(--muted) 70%, transparent);
+  }
+
+  .natb-md pre code {
+    padding: 0;
+    background: transparent;
+    font-size: 0.84em;
+    line-height: 1.6;
+  }
+
+  .natb-md table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+
+  .natb-md th, .natb-md td {
+    border: 1px solid var(--border);
+    padding: 0.45em 0.7em;
+    text-align: left;
+  }
+
+  .natb-md th { background: var(--muted); font-weight: 600; }
+  .natb-md img { border-radius: 10px; border: 1px solid var(--border); }
+
+  .natb-md hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 1.4em 0;
+  }
+
+  .natb-md input[type="checkbox"] {
+    margin-right: 0.45em;
+    vertical-align: middle;
+  }
+}
+
+@keyframes natb-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.995); }
+  to { opacity: 1; transform: none; }
+}
+/* ---break---
+ */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
