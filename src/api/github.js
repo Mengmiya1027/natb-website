@@ -56,9 +56,25 @@ export function setToken(token) {
   writeStore(STORAGE_KEYS.token, token || null)
 }
 
+/* clearToken 可能由任意一次 401 触发，而 Pinia 里的登录态是另一份内存副本。
+ * 不同步清掉的话会出现「顶栏还显示已登录、实际请求却不带凭据」的错位。 */
+const tokenClearedListeners = new Set()
+
+export function onTokenCleared(fn) {
+  tokenClearedListeners.add(fn)
+  return () => tokenClearedListeners.delete(fn)
+}
+
 export function clearToken() {
   writeStore(STORAGE_KEYS.token, null)
   writeStore(STORAGE_KEYS.user, null)
+  for (const fn of tokenClearedListeners) {
+    try {
+      fn()
+    } catch {
+      /* 监听方自己出错不该影响清凭据 */
+    }
+  }
 }
 
 export function getProxyBase() {

@@ -12,6 +12,7 @@ import {
   setProxyBase,
   getRateLimit,
   GitHubError,
+  onTokenCleared,
 } from '@/api/github'
 import { startDeviceFlow, pollDeviceToken, isDeviceFlowAvailable } from '@/api/oauth'
 import {
@@ -53,6 +54,14 @@ export const useIssueStore = defineStore('issue', () => {
   })
 
   /* ---------------- QQ 邮箱身份 ---------------- */
+
+  /* 凭据被 401 清掉时，内存里的登录态必须跟着一起清，否则顶栏会显示一个假的已登录 */
+  onTokenCleared(() => {
+    token.value = ''
+    user.value = null
+    permission.value = ''
+    authState.value = 'idle'
+  })
 
   const qqToken = ref(getQqToken())
   const qqUser = ref(getQqUser())
