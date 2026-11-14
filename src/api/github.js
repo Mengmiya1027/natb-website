@@ -164,7 +164,7 @@ function humanize(status, payload) {
  * path 以 / 开头时拼在 apiBase() 后；以 http 开头时原样使用（用于 GraphQL 之外的特殊端点）。
  */
 export async function gh(path, { method = 'GET', body, auth = true, headers = {}, noCache = false } = {}) {
-  const token = getEffectiveToken()
+  let token = getEffectiveToken()
   const url = /^https?:\/\//.test(path) ? path : apiBase() + path
 
   const useCache = method === 'GET' && body === undefined && !noCache
@@ -174,29 +174,39 @@ export async function gh(path, { method = 'GET', body, auth = true, headers = {}
     if (hit && Date.now() - hit.at < CACHE_TTL) return hit.data
   }
 
-  const h = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    ...headers,
+  const attempt = async () => {
+    const h = {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...headers,
+    }
+    if (auth && token) h.Authorization = `Bearer ${token}`
+    if (body !== undefined) h['Content-Type'] = 'application/json'
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), TIMEOUT)
+    try {
+      return await fetch(url, {
+        method,
+        headers: h,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      throw new GitHubError(0, 'NETWORK', err)
+    } finally {
+      clearTimeout(timer)
+    }
   }
-  if (auth && token) h.Authorization = `Bearer ${token}`
-  if (body !== undefined) h['Content-Type'] = 'application/json'
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT)
+  let res = await attempt()
 
-  let res
-  try {
-    res = await fetch(url, {
-      method,
-      headers: h,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: controller.signal,
-    })
-  } catch (err) {
-    throw new GitHubError(0, 'NETWORK', err)
-  } finally {
-    clearTimeout(timer)
+  /* 本地缓存的 token 失效时，读操作自动降级成匿名重试一次：
+   * 公开仓库本来就允许匿名读，没必要因为一条过期凭据把整页卡成「登录已失效」。 */
+  if (res.status === 401 && method === 'GET' && auth && token) {
+    clearToken()
+    token = ''
+    res = await attempt()
   }
 
   syncRateLimit(res)
