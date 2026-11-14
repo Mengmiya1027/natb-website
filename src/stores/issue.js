@@ -14,6 +14,14 @@ import {
   GitHubError,
 } from '@/api/github'
 import { startDeviceFlow, pollDeviceToken, isDeviceFlowAvailable } from '@/api/oauth'
+import {
+  getQqToken,
+  getQqUser,
+  setQqToken,
+  setQqUser,
+  clearQqSession,
+  fetchMe as fetchQqMe,
+} from '@/api/qqAuth'
 import { OWNER_LOGINS, EXTRA_ADMIN_LOGINS, STORAGE_KEYS } from '@/config/github'
 
 const MANAGE_ROLES = ['admin', 'maintain', 'write']
@@ -44,8 +52,58 @@ export const useIssueStore = defineStore('issue', () => {
     return isOwner.value || EXTRA_ADMIN_LOGINS.includes(user.value?.login)
   })
 
-  /** 能发 issue / 评论就算「可写」，登录用户默认都行 */
-  const canWrite = computed(() => isLoggedIn.value)
+  /* ---------------- QQ 邮箱身份 ---------------- */
+
+  const qqToken = ref(getQqToken())
+  const qqUser = ref(getQqUser())
+  const qqBanned = ref(false)
+  const qqBanUntil = ref(0)
+
+  const isQqLoggedIn = computed(() => Boolean(qqToken.value))
+
+  /** 写操作走谁：GitHub 身份优先，其次是 QQ 身份 */
+  const writeMode = computed(() => {
+    if (isLoggedIn.value) return 'github'
+    if (isQqLoggedIn.value) return 'qq'
+    return 'none'
+  })
+
+  function setQqSession(user, token) {
+    if (token) {
+      setQqToken(token)
+      qqToken.value = token
+    }
+    if (user) {
+      setQqUser(user)
+      qqUser.value = user
+    }
+  }
+
+  function logoutQq() {
+    clearQqSession()
+    qqToken.value = ''
+    qqUser.value = null
+    qqBanned.value = false
+    qqBanUntil.value = 0
+  }
+
+  /** 校验本地 QQ 令牌是否还有效，顺带同步封禁状态 */
+  async function refreshQq() {
+    if (!qqToken.value) return
+    const data = await fetchQqMe()
+    if (!data) {
+      logoutQq()
+      return
+    }
+    qqBanned.value = Boolean(data.banned)
+    qqBanUntil.value = data.until || 0
+    if (data.user) qqUser.value = data.user
+  }
+
+  /** 能发 issue / 评论就算「可写」：GitHub 登录或 QQ 登录都行（被封禁的 QQ 账号不行） */
+  const canWrite = computed(
+    () => isLoggedIn.value || (isQqLoggedIn.value && !qqBanned.value),
+  )
 
   async function bootstrap() {
     if (!token.value) {
@@ -229,6 +287,15 @@ export const useIssueStore = defineStore('issue', () => {
     isOwner,
     canManage,
     canWrite,
+    qqUser,
+    qqToken,
+    qqBanned,
+    qqBanUntil,
+    isQqLoggedIn,
+    writeMode,
+    setQqSession,
+    logoutQq,
+    refreshQq,
     bootstrap,
     refreshPermission,
     loginWithToken,

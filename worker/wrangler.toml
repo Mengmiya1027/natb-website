@@ -3,8 +3,26 @@ main = "index.js"
 compatibility_date = "2025-01-01"
 
 # 允许的站点来源，逗号分隔。留空则用脚本内的默认列表。
+# 三个都要留：github.io 是线上，两个 localhost 是本地开发（缺 127.0.0.1 时本地整页取不到数据）
 [vars]
-ALLOWED_ORIGINS = "https://mengmiya1027.github.io,http://localhost:5173"
+ALLOWED_ORIGINS = "https://mengmiya1027.github.io,http://localhost:5173,http://127.0.0.1:5173"
 
-# 可选：给匿名访客用的只读 token（强烈建议创建一个只勾 public_repo 的细粒度 token）
-# 用 wrangler secret put GITHUB_READ_TOKEN 写入，不要写在这个文件里
+# QQ 邮箱身份（GitHub App）
+GITHUB_APP_ID = "5755011"
+GITHUB_INSTALLATION_ID = "181823056"
+RESEND_FROM_EMAIL = "noreply@mail.wgdocs.ddns-ip.net"
+RESEND_FROM_NAME = "NATB Issue"
+
+# KV：存验证码、限流计数、用户档案、封禁标记
+[[kv_namespaces]]
+binding = "NATB_KV"
+id = "4e8a55fc75394b5396ca11056abb54d5"
+
+# 密钥（不要写进本文件）：用 wrangler secret put 写入
+#   GITHUB_READ_TOKEN        匿名访客的只读 token
+#   GITHUB_APP_PRIVATE_KEY   GitHub App 的 pem 全文（PKCS#1，整段含 BEGIN/END 行）
+#   RESEND_API_KEY           re_ 开头
+#   SESSION_SECRET           会话签名密钥，随机 48 字节 base64
+#
+# ⚠️ 用 wrangler deploy 部署会以本文件为准，Dashboard 里手工加的变量会被覆盖；
+#    两边要保持一致。只改 Dashboard 不改这里，下次 wrangler deploy 就会丢配置。
