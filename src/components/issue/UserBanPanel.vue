@@ -133,7 +133,8 @@ onMounted(load)
         <Skeleton v-for="i in 4" :key="i" class="h-12 w-full rounded-lg" />
       </div>
 
-      <p v-else-if="!users.length" class="text-muted-foreground py-8 text-center text-xs">
+      <!-- 加载失败时不要再显示「还没有用户」，否则错误被伪装成空数据 -->
+      <p v-else-if="!users.length && !error" class="text-muted-foreground py-8 text-center text-xs">
         还没有 QQ 用户发过言
       </p>
 
