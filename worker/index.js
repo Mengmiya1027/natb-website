@@ -421,7 +421,10 @@ async function handleIssueMeta(env, request, url, match) {
     }
   }
 
-  const isAdmin = await callerIsAdmin(env, login, login ? raw : '')
+  // 两种身份各自查角色：GitHub 用本人 token 查协作者，QQ 用授予角色或绑定账号
+  const isAdmin = login
+    ? await callerIsAdmin(env, login, raw)
+    : await qqCallerIsAdmin(env, sub)
   const isAuthor = Boolean(
     (sub && ownerSub && sub === ownerSub) ||
       (login && issue.user && issue.user.login && issue.user.login.toLowerCase() === login.toLowerCase()),
@@ -457,16 +460,53 @@ async function handleIssueMeta(env, request, url, match) {
   return json({ ok: true, issue: { labels: updated.labels || [], milestone: updated.milestone || null, assignees: updated.assignees || [] } }, 200, origin, env)
 }
 
+
+/**
+ * 解析一个身份在本仓库里的角色，返回 'admin' / 'maintain' / 'write' / 'triage' / 'read' / ''
+ * 与登录方式无关：GitHub 身份查它自己的 permission，QQ 身份查「授予的角色」或「绑定账号的角色」。
+ */
+async function resolveQqRole(env, sub) {
+  // 1) 管理员直接授予这个身份的角色（将来管理面板里可以给人授权）
+  const granted = await env.NATB_KV.get('role:' + sub)
+  if (granted) return String(granted)
+  // 2) 这个身份绑定的 GitHub 账号在仓库里的角色
+  const boundLogin = await env.NATB_KV.get('bind:' + sub)
+  if (!boundLogin) return ''
+  return await roleOfLogin(env, boundLogin)
+}
+
+/** 用 App 的 installation token 查某个 GitHub 账号在本仓库的角色 */
+async function roleOfLogin(env, login) {
+  if (!login) return ''
+  try {
+    const token = await installationToken(env)
+    const res = await fetch(
+      'https://api.github.com/repos/' + QQ_REPO + '/collaborators/' + encodeURIComponent(login) + '/permission',
+      {
+        headers: {
+          Authorization: 'Bearer ' + token,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'natb-issue-proxy',
+        },
+      },
+    )
+    if (!res.ok) return ''
+    const data = await res.json()
+    return data && data.permission ? String(data.permission) : ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * QQ 身份是否有维护者权限。
- * 目前 QQ 身份还没有和 GitHub 账号绑定，所以恒为 false —— 这不是「QQ 用户低一等」，
- * 而是「这个身份背后暂时没有可查的仓库角色」。做双向绑定后，在这里读
- * bind:<sub> 拿到 GitHub login，再走 callerIsAdmin 即可，其余调用方不用改。
+ * 角色来源有两种：管理员直接授予（role:<sub>），或绑定了的 GitHub 账号在仓库里的角色（bind:<sub>）。
+ * 目前两者都没有记录，所以恒为 false —— 这是「这个身份暂时没有可查的角色」，
+ * 而不是「QQ 用户低一等」。
  */
 async function qqCallerIsAdmin(env, sub) {
-  const boundLogin = await env.NATB_KV.get('bind:' + sub)
-  if (!boundLogin) return false
-  return callerIsAdmin(env, boundLogin, '')
+  const role = await resolveQqRole(env, sub)
+  return MANAGE_ROLES.includes(role)
 }
 
 /** 判断这个 GitHub 账号是不是「管理」：拥有者白名单，或该仓库的 admin/maintain/write 协作者 */
@@ -700,6 +740,7 @@ async function handleAuth(env, request, url, cors) {
         token,
         exp,
         user: { sub, nick: finalNick, masked },
+        role: await resolveQqRole(env, sub),
         banned: isBanned,
         until: isBanned ? ban.until : 0,
         reason: isBanned ? ban.reason || '' : '',
@@ -756,6 +797,7 @@ async function handleAuth(env, request, url, cors) {
           issues: profile.issues || 0,
           comments: profile.comments || 0,
         },
+        role: await resolveQqRole(env, session.sub),
         banned: Boolean(banned),
         until: banned ? ban.until : 0,
         reason: banned ? ban.reason || '' : '',

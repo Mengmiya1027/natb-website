@@ -189,6 +189,7 @@ async function verifyQqCode() {
   try {
     const data = await verifyQqCodeMail(qqEmail.value.trim(), qqCode.value.trim())
     store.setQqSession(data.user, data.token)
+    store.applyQqRole(data.role)
     authOpenModel.value = false
     qqCode.value = ''
 

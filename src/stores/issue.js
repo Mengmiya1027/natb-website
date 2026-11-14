@@ -50,9 +50,16 @@ export const useIssueStore = defineStore('issue', () => {
    * 这一处，canManage 与所有下游判断都会自动跟上，不需要改调用方。
    */
   const canManage = computed(() => {
-    if (MANAGE_ROLES.includes(permission.value)) return true
-    if (permission.value) return false
-    return isOwner.value || EXTRA_ADMIN_LOGINS.includes(user.value?.login)
+    /* 两种身份各自解析出「在这个仓库的角色」，再看是否落在管理档位里——
+     * 与用哪种方式登录无关，QQ 身份同样可能是管理（授予角色或绑定账号）。 */
+    if (isLoggedIn.value) {
+      if (MANAGE_ROLES.includes(permission.value)) return true
+      if (permission.value) return false
+      // GitHub 的 permission 还没取到时，用拥有者白名单兜一次
+      if (isOwner.value || EXTRA_ADMIN_LOGINS.includes(user.value?.login)) return true
+    }
+    if (isQqLoggedIn.value && MANAGE_ROLES.includes(qqRole.value)) return true
+    return false
   })
 
   /* ---------------- QQ 邮箱身份 ---------------- */
@@ -70,6 +77,8 @@ export const useIssueStore = defineStore('issue', () => {
   const qqBanned = ref(false)
   const qqBanUntil = ref(0)
   const qqBanReason = ref('')
+  /** 这个 QQ 身份在本仓库的角色，由服务端解析（授予的角色或绑定账号的角色） */
+  const qqRole = ref('')
 
   const isQqLoggedIn = computed(() => Boolean(qqToken.value))
 
@@ -107,6 +116,11 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanReason.value = reason || ''
   }
 
+  /** 登录响应里带着角色，省一次 /auth/me */
+  function applyQqRole(role) {
+    qqRole.value = role || ''
+  }
+
   /** 校验本地 QQ 令牌是否还有效，顺带同步封禁状态 */
   async function refreshQq() {
     if (!qqToken.value) return
@@ -118,6 +132,7 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanned.value = Boolean(data.banned)
     qqBanUntil.value = data.until || 0
     qqBanReason.value = data.reason || ''
+    qqRole.value = data.role || ''
     if (data.user) qqUser.value = data.user
   }
 
@@ -313,6 +328,8 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanned,
     qqBanUntil,
     qqBanReason,
+    qqRole,
+    applyQqRole,
     isQqLoggedIn,
     writeMode,
     setQqSession,
