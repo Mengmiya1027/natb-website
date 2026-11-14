@@ -24,7 +24,7 @@ import IconSquarePen from '~icons/lucide/square-pen'
 import IconLock from '~icons/lucide/lock'
 import IconLoader2 from '~icons/lucide/loader-2'
 import IconTriangleAlert from '~icons/lucide/triangle-alert'
-import IconBan from '~icons/lucide/ban'
+import DisabledPicker from './DisabledPicker.vue'
 
 const emit = defineEmits(['created', 'cancel'])
 
@@ -274,16 +274,8 @@ async function submit() {
         </div>
         <div class="flex flex-col gap-1.5">
           <Label class="text-xs text-muted-foreground">指派给</Label>
-          <div v-if="canAssign">
-            <AssigneePicker v-model="assignees" />
-          </div>
-          <div v-else class="pointer-events-none opacity-60">
-            <AssigneePicker v-model="assignees" />
-          </div>
-          <p v-if="!canAssign" class="text-muted-foreground flex items-center gap-1 text-[11px]">
-            <IconBan class="size-3 shrink-0" />
-            你没有管理员权限
-          </p>
+          <AssigneePicker v-if="canAssign" v-model="assignees" />
+          <DisabledPicker v-else />
         </div>
         <div class="flex flex-col gap-1.5">
           <Label class="text-xs text-muted-foreground">里程碑</Label>

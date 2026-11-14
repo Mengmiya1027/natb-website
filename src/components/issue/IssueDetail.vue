@@ -12,6 +12,7 @@ import { githubApi, githubWriteApi } from '@/api/github'
 import { qqWriteApi } from '@/api/qqWrite'
 import { updateIssueMeta } from '@/api/issueMeta'
 import QqBanDialog from './QqBanDialog.vue'
+import DisabledPicker from './DisabledPicker.vue'
 import { useIssueStore } from '@/stores/issue'
 
 import MarkdownView from './MarkdownView.vue'
@@ -50,7 +51,6 @@ import IconExternalLink from '~icons/lucide/external-link'
 import IconLoader from '~icons/lucide/loader-circle'
 import IconLock from '~icons/lucide/lock'
 import IconInfo from '~icons/lucide/info'
-import IconBan from '~icons/lucide/ban'
 import IconMessageSquare from '~icons/lucide/message-square'
 import IconMilestone from '~icons/lucide/milestone'
 import IconTag from '~icons/lucide/tag'
@@ -545,16 +545,8 @@ async function onSidebarChanged() {
             <IconLoader v-if="savingField === 'labels'" class="natb-side__spin size-3" />
           </h2>
           <template v-if="store.canWrite">
-            <div :class="canEditTags ? '' : 'pointer-events-none opacity-60'">
-              <LabelPicker v-model="labels" />
-            </div>
-            <p
-              v-if="!canEditTags"
-              class="text-muted-foreground mt-1.5 flex items-center gap-1 text-[11px]"
-            >
-              <IconBan class="size-3 shrink-0" />
-              你没有管理员权限
-            </p>
+            <LabelPicker v-if="canEditTags" v-model="labels" />
+            <DisabledPicker v-else />
           </template>
           <div v-else class="natb-side__labels">
             <Badge v-for="label in labelObjects" :key="label.name" variant="outline" class="gap-1.5">
@@ -576,16 +568,8 @@ async function onSidebarChanged() {
             <IconLoader v-if="savingField === 'assignees'" class="natb-side__spin size-3" />
           </h2>
           <template v-if="store.canWrite">
-            <div :class="canEditAssignees ? '' : 'pointer-events-none opacity-60'">
-              <AssigneePicker v-model="assignees" />
-            </div>
-            <p
-              v-if="!canEditAssignees"
-              class="text-muted-foreground mt-1.5 flex items-center gap-1 text-[11px]"
-            >
-              <IconBan class="size-3 shrink-0" />
-              你没有管理员权限
-            </p>
+            <AssigneePicker v-if="canEditAssignees" v-model="assignees" />
+            <DisabledPicker v-else />
           </template>
           <div v-else class="natb-side__people">
             <span v-for="user in assigneeList" :key="user.login" class="natb-side__person">
@@ -606,16 +590,8 @@ async function onSidebarChanged() {
             <IconLoader v-if="savingField === 'milestone'" class="natb-side__spin size-3" />
           </h2>
           <template v-if="store.canWrite">
-            <div :class="canEditTags ? '' : 'pointer-events-none opacity-60'">
-              <MilestonePicker v-model="milestone" />
-            </div>
-            <p
-              v-if="!canEditTags"
-              class="text-muted-foreground mt-1.5 flex items-center gap-1 text-[11px]"
-            >
-              <IconBan class="size-3 shrink-0" />
-              你没有管理员权限
-            </p>
+            <MilestonePicker v-if="canEditTags" v-model="milestone" />
+            <DisabledPicker v-else />
           </template>
           <div v-else class="natb-side__milestone">
             <template v-if="milestoneInfo">
