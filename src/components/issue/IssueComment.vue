@@ -60,12 +60,21 @@ const cleanBody = computed(() => stripQqMarker(props.comment?.body))
 const createdAt = computed(() => props.comment?.created_at || '')
 const updatedAt = computed(() => props.comment?.updated_at || createdAt.value)
 
-/** 只有作者本人能编辑 / 删除 */
+/** 作者本人（GitHub 身份） */
 const isAuthor = computed(() => {
   const me = store.user?.login
   if (!store.isLoggedIn || !me) return false
   return String(me).toLowerCase() === String(login.value).toLowerCase()
 })
+
+/** 这条评论是当前 QQ 账号发的 */
+const qqOwnComment = computed(
+  () => Boolean(qqMarker.value?.sub && store.qqUser?.sub && qqMarker.value.sub === store.qqUser.sub),
+)
+
+/** 编辑只给作者本人；删除额外给管理员（可以删别人的） */
+const canEdit = computed(() => isAuthor.value || qqOwnComment.value)
+const canDelete = computed(() => canEdit.value || store.canManage)
 
 /** 时间线里的编辑记录（GitHub 对评论编辑通常只反映在 updated_at 上，两者都认） */
 const editedFromEvents = computed(() => {
@@ -202,16 +211,17 @@ function requestReply() {
           <IconReply class="size-3.5" />
         </button>
 
-        <template v-if="isAuthor">
-          <button
-            type="button"
-            class="natb-comment__action"
-            title="编辑评论"
-            @click="startEdit"
-          >
-            <IconPencil class="size-3.5" />
-          </button>
+        <button
+          v-if="canEdit"
+          type="button"
+          class="natb-comment__action"
+          title="编辑评论"
+          @click="startEdit"
+        >
+          <IconPencil class="size-3.5" />
+        </button>
 
+        <template v-if="canDelete">
           <AlertDialog>
             <AlertDialogTrigger as-child>
               <button type="button" class="natb-comment__action natb-comment__action--danger" title="删除评论">

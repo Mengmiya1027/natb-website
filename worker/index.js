@@ -706,6 +706,49 @@ async function handleQq(env, request, url, cors) {
     return json({ ok: true, id: comment.id }, 201, origin, env)
   }
 
+
+  const deleteIssueMatch = url.pathname.match(/^\/qq\/issue\/(\d+)$/)
+  if (deleteIssueMatch && request.method === 'DELETE') {
+    const number = Number(deleteIssueMatch[1])
+    const issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
+    const marker = String(issue.body || '').match(/<!-- natb:qq (\{.*?\}) -->/)
+    let owner = null
+    if (marker) {
+      try {
+        owner = JSON.parse(marker[1]).sub
+      } catch {
+        owner = null
+      }
+    }
+    if (owner !== session.sub) {
+      return json({ error: 'forbidden', message: '只能删除自己发的 issue' }, 403, origin, env)
+    }
+    await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'DELETE' })
+    return json({ ok: true }, 200, origin, env)
+  }
+
+  const commentDeleteMatch = url.pathname.match(/^\/qq\/comment\/(\d+)$/)
+  if (commentDeleteMatch && request.method === 'DELETE') {
+    const commentId = Number(commentDeleteMatch[1])
+    const comment = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
+      method: 'GET',
+    })
+    const marker = String(comment.body || '').match(/<!-- natb:qq (\{.*?\}) -->/)
+    let owner = null
+    if (marker) {
+      try {
+        owner = JSON.parse(marker[1]).sub
+      } catch {
+        owner = null
+      }
+    }
+    if (owner !== session.sub) {
+      return json({ error: 'forbidden', message: '只能删除自己发的评论' }, 403, origin, env)
+    }
+    await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, { method: 'DELETE' })
+    return json({ ok: true }, 200, origin, env)
+  }
+
   const closeMatch = url.pathname.match(/^\/qq\/issue\/(\d+)$/)
   if (closeMatch && request.method === 'PATCH') {
     const number = Number(closeMatch[1])

@@ -37,9 +37,11 @@ import IconCircleDot from '~icons/lucide/circle-dot'
 import IconExternalLink from '~icons/lucide/external-link'
 import IconLoader from '~icons/lucide/loader-circle'
 import IconLock from '~icons/lucide/lock'
+import IconInfo from '~icons/lucide/info'
 import IconMessageSquare from '~icons/lucide/message-square'
 import IconMilestone from '~icons/lucide/milestone'
 import IconTag from '~icons/lucide/tag'
+import IconTrash2 from '~icons/lucide/trash-2'
 import IconUsers from '~icons/lucide/users'
 
 const props = defineProps({
@@ -125,7 +127,22 @@ const canQqClose = computed(
   () => store.writeMode === 'qq' && qqOwnIssue.value && issue.value?.state === 'open',
 )
 const qqClosing = ref(false)
+const qqDeleting = ref(false)
 const banOpen = ref(false)
+
+async function deleteOwnIssue() {
+  if (qqDeleting.value) return
+  qqDeleting.value = true
+  try {
+    await qqWriteApi.deleteIssue(issue.value.number)
+    toast.success('Issue 已删除')
+    emit('back')
+  } catch (err) {
+    toast.error(err?.message || String(err))
+  } finally {
+    qqDeleting.value = false
+  }
+}
 
 async function closeOwnIssue() {
   if (!canQqClose.value || qqClosing.value) return
@@ -314,7 +331,9 @@ async function onEditComment(id, body) {
 
 async function onDeleteComment(id) {
   try {
-    await githubWriteApi.deleteComment(id)
+    // QQ 身份走中转代删，管理员与 GitHub 用户直接走 GitHub
+    if (store.writeMode === 'qq' && !store.canManage) await qqWriteApi.deleteComment(id)
+    else await githubWriteApi.deleteComment(id)
     comments.value = comments.value.filter((comment) => comment.id !== id)
     toast.success('评论已删除')
     emit('changed')
@@ -485,7 +504,8 @@ async function onSidebarChanged() {
             <IconLock class="size-4" />
             <template v-if="store.qqBanned">
               <span>这个 QQ 账号已被封禁，暂时不能参与讨论</span>
-              <Button variant="link" size="xs" class="h-auto px-1 text-xs" @click="banOpen = true">
+              <Button size="sm" class="h-8 gap-1.5 rounded-lg px-3.5 text-[13px]" @click="banOpen = true">
+                <IconInfo class="size-3.5" />
                 了解详情
               </Button>
             </template>
@@ -570,6 +590,16 @@ async function onSidebarChanged() {
               {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
             </Button>
             <p v-else class="text-muted-foreground text-xs">已关闭。</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="text-destructive w-full gap-1.5"
+              :disabled="qqDeleting"
+              @click="deleteOwnIssue"
+            >
+              <IconTrash2 class="size-4" />
+              {{ qqDeleting ? '正在删除…' : '删除这个 issue' }}
+            </Button>
           </div>
         </section>
 
@@ -730,7 +760,9 @@ async function onSidebarChanged() {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 16px;
+  /* 固定高度：加一个按钮进来也不该把这条挤高 */
+  min-height: 52px;
+  padding: 0 16px;
   border-radius: 14px;
   border: 1px dashed var(--natb-border);
   color: var(--natb-muted-foreground);

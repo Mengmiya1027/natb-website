@@ -43,4 +43,6 @@ export const qqWriteApi = {
   createComment: (number, body) =>
     request('/qq/issue/' + number + '/comment', { method: 'POST', body: { body } }),
   closeIssue: (number) => request('/qq/issue/' + number, { method: 'PATCH', body: { state: 'closed' } }),
+  deleteIssue: (number) => request('/qq/issue/' + number, { method: 'DELETE' }),
+  deleteComment: (commentId) => request('/qq/comment/' + commentId, { method: 'DELETE' }),
 }
