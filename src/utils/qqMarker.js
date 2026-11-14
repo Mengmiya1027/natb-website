@@ -16,9 +16,12 @@ export function parseQqMarker(body) {
   }
 }
 
-/** 去掉标记本身以及它前面多余的换行，避免正文末尾留一块空白 */
+/** 去掉隐藏标记与那行可见署名，避免正文末尾留一块空白 */
 export function stripQqMarker(body) {
-  return String(body || '').replace(/\s*<!--\s*natb:qq\s+\{[\s\S]*?\}\s*-->\s*$/, '')
+  return String(body || '')
+    .replace(/\s*<sub>QQ 用户[\s\S]*?通过 NATB 官网提交<\/sub>\s*/, '')
+    .replace(/\s*<!--\s*natb:qq\s+\{[\s\S]*?\}\s*-->\s*$/, '')
+    .trimEnd()
 }
 
 /** 作者显示名：QQ 用户优先，否则退回 GitHub login */

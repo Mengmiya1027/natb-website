@@ -353,12 +353,16 @@ async function requireWriter(env, request, cors) {
   return { session }
 }
 
+/**
+ * 身份尾巴。GitHub 不渲染 HTML 注释，所以光埋注释的话在 GitHub 页面上
+ * 只能看到一个 bot，看不出是谁发的。因此再加一行给 <sub> 的可见署名，
+ * 前端渲染时连同注释一起剥掉（那边已经有作者名了，不需要重复）。
+ */
 function qqMarker(session, masked) {
-  return (
-    '\n\n<!-- natb:qq ' +
-    JSON.stringify({ sub: session.sub, nick: session.nick || '', masked }) +
-    ' -->\n'
-  )
+  const nick = session.nick || '匿名用户'
+  const meta = JSON.stringify({ sub: session.sub, nick, masked: masked || '' })
+  const visible = '<sub>QQ 用户 ' + nick + (masked ? '（' + masked + '）' : '') + ' 通过 NATB 官网提交</sub>'
+  return '\n\n' + visible + '\n<!-- natb:qq ' + meta + ' -->\n'
 }
 
 
