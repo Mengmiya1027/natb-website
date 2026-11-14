@@ -10,6 +10,7 @@ import { toast } from 'vue-sonner'
 
 import { githubApi, githubWriteApi } from '@/api/github'
 import { qqWriteApi } from '@/api/qqWrite'
+import { updateIssueMeta } from '@/api/issueMeta'
 import QqBanDialog from './QqBanDialog.vue'
 import { useIssueStore } from '@/stores/issue'
 
@@ -49,6 +50,7 @@ import IconExternalLink from '~icons/lucide/external-link'
 import IconLoader from '~icons/lucide/loader-circle'
 import IconLock from '~icons/lucide/lock'
 import IconInfo from '~icons/lucide/info'
+import IconBan from '~icons/lucide/ban'
 import IconMessageSquare from '~icons/lucide/message-square'
 import IconMilestone from '~icons/lucide/milestone'
 import IconTag from '~icons/lucide/tag'
@@ -262,6 +264,18 @@ async function reloadThread() {
 
 /* ---------------- 侧栏写入 ---------------- */
 
+/* 管理 = 拥有者 + 协作者；其余都算非管理。
+ * 非管理里的作者本人可以改自己单的标签与里程碑，指派始终只给管理。 */
+const isIssueAuthor = computed(() => {
+  const marker = qqMarker.value
+  if (marker?.sub && store.qqUser?.sub) return marker.sub === store.qqUser.sub
+  const me = store.user?.login
+  const owner = issue.value?.user?.login
+  return Boolean(me && owner && String(me).toLowerCase() === String(owner).toLowerCase())
+})
+const canEditTags = computed(() => store.canManage || isIssueAuthor.value)
+const canEditAssignees = computed(() => store.canManage)
+
 watch(labels, async (next) => {
   if (!issue.value) return
   const current = toLabelNames(issue.value.labels)
@@ -270,11 +284,8 @@ watch(labels, async (next) => {
 
   savingField.value = 'labels'
   try {
-    const updated = await githubWriteApi.setLabels(props.number, nextNames)
-    issue.value = {
-      ...issue.value,
-      labels: Array.isArray(updated) ? updated : nextNames.map((name) => ({ name })),
-    }
+    const data = await updateIssueMeta(props.number, { labels: nextNames })
+    issue.value = { ...issue.value, labels: data?.issue?.labels || [] }
     toast.success('标签已更新')
     emit('changed')
   } catch (err) {
@@ -293,8 +304,8 @@ watch(assignees, async (next) => {
 
   savingField.value = 'assignees'
   try {
-    const updated = await githubWriteApi.setAssignees(props.number, nextLogins)
-    issue.value = { ...issue.value, ...(updated || {}), assignees: updated?.assignees || [] }
+    const data = await updateIssueMeta(props.number, { assignees: nextLogins })
+    issue.value = { ...issue.value, assignees: data?.issue?.assignees || [] }
     toast.success(nextLogins.length ? '指派已更新' : '已清空指派')
     emit('changed')
   } catch (err) {
@@ -313,8 +324,8 @@ watch(milestone, async (next) => {
 
   savingField.value = 'milestone'
   try {
-    const updated = await githubWriteApi.updateIssue(props.number, { milestone: nextValue })
-    issue.value = { ...issue.value, ...(updated || {}), milestone: updated?.milestone ?? null }
+    const data = await updateIssueMeta(props.number, { milestone: nextValue })
+    issue.value = { ...issue.value, milestone: data?.issue?.milestone ?? null }
     toast.success('里程碑已更新')
     emit('changed')
   } catch (err) {
@@ -533,7 +544,18 @@ async function onSidebarChanged() {
             标签
             <IconLoader v-if="savingField === 'labels'" class="natb-side__spin size-3" />
           </h2>
-          <LabelPicker v-if="store.canWrite" v-model="labels" />
+          <template v-if="store.canWrite">
+            <div :class="canEditTags ? '' : 'pointer-events-none opacity-60'">
+              <LabelPicker v-model="labels" />
+            </div>
+            <p
+              v-if="!canEditTags"
+              class="text-muted-foreground mt-1.5 flex items-center gap-1 text-[11px]"
+            >
+              <IconBan class="size-3 shrink-0" />
+              你没有管理员权限
+            </p>
+          </template>
           <div v-else class="natb-side__labels">
             <Badge v-for="label in labelObjects" :key="label.name" variant="outline" class="gap-1.5">
               <span
@@ -553,7 +575,18 @@ async function onSidebarChanged() {
             指派
             <IconLoader v-if="savingField === 'assignees'" class="natb-side__spin size-3" />
           </h2>
-          <AssigneePicker v-if="store.canWrite" v-model="assignees" />
+          <template v-if="store.canWrite">
+            <div :class="canEditAssignees ? '' : 'pointer-events-none opacity-60'">
+              <AssigneePicker v-model="assignees" />
+            </div>
+            <p
+              v-if="!canEditAssignees"
+              class="text-muted-foreground mt-1.5 flex items-center gap-1 text-[11px]"
+            >
+              <IconBan class="size-3 shrink-0" />
+              你没有管理员权限
+            </p>
+          </template>
           <div v-else class="natb-side__people">
             <span v-for="user in assigneeList" :key="user.login" class="natb-side__person">
               <Avatar class="size-5">
@@ -572,7 +605,18 @@ async function onSidebarChanged() {
             里程碑
             <IconLoader v-if="savingField === 'milestone'" class="natb-side__spin size-3" />
           </h2>
-          <MilestonePicker v-if="store.canWrite" v-model="milestone" />
+          <template v-if="store.canWrite">
+            <div :class="canEditTags ? '' : 'pointer-events-none opacity-60'">
+              <MilestonePicker v-model="milestone" />
+            </div>
+            <p
+              v-if="!canEditTags"
+              class="text-muted-foreground mt-1.5 flex items-center gap-1 text-[11px]"
+            >
+              <IconBan class="size-3 shrink-0" />
+              你没有管理员权限
+            </p>
+          </template>
           <div v-else class="natb-side__milestone">
             <template v-if="milestoneInfo">
               <span class="natb-side__milestone-title">{{ milestoneInfo.title }}</span>

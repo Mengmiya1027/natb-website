@@ -366,6 +366,122 @@ function qqMarker(session, masked) {
 }
 
 
+
+/**
+ * 统一的「改 issue 元信息」入口：标签 / 里程碑 / 指派。
+ *
+ * 身份规则（管理 = 拥有者 + 协作者，其余都算非管理）：
+ *   - 管理：三项都能改
+ *   - 非管理中的作者本人：只能改标签与里程碑
+ *   - 非管理中的其他人：一律 403
+ * 令牌由这一个端点自行分辨：含点的 base64url.base64url 是本站签发的 QQ 令牌，
+ * 其余按 GitHub token 处理，这样前端只需要一个调用点。
+ */
+async function handleIssueMeta(env, request, url, match) {
+  const origin = request.headers.get('Origin') || ''
+  const number = Number(match[1])
+  const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+  if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
+
+  let sub = null
+  let login = null
+  let session = null
+
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) {
+    session = await verifySession(env, request)
+    if (!session) return json({ error: 'unauthorized', message: 'QQ 登录已失效' }, 401, origin, env)
+    sub = session.sub
+    const ban = await kvJson(env, 'ban:' + sub)
+    if (ban && (ban.until === 0 || ban.until > Date.now())) {
+      return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
+    }
+    const used = await bump(env, 'rl:' + sub + ':' + minuteBucket(), 120)
+    if (used > WRITE_LIMIT_PER_MIN) {
+      return json({ error: 'rate_limited', limit: WRITE_LIMIT_PER_MIN, window: 60 }, 429, origin, env)
+    }
+  } else {
+    const meRes = await fetch('https://api.github.com/user', {
+      headers: { Authorization: raw, Accept: 'application/vnd.github+json', 'User-Agent': 'natb-issue-proxy' },
+    })
+    if (meRes.status === 401) return json({ error: 'token_invalid', message: 'GitHub 登录已失效' }, 401, origin, env)
+    if (!meRes.ok) return json({ error: 'github_unreachable' }, 502, origin, env)
+    const me = await meRes.json()
+    login = me && me.login
+    if (!login) return json({ error: 'token_invalid' }, 401, origin, env)
+  }
+
+  const issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
+  const marker = String(issue.body || '').match(/<!-- natb:qq (\{.*?\}) -->/)
+  let ownerSub = null
+  if (marker) {
+    try {
+      ownerSub = JSON.parse(marker[1]).sub
+    } catch {
+      ownerSub = null
+    }
+  }
+
+  const isAdmin = await callerIsAdmin(env, login, login ? raw : '')
+  const isAuthor = Boolean(
+    (sub && ownerSub && sub === ownerSub) ||
+      (login && issue.user && issue.user.login && issue.user.login.toLowerCase() === login.toLowerCase()),
+  )
+
+  if (!isAdmin && !isAuthor) {
+    return json({ error: 'forbidden', message: '你没有管理员权限' }, 403, origin, env)
+  }
+
+  const body = (await readJsonBody(request)) || {}
+  const patch = {}
+
+  if (Array.isArray(body.labels)) {
+    if (!isAdmin && !isAuthor) return json({ error: 'forbidden' }, 403, origin, env)
+    patch.labels = body.labels.slice(0, 5)
+  }
+  if (body.milestone !== undefined) {
+    patch.milestone = body.milestone || null
+  }
+  if (body.assignees !== undefined) {
+    if (!isAdmin) {
+      return json({ error: 'forbidden', message: '只有管理员能改指派' }, 403, origin, env)
+    }
+    patch.assignees = Array.isArray(body.assignees) ? body.assignees.slice(0, 5) : []
+  }
+
+  if (!Object.keys(patch).length) return json({ error: 'nothing_to_update' }, 400, origin, env)
+
+  const updated = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+  return json({ ok: true, issue: { labels: updated.labels || [], milestone: updated.milestone || null, assignees: updated.assignees || [] } }, 200, origin, env)
+}
+
+/** 判断这个 GitHub 账号是不是「管理」：拥有者白名单，或该仓库的 admin/maintain/write 协作者 */
+async function callerIsAdmin(env, login, token) {
+  if (!login) return false
+  const ownerLogins = String(env.ADMIN_LOGINS || 'Mengmiya1027')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (ownerLogins.includes(login)) return true
+  if (!token) return false
+
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/' + QQ_REPO + '/collaborators/' + encodeURIComponent(login) + '/permission',
+      {
+        headers: { Authorization: token, Accept: 'application/vnd.github+json', 'User-Agent': 'natb-issue-proxy' },
+      },
+    )
+    if (!res.ok) return false
+    const perm = await res.json()
+    return Boolean(perm && MANAGE_ROLES.includes(perm.permission))
+  } catch {
+    return false
+  }
+}
+
 /* ---------------- 管理端：用户与封禁 ---------------- */
 
 const MANAGE_ROLES = ['admin', 'maintain', 'write']
@@ -804,6 +920,10 @@ export default {
       }
       if (url.pathname.startsWith('/admin/')) {
         return await handleAdmin(env, request, url)
+      }
+      const metaMatch = url.pathname.match(/^\/issue\/(\d+)\/meta$/)
+      if (metaMatch && request.method === 'PATCH') {
+        return await handleIssueMeta(env, request, url, metaMatch)
       }
       if (url.pathname === '/' || url.pathname === '/health') {
         return json({ ok: true, service: 'natb-issue-proxy' }, 200, origin, env)
