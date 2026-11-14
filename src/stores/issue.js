@@ -43,9 +43,11 @@ export const useIssueStore = defineStore('issue', () => {
   const isOwner = computed(() => OWNER_LOGINS.includes(user.value?.login))
 
   /**
-   * 管理权的判定以 GitHub 返回的仓库角色为准，而不是「谁拥有这个仓库」：
-   * 拥有者、协作者、被授予 triage/maintain 的外部成员，都应该能进管理面板。
-   * 只有接口没给出角色时（未登录、请求失败），才回落到 OWNER_LOGINS 白名单。
+   * 管理权的判定以「这个人在这仓库里是什么角色」为准，与用什么方式登录无关：
+   * 拥有者、协作者（含 maintain / write）都算管理。
+   * 目前 QQ 身份还没有和 GitHub 账号绑定，所以 QQ 登录时 permission 为空、落到非管理；
+   * 将来做双向绑定后，只要在 refreshQq / bootstrap 里把绑定账号的角色写进 permission
+   * 这一处，canManage 与所有下游判断都会自动跟上，不需要改调用方。
    */
   const canManage = computed(() => {
     if (MANAGE_ROLES.includes(permission.value)) return true

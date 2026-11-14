@@ -24,6 +24,7 @@ import IconSquarePen from '~icons/lucide/square-pen'
 import IconLock from '~icons/lucide/lock'
 import IconLoader2 from '~icons/lucide/loader-2'
 import IconTriangleAlert from '~icons/lucide/triangle-alert'
+import IconBan from '~icons/lucide/ban'
 
 const emit = defineEmits(['created', 'cancel'])
 
@@ -45,6 +46,9 @@ const canSubmit = computed(() => Boolean(title.value.trim()) && !submitting.valu
 
 /** QQ 身份没有自己的 GitHub 账号，写操作走中转代发 */
 const writeApi = computed(() => (store.writeMode === 'qq' ? qqWriteApi : githubWriteApi))
+
+/** 指派是把活派给别人，属于维护者职权：按角色判断，不看用什么方式登录 */
+const canAssign = computed(() => store.canManage)
 
 /* ---------------- 前置选择带来的预填 ---------------- */
 
@@ -270,7 +274,16 @@ async function submit() {
         </div>
         <div class="flex flex-col gap-1.5">
           <Label class="text-xs text-muted-foreground">指派给</Label>
-          <AssigneePicker v-model="assignees" />
+          <div v-if="canAssign">
+            <AssigneePicker v-model="assignees" />
+          </div>
+          <div v-else class="pointer-events-none opacity-60">
+            <AssigneePicker v-model="assignees" />
+          </div>
+          <p v-if="!canAssign" class="text-muted-foreground flex items-center gap-1 text-[11px]">
+            <IconBan class="size-3 shrink-0" />
+            你没有管理员权限
+          </p>
         </div>
         <div class="flex flex-col gap-1.5">
           <Label class="text-xs text-muted-foreground">里程碑</Label>

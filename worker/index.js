@@ -457,6 +457,18 @@ async function handleIssueMeta(env, request, url, match) {
   return json({ ok: true, issue: { labels: updated.labels || [], milestone: updated.milestone || null, assignees: updated.assignees || [] } }, 200, origin, env)
 }
 
+/**
+ * QQ 身份是否有维护者权限。
+ * 目前 QQ 身份还没有和 GitHub 账号绑定，所以恒为 false —— 这不是「QQ 用户低一等」，
+ * 而是「这个身份背后暂时没有可查的仓库角色」。做双向绑定后，在这里读
+ * bind:<sub> 拿到 GitHub login，再走 callerIsAdmin 即可，其余调用方不用改。
+ */
+async function qqCallerIsAdmin(env, sub) {
+  const boundLogin = await env.NATB_KV.get('bind:' + sub)
+  if (!boundLogin) return false
+  return callerIsAdmin(env, boundLogin, '')
+}
+
 /** 判断这个 GitHub 账号是不是「管理」：拥有者白名单，或该仓库的 admin/maintain/write 协作者 */
 async function callerIsAdmin(env, login, token) {
   if (!login) return false
@@ -669,6 +681,7 @@ async function handleAuth(env, request, url, cors) {
 
     await env.NATB_KV.delete('code:' + sub)
     const masked = maskEmail(email)
+
     // 昵称只在个人中心里设；首次登录给个占位，登录表单不再收这个字段
     const profile = (await kvJson(env, 'user:' + sub)) || { created: Date.now(), issues: 0, comments: 0 }
     const finalNick = profile.nick || 'QQ用户' + sub.slice(0, 4)
@@ -769,6 +782,12 @@ async function handleQq(env, request, url, cors) {
     const text = String((body && body.body) || '').slice(0, 20000)
     if (!title) return json({ error: 'title_required', message: '标题不能为空' }, 400, origin, env)
 
+    // 指派属于维护者职权：非管理提交指派时明确拒绝，而不是静默丢掉
+    const assignees = Array.isArray(body && body.assignees) ? body.assignees.slice(0, 5) : []
+    if (assignees.length && !(await qqCallerIsAdmin(env, session.sub))) {
+      return json({ error: 'forbidden', message: '只有管理员能指派' }, 403, origin, env)
+    }
+
     const dayKey = 'day:issue:' + session.sub + ':' + today()
     if (Number((await env.NATB_KV.get(dayKey)) || 0) >= 5) {
       return json({ error: 'daily_limit', message: '今天发帖数量已用完' }, 429, origin, env)
@@ -783,6 +802,7 @@ async function handleQq(env, request, url, cors) {
         body: content,
         labels: Array.isArray(body && body.labels) ? body.labels.slice(0, 5) : [],
         ...(body && body.milestone ? { milestone: body.milestone } : {}),
+        ...(assignees.length ? { assignees } : {}),
       }),
     })
     await kvSet(env, dayKey, String(Number((await env.NATB_KV.get(dayKey)) || 0) + 1), 86400)

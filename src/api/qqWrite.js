@@ -38,8 +38,8 @@ async function request(path, { method = 'POST', body } = {}) {
 }
 
 export const qqWriteApi = {
-  createIssue: ({ title, body, labels, milestone }) =>
-    request('/qq/issue', { method: 'POST', body: { title, body, labels, milestone } }),
+  createIssue: ({ title, body, labels, milestone, assignees }) =>
+    request('/qq/issue', { method: 'POST', body: { title, body, labels, milestone, assignees } }),
   createComment: (number, body) =>
     request('/qq/issue/' + number + '/comment', { method: 'POST', body: { body } }),
   closeIssue: (number) => request('/qq/issue/' + number, { method: 'PATCH', body: { state: 'closed' } }),
