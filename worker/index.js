@@ -328,6 +328,11 @@ async function requireWriter(env, request, cors) {
     return { error: json({ error: 'banned', until }, 403, request.headers.get('Origin') || '', env) }
   }
 
+  const ipBan = await env.NATB_KV.get('ban:ip:' + clientIp(request))
+  if (ipBan) {
+    return { error: json({ error: 'banned', until: 'IP 已临时封禁' }, 403, request.headers.get('Origin') || '', env) }
+  }
+
   const used = await bump(env, 'rl:' + session.sub + ':' + minuteBucket(), 120)
   if (used > WRITE_LIMIT_PER_MIN) {
     const wait = 60 - (Math.floor(Date.now() / 1000) % 60)
@@ -354,6 +359,101 @@ function qqMarker(session, masked) {
     JSON.stringify({ sub: session.sub, nick: session.nick || '', masked }) +
     ' -->\n'
   )
+}
+
+
+/* ---------------- 管理端：用户与封禁 ---------------- */
+
+async function requireAdmin(env, request) {
+  const auth = request.headers.get('Authorization') || ''
+  if (!/^Bearer\s+\S+/i.test(auth)) return null
+  const headers = {
+    Authorization: auth,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'natb-issue-proxy',
+  }
+  const meRes = await fetch('https://api.github.com/user', { headers })
+  if (!meRes.ok) return null
+  const me = await meRes.json()
+  if (!me || !me.login) return null
+  const permRes = await fetch(
+    'https://api.github.com/repos/' + QQ_REPO + '/collaborators/' + encodeURIComponent(me.login) + '/permission',
+    { headers },
+  )
+  if (!permRes.ok) return null
+  const perm = await permRes.json()
+  if (!perm || !['admin', 'maintain', 'write'].includes(perm.permission)) return null
+  return me
+}
+
+async function handleAdmin(env, request, url) {
+  const origin = request.headers.get('Origin') || ''
+  const me = await requireAdmin(env, request)
+  if (!me) return json({ error: 'forbidden', message: '需要该仓库的 write 及以上权限' }, 403, origin, env)
+
+  if (url.pathname === '/admin/users' && request.method === 'GET') {
+    const cursor = url.searchParams.get('cursor') || undefined
+    const list = await env.NATB_KV.list({ prefix: 'user:', limit: 20, cursor })
+    const users = []
+    for (const key of list.keys) {
+      const sub = key.name.slice('user:'.length)
+      const profile = (await kvJson(env, key.name)) || {}
+      const ban = await kvJson(env, 'ban:' + sub)
+      const banned = Boolean(ban) && (ban.until === 0 || ban.until > Date.now())
+      users.push({
+        sub,
+        nick: profile.nick || '',
+        masked: profile.masked || '',
+        created: profile.created || 0,
+        lastSeen: profile.lastSeen || 0,
+        issues: profile.issues || 0,
+        comments: profile.comments || 0,
+        banned,
+        until: banned ? ban.until : 0,
+        reason: banned ? ban.reason || '' : '',
+      })
+    }
+    users.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
+    return json({ ok: true, users, cursor: list.list_complete ? null : list.cursor }, 200, origin, env)
+  }
+
+  if (url.pathname === '/admin/ban' && request.method === 'POST') {
+    const body = await readJsonBody(request)
+    const sub = String((body && body.sub) || '')
+    if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
+    const reason = String((body && body.reason) || '').trim().slice(0, 100) || '管理员封禁'
+    const days = Number((body && body.days) || 0)
+    const until = days > 0 ? Date.now() + days * 86400000 : 0
+    const record = { reason, by: me.login, at: Date.now(), until }
+
+    if (until > 0) {
+      await env.NATB_KV.put('ban:' + sub, JSON.stringify(record), {
+        expirationTtl: Math.max(60, Math.floor((until - Date.now()) / 1000) + 60),
+      })
+    } else {
+      await env.NATB_KV.put('ban:' + sub, JSON.stringify(record))
+    }
+
+    let ips = []
+    if (body && body.banIp) {
+      const profile = (await kvJson(env, 'user:' + sub)) || {}
+      ips = (profile.ips || []).slice(0, 5)
+      for (const ip of ips) {
+        await kvSet(env, 'ban:ip:' + ip, me.login, 86400)
+      }
+    }
+    return json({ ok: true, until, ips }, 200, origin, env)
+  }
+
+  if (url.pathname === '/admin/unban' && request.method === 'POST') {
+    const body = await readJsonBody(request)
+    const sub = String((body && body.sub) || '')
+    if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
+    await env.NATB_KV.delete('ban:' + sub)
+    return json({ ok: true }, 200, origin, env)
+  }
+
+  return json({ error: 'not_found' }, 404, origin, env)
 }
 
 /* ---------------- 路由 ---------------- */
@@ -574,6 +674,9 @@ export default {
       }
       if (url.pathname.startsWith('/qq/')) {
         return await handleQq(env, request, url, cors)
+      }
+      if (url.pathname.startsWith('/admin/')) {
+        return await handleAdmin(env, request, url)
       }
       if (url.pathname === '/' || url.pathname === '/health') {
         return json({ ok: true, service: 'natb-issue-proxy' }, 200, origin, env)

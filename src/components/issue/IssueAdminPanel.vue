@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/select'
 
 import LabelManageDialog from './LabelManageDialog.vue'
+import UserBanPanel from './UserBanPanel.vue'
 import MilestoneManageDialog from './MilestoneManageDialog.vue'
 
 import IconTag from '~icons/lucide/tag'
@@ -43,6 +44,7 @@ import IconRefresh from '~icons/lucide/refresh-cw'
 import IconCheckCircle from '~icons/lucide/check-circle'
 import IconRotateCcw from '~icons/lucide/rotate-ccw'
 import IconTags from '~icons/lucide/tags'
+import IconUsers from '~icons/lucide/users'
 
 const emit = defineEmits(['close'])
 
@@ -318,18 +320,22 @@ onMounted(() => {
             :class="sheetOpen ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'"
           >
             <Tabs v-model="tab" class="flex min-h-0 flex-1 flex-col">
-          <TabsList class="grid w-full grid-cols-3">
+          <TabsList class="grid w-full grid-cols-4">
             <TabsTrigger value="labels">
               <IconTag class="size-4" />
-              标签管理
+              标签
             </TabsTrigger>
             <TabsTrigger value="milestones">
               <IconFlag class="size-4" />
-              里程碑管理
+              里程碑
             </TabsTrigger>
             <TabsTrigger value="issues">
               <IconTags class="size-4" />
-              批量操作
+              批量
+            </TabsTrigger>
+            <TabsTrigger value="users">
+              <IconUsers class="size-4" />
+              用户
             </TabsTrigger>
           </TabsList>
 
@@ -345,6 +351,10 @@ onMounted(() => {
               @changed="loadOverview"
               @update:form-open="milestoneFormOpen = $event"
             />
+          </TabsContent>
+
+          <TabsContent value="users" class="mt-2 min-h-0 flex-1 overflow-hidden">
+            <UserBanPanel />
           </TabsContent>
 
           <TabsContent value="issues" class="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
