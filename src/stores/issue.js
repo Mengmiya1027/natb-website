@@ -98,6 +98,13 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanReason.value = ''
   }
 
+  /** 登录响应里直接带着封禁状态，省一次 /auth/me 往返 */
+  function applyBanState({ banned, until, reason } = {}) {
+    qqBanned.value = Boolean(banned)
+    qqBanUntil.value = until || 0
+    qqBanReason.value = reason || ''
+  }
+
   /** 校验本地 QQ 令牌是否还有效，顺带同步封禁状态 */
   async function refreshQq() {
     if (!qqToken.value) return
@@ -307,6 +314,7 @@ export const useIssueStore = defineStore('issue', () => {
     isQqLoggedIn,
     writeMode,
     setQqSession,
+    applyBanState,
     logoutQq,
     refreshQq,
     bootstrap,

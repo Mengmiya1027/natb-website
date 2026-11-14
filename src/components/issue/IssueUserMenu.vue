@@ -49,6 +49,7 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import QqProfileDialog from './QqProfileDialog.vue'
+import QqBanDialog from './QqBanDialog.vue'
 
 import IconGitHub from '~icons/simple-icons/github'
 import IconLogOut from '~icons/lucide/log-out'
@@ -188,9 +189,16 @@ async function verifyQqCode() {
   try {
     const data = await verifyQqCodeMail(qqEmail.value.trim(), qqCode.value.trim())
     store.setQqSession(data.user, data.token)
-    toast.success('欢迎，' + (data.user?.nick || 'QQ 用户'))
     authOpenModel.value = false
     qqCode.value = ''
+
+    // 封禁不拦登录，只在登录后弹一次说明；写操作由服务端每次拦
+    if (data.banned) {
+      store.applyBanState({ banned: true, until: data.until, reason: data.reason })
+      banOpen.value = true
+      return
+    }
+    toast.success('欢迎，' + (data.user?.nick || 'QQ 用户'))
   } catch (err) {
     qqError.value = err?.message || String(err)
   } finally {
@@ -282,6 +290,7 @@ const logoutConfirmOpen = ref(false)
 
 const isQqOnly = computed(() => store.isQqLoggedIn && !store.isLoggedIn)
 const profileOpen = ref(false)
+const banOpen = ref(false)
 
 function requestLogout() {
   settingsOpenModel.value = false
@@ -363,6 +372,7 @@ onBeforeUnmount(resetFlow)
     </DropdownMenu>
 
     <QqProfileDialog v-model:open="profileOpen" />
+    <QqBanDialog v-model:open="banOpen" />
 
     <!-- 登录面板 -->
     <Dialog v-model:open="authOpenModel">
