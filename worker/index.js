@@ -438,10 +438,12 @@ async function handleAuth(env, request, url, cors) {
     if (!session) return json({ error: 'unauthorized' }, 401, origin, env)
     const ban = await kvJson(env, 'ban:' + session.sub)
     const banned = ban && (ban.until === 0 || ban.until > Date.now())
+    // 掩码只存在 KV 档案里：令牌载荷里没有邮箱，拿昵称去 maskEmail 只会得到空串
+    const profile = (await kvJson(env, 'user:' + session.sub)) || {}
     return json(
       {
         ok: true,
-        user: { sub: session.sub, nick: session.nick, masked: maskEmail(session.nick || '') || '' },
+        user: { sub: session.sub, nick: session.nick, masked: profile.masked || '' },
         banned: Boolean(banned),
         until: banned ? ban.until : 0,
       },
