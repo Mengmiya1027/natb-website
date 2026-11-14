@@ -18,6 +18,17 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 import IconLogOut from '~icons/lucide/log-out'
 import IconBan from '~icons/lucide/ban'
@@ -158,10 +169,26 @@ function formatDate(ms) {
       </div>
 
       <div class="flex items-center justify-between border-t border-border px-5 py-3">
-        <Button variant="ghost" size="sm" class="text-destructive gap-1.5" @click="logout">
-          <IconLogOut class="size-4" />
-          退出登录
-        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger as-child>
+            <Button variant="ghost" size="sm" class="text-destructive gap-1.5">
+              <IconLogOut class="size-4" />
+              退出登录
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>退出 QQ 登录？</AlertDialogTitle>
+              <AlertDialogDescription>
+                退出后这台设备上的身份会被清除，需要重新收取验证码才能再登录。你的昵称和已发的内容都会保留。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction @click="logout">退出</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <Button variant="outline" size="sm" @click="emit('update:open', false)">关闭</Button>
       </div>
     </DialogContent>

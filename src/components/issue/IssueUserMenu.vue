@@ -285,13 +285,7 @@ const profileOpen = ref(false)
 
 function requestLogout() {
   settingsOpenModel.value = false
-  // QQ 身份没有服务端会话可撤销，退出就是清本地令牌，不需要二次确认
-  if (isQqOnly.value) {
-    store.logoutQq()
-    toast.success('已退出 QQ 登录')
-    return
-  }
-  // 从设置面板点进来时先收起面板，避免两层弹窗叠在一起
+  // QQ 身份虽然只是清本地令牌，但退出后要重新收验证码才能回来，同样走二次确认
   logoutConfirmOpen.value = true
 }
 
@@ -656,14 +650,22 @@ onBeforeUnmount(resetFlow)
               确认退出登录？
             </AlertDialogTitle>
             <AlertDialogDescription class="text-[15px] leading-relaxed">
-              退出后会清除这台设备上保存的 GitHub 授权凭据。
+              {{
+                isQqOnly
+                  ? '退出后会清除这台设备上保存的 QQ 登录状态，重新登录需要再收一次验证码。'
+                  : '退出后会清除这台设备上保存的 GitHub 授权凭据。'
+              }}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <p
             class="border-border text-muted-foreground mt-6 rounded-xl border px-4 py-3.5 text-[13px] leading-relaxed"
           >
-            只影响这台设备的登录状态，账号与仓库权限不受任何影响。
+            {{
+              isQqOnly
+                ? '昵称与已经发布的内容都会保留，不会因为退出而被删除。'
+                : '只影响这台设备的登录状态，账号与仓库权限不受任何影响。'
+            }}
           </p>
         </div>
 

@@ -29,6 +29,17 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 import IconAlertTriangle from '~icons/lucide/triangle-alert'
 import IconArrowLeft from '~icons/lucide/arrow-left'
@@ -578,28 +589,53 @@ async function onSidebarChanged() {
         <section v-if="store.writeMode === 'qq' && qqOwnIssue" class="natb-detail__actions">
           <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-xs">
             <p class="text-xs font-medium text-muted-foreground">这是你发的 issue</p>
-            <Button
-              v-if="canQqClose"
-              variant="outline"
-              size="sm"
-              class="w-full"
-              :disabled="qqClosing"
-              @click="closeOwnIssue"
-            >
-              <IconCircleCheck class="size-4" />
-              {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
-            </Button>
+            <AlertDialog v-if="canQqClose">
+              <AlertDialogTrigger as-child>
+                <Button variant="outline" size="sm" class="w-full" :disabled="qqClosing">
+                  <IconCircleCheck class="size-4" />
+                  {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>关闭这个 issue？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    关闭后它仍然可以被别人读到，但你自己无法重新打开。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction @click="closeOwnIssue">关闭</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <p v-else class="text-muted-foreground text-xs">已关闭。</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="text-destructive w-full gap-1.5"
-              :disabled="qqDeleting"
-              @click="deleteOwnIssue"
-            >
-              <IconTrash2 class="size-4" />
-              {{ qqDeleting ? '正在删除…' : '删除这个 issue' }}
-            </Button>
+
+            <AlertDialog>
+              <AlertDialogTrigger as-child>
+                <Button variant="ghost" size="sm" class="text-destructive w-full gap-1.5" :disabled="qqDeleting">
+                  <IconTrash2 class="size-4" />
+                  {{ qqDeleting ? '正在删除…' : '删除这个 issue' }}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>删除这个 issue？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    删除后无法恢复，评论与时间线会一并消失。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    class="bg-destructive hover:bg-destructive/90 font-semibold text-white"
+                    @click="deleteOwnIssue"
+                  >
+                    删除
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </section>
 
