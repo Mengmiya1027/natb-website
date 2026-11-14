@@ -3,11 +3,12 @@
  * 走中转的 /admin/*，凭据是管理员的 GitHub token（Worker 会回查仓库权限）。
  */
 import { DEFAULT_PROXY_BASE } from '@/config/github'
-import { getProxyBase, getEffectiveToken } from '@/api/github'
+import { getProxyBase, getToken } from '@/api/github'
 
 async function request(path, { method = 'GET', body } = {}) {
-  const token = getEffectiveToken()
-  if (!token) throw new Error('需要 GitHub Token 才能管理用户')
+  // 只用真实登录凭据：开发环境的只读兜底 token 是给公开数据用的，调管理接口只会得到 403
+  const token = getToken()
+  if (!token) throw new Error('需要先登录 GitHub 才能管理用户（QQ 登录没有管理权限）')
   const root = (getProxyBase() || DEFAULT_PROXY_BASE || '').replace(/\/$/, '')
   if (!root) throw new Error('没有配置中转地址')
   const res = await fetch(root + path, {

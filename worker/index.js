@@ -368,32 +368,58 @@ function qqMarker(session, masked) {
 
 /* ---------------- 管理端：用户与封禁 ---------------- */
 
+const MANAGE_ROLES = ['admin', 'maintain', 'write']
+
 async function requireAdmin(env, request) {
   const auth = request.headers.get('Authorization') || ''
-  if (!/^Bearer\s+\S+/i.test(auth)) return null
+  if (!/^Bearer\s+\S+/i.test(auth)) return { error: 'unauthorized' }
   const headers = {
     Authorization: auth,
     Accept: 'application/vnd.github+json',
     'User-Agent': 'natb-issue-proxy',
   }
+
   const meRes = await fetch('https://api.github.com/user', { headers })
-  if (!meRes.ok) return null
+  if (meRes.status === 401) return { error: 'token_invalid' }
+  if (!meRes.ok) return { error: 'github_unreachable', status: meRes.status }
   const me = await meRes.json()
-  if (!me || !me.login) return null
+  if (!me || !me.login) return { error: 'token_invalid' }
+
   const permRes = await fetch(
     'https://api.github.com/repos/' + QQ_REPO + '/collaborators/' + encodeURIComponent(me.login) + '/permission',
     { headers },
   )
-  if (!permRes.ok) return null
-  const perm = await permRes.json()
-  if (!perm || !['admin', 'maintain', 'write'].includes(perm.permission)) return null
-  return me
+  if (permRes.ok) {
+    const perm = await permRes.json()
+    if (perm && MANAGE_ROLES.includes(perm.permission)) return { login: me.login }
+  }
+
+  // 兜底：仓库拥有者即使权限查询被限流或 token 缺 scope，也应该能进管理面板
+  const ownerLogins = String(env.ADMIN_LOGINS || 'Mengmiya1027')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (ownerLogins.includes(me.login)) return { login: me.login }
+
+  return { error: 'forbidden', login: me.login }
 }
 
 async function handleAdmin(env, request, url) {
   const origin = request.headers.get('Origin') || ''
-  const me = await requireAdmin(env, request)
-  if (!me) return json({ error: 'forbidden', message: '需要该仓库的 write 及以上权限' }, 403, origin, env)
+  const gate = await requireAdmin(env, request)
+  // 用 error 判断成败：失败分支也带 login 用于错误文案，不能拿 login 当通行证
+  if (gate.error) {
+    const message =
+      gate.error === 'unauthorized'
+        ? '缺少 Authorization 头'
+        : gate.error === 'token_invalid'
+          ? 'GitHub 登录已失效，请重新登录'
+          : gate.error === 'github_unreachable'
+            ? '中转访问 api.github.com 失败（HTTP ' + gate.status + '），稍后再试'
+            : '需要该仓库的 write 及以上权限（当前账号：' + (gate.login || '未知') + '）'
+    return json({ error: gate.error, message }, 403, origin, env)
+  }
+  const me = { login: gate.login }
 
   if (url.pathname === '/admin/users' && request.method === 'GET') {
     const cursor = url.searchParams.get('cursor') || undefined
