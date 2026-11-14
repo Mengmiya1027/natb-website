@@ -9,9 +9,11 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { githubApi, githubWriteApi } from '@/api/github'
+import { qqWriteApi } from '@/api/qqWrite'
 import { useIssueStore } from '@/stores/issue'
 
 import MarkdownView from './MarkdownView.vue'
+import { parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
 import IssueTimeline from './IssueTimeline.vue'
 
 // issue-write 负责的组件，签名按 CONTRACT.md
@@ -102,9 +104,40 @@ function absoluteTime(value) {
 /* ---------------- 派生数据 ---------------- */
 
 const author = computed(() => issue.value?.user || {})
-const authorLogin = computed(() => author.value.login || 'ghost')
+/** QQ 用户发的单子，作者显示成「QQ 用户 xxx」，不显示机器人账号 */
+const qqMarker = computed(() => parseQqMarker(issue.value?.body))
+const authorLogin = computed(() =>
+  qqMarker.value
+    ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4))
+    : author.value.login || 'ghost',
+)
 const authorAvatar = computed(() => author.value.avatar_url || '')
 const authorInitial = computed(() => String(authorLogin.value).slice(0, 1).toUpperCase())
+const cleanBody = computed(() => stripQqMarker(issue.value?.body))
+
+/* ---------------- QQ 身份：只能关自己发的单 ---------------- */
+
+const qqOwnIssue = computed(
+  () => Boolean(qqMarker.value?.sub && store.qqUser?.sub && qqMarker.value.sub === store.qqUser.sub),
+)
+const canQqClose = computed(
+  () => store.writeMode === 'qq' && qqOwnIssue.value && issue.value?.state === 'open',
+)
+const qqClosing = ref(false)
+
+async function closeOwnIssue() {
+  if (!canQqClose.value || qqClosing.value) return
+  qqClosing.value = true
+  try {
+    await qqWriteApi.closeIssue(issue.value.number)
+    toast.success('已关闭这个 issue')
+    await load()
+  } catch (err) {
+    toast.error(err?.message || String(err))
+  } finally {
+    qqClosing.value = false
+  }
+}
 const commentCount = computed(() => comments.value.length)
 
 const labelObjects = computed(() =>
@@ -420,7 +453,7 @@ async function onSidebarChanged() {
           </header>
 
           <div class="natb-detail__card-body">
-            <MarkdownView v-if="issue.body" :content="issue.body" />
+            <MarkdownView v-if="issue.body" :content="cleanBody" />
             <p v-else class="natb-detail__empty">这条 issue 没有正文。</p>
           </div>
         </article>
@@ -513,7 +546,26 @@ async function onSidebarChanged() {
         </section>
 
         <!-- 操作卡片的样式由 IssueSidebarActions 自己提供，这里只负责摆位置 -->
-        <section v-if="store.canWrite" class="natb-detail__actions">
+        <!-- QQ 身份没有标签/锁定/指派这些能力，只给「关闭自己发的单」一个入口 -->
+        <section v-if="store.writeMode === 'qq' && qqOwnIssue" class="natb-detail__actions">
+          <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-xs">
+            <p class="text-xs font-medium text-muted-foreground">这是你发的 issue</p>
+            <Button
+              v-if="canQqClose"
+              variant="outline"
+              size="sm"
+              class="w-full"
+              :disabled="qqClosing"
+              @click="closeOwnIssue"
+            >
+              <IconCircleCheck class="size-4" />
+              {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
+            </Button>
+            <p v-else class="text-muted-foreground text-xs">已关闭。</p>
+          </div>
+        </section>
+
+        <section v-else-if="store.writeMode === 'github'" class="natb-detail__actions">
           <IssueSidebarActions :issue="issue" @changed="onSidebarChanged" />
         </section>
       </aside>

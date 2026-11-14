@@ -146,6 +146,8 @@ onMounted(async () => {
   anim.land()
   store.applyTheme()
   await store.bootstrap()
+  // QQ 令牌是另一套凭据，独立校验；失败时静默退出登录，不打扰访客
+  store.refreshQq().catch(() => {})
   loadStats()
 })
 
@@ -168,8 +170,10 @@ const adminOpen = ref(false)
 const intakeOpen = ref(false)
 
 function startCreate() {
-  if (!store.isLoggedIn) {
-    toast.error('发布 issue 需要先登录 GitHub')
+  if (!store.canWrite) {
+    toast.error(
+      store.qqBanned ? '该 QQ 账号已被封禁，无法发布' : '发布 issue 需要先登录（GitHub 或 QQ 邮箱）',
+    )
     authOpen.value = true
     return
   }

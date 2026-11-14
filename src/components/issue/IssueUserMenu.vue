@@ -13,6 +13,7 @@ import { useIssueStore } from '@/stores/issue'
 import { ISSUE_REPO_URL, PAT_CREATE_URL, DEFAULT_PROXY_BASE } from '@/config/github'
 import { probeConnection } from '@/api/github'
 import { isDeviceFlowAvailable } from '@/api/oauth'
+import { sendCode as sendQqCodeMail, verifyCode as verifyQqCodeMail } from '@/api/qqAuth'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -134,6 +135,69 @@ async function startDeviceFlowLogin() {
   }
 }
 
+/* ---------------- QQ 邮箱登录 ---------------- */
+
+const qqEmail = ref('')
+const qqCode = ref('')
+const qqNick = ref('')
+const qqSending = ref(false)
+const qqCooldown = ref(0)
+const qqVerifying = ref(false)
+const qqError = ref('')
+let qqTimer = 0
+
+const qqEmailValid = computed(() => /^[^\s@]+@(qq|foxmail)\.com$/i.test(qqEmail.value.trim()))
+const qqCanSend = computed(() => qqEmailValid.value && qqCooldown.value === 0 && !qqSending.value)
+const qqCanVerify = computed(
+  () => qqEmailValid.value && /^\d{6}$/.test(qqCode.value.trim()) && !qqVerifying.value,
+)
+
+function startQqCooldown() {
+  qqCooldown.value = 60
+  window.clearInterval(qqTimer)
+  qqTimer = window.setInterval(() => {
+    qqCooldown.value = Math.max(0, qqCooldown.value - 1)
+    if (qqCooldown.value === 0) window.clearInterval(qqTimer)
+  }, 1000)
+}
+
+async function sendQqCode() {
+  if (!qqCanSend.value) return
+  qqSending.value = true
+  qqError.value = ''
+  try {
+    const data = await sendQqCodeMail(qqEmail.value.trim())
+    toast.success('验证码已发送，请查收邮箱（垃圾箱也看一眼）')
+    // 服务端没配发信通道时会把码回在 debug 字段里，本地联调直接填上
+    if (data?.debug && data.code) {
+      qqCode.value = data.code
+      toast.info('开发模式：验证码已自动填入')
+    }
+    startQqCooldown()
+  } catch (err) {
+    qqError.value = err?.message || String(err)
+  } finally {
+    qqSending.value = false
+  }
+}
+
+async function verifyQqCode() {
+  if (!qqCanVerify.value) return
+  qqVerifying.value = true
+  qqError.value = ''
+  try {
+    const data = await verifyQqCodeMail(qqEmail.value.trim(), qqCode.value.trim(), qqNick.value.trim())
+    store.setQqSession(data.user, data.token)
+    toast.success('欢迎，' + (data.user?.nick || 'QQ 用户'))
+    authOpenModel.value = false
+    qqCode.value = ''
+  } catch (err) {
+    qqError.value = err?.message || String(err)
+  } finally {
+    qqVerifying.value = false
+  }
+}
+
 const copied = ref(false)
 let copiedTimer = 0
 
@@ -216,20 +280,33 @@ async function saveProxy() {
 const logoutConfirmOpen = ref(false)
 
 
+const isQqOnly = computed(() => store.isQqLoggedIn && !store.isLoggedIn)
+
 function requestLogout() {
-  // 从设置面板点进来时先收起面板，避免两层弹窗叠在一起
   settingsOpenModel.value = false
+  // QQ 身份没有服务端会话可撤销，退出就是清本地令牌，不需要二次确认
+  if (isQqOnly.value) {
+    store.logoutQq()
+    toast.success('已退出 QQ 登录')
+    return
+  }
+  // 从设置面板点进来时先收起面板，避免两层弹窗叠在一起
   logoutConfirmOpen.value = true
 }
 
 function logout() {
-  store.logout()
+  if (isQqOnly.value) store.logoutQq()
+  else store.logout()
   toast.success('已退出登录')
   settingsOpenModel.value = false
 }
 
-const displayName = computed(() => store.user?.name || store.user?.login || '')
-const avatarUrl = computed(() => store.user?.avatar_url || '')
+const displayName = computed(() =>
+  store.isLoggedIn
+    ? store.user?.name || store.user?.login || ''
+    : store.qqUser?.nick || 'QQ 用户',
+)
+const avatarUrl = computed(() => (store.isLoggedIn ? store.user?.avatar_url || '' : ''))
 const initial = computed(() => (displayName.value || '?').slice(0, 1).toUpperCase())
 
 onBeforeUnmount(resetFlow)
@@ -237,7 +314,13 @@ onBeforeUnmount(resetFlow)
 
 <template>
   <div class="inline-flex items-center">
-    <Button v-if="!store.isLoggedIn" size="sm" variant="outline" class="gap-1.5" @click="authOpenModel = true">
+    <Button
+      v-if="!store.isLoggedIn && !store.isQqLoggedIn"
+      size="sm"
+      variant="outline"
+      class="gap-1.5"
+      @click="authOpenModel = true"
+    >
       <IconGitHub class="size-3.5" />
       <span class="hidden sm:inline">登录</span>
     </Button>
@@ -259,6 +342,7 @@ onBeforeUnmount(resetFlow)
           </Avatar>
           <span class="truncate">{{ displayName }}</span>
           <Badge v-if="store.canManage" variant="secondary" class="ml-auto text-[10px]">管理</Badge>
+          <Badge v-else-if="isQqOnly" variant="secondary" class="ml-auto text-[10px]">QQ</Badge>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem @select="settingsOpenModel = true">
@@ -283,9 +367,9 @@ onBeforeUnmount(resetFlow)
     <Dialog v-model:open="authOpenModel">
       <DialogContent class="sm:max-w-[820px]">
         <DialogHeader>
-          <DialogTitle>登录 GitHub</DialogTitle>
+          <DialogTitle>登录</DialogTitle>
           <DialogDescription>
-            发布 issue 与评论需要 GitHub 账号。凭据只保存在你这台设备的浏览器里。
+            发布 issue 与评论需要身份。GitHub 账号功能最全，QQ 邮箱登录门槛最低。
           </DialogDescription>
         </DialogHeader>
 
@@ -349,9 +433,10 @@ onBeforeUnmount(resetFlow)
           <!-- 右栏：登录方式与具体操作（按钮统一沉到底部） -->
           <div class="flex min-w-0 flex-col">
         <Tabs v-model="authTab" class="flex flex-1 flex-col">
-          <TabsList class="grid w-full grid-cols-2">
-            <TabsTrigger value="device">GitHub 账号登录</TabsTrigger>
-            <TabsTrigger value="token">使用 Token</TabsTrigger>
+          <TabsList class="grid w-full grid-cols-3">
+            <TabsTrigger value="device">GitHub</TabsTrigger>
+            <TabsTrigger value="token">Token</TabsTrigger>
+            <TabsTrigger value="qq">QQ 邮箱</TabsTrigger>
           </TabsList>
 
           <!-- 以「未生成验证码」那一态的高度为准（263px）：
@@ -442,6 +527,51 @@ onBeforeUnmount(resetFlow)
             <Button class="mt-auto w-full gap-2" :disabled="patLoading || !patValue.trim()" @click="submitPat">
               <IconKey class="size-4" />
               {{ patLoading ? '验证中…' : '用 Token 登录' }}
+            </Button>
+          </TabsContent>
+
+          <!-- QQ 邮箱：没有 GitHub 账号也能发言，由服务器以机器人身份代发 -->
+          <TabsContent value="qq" class="mt-4 flex min-h-[263px] shrink-0 flex-col gap-3">
+            <p class="text-muted-foreground text-xs leading-relaxed">
+              只收 @qq.com 与 @foxmail.com。登录后可以发 issue、评论、关闭自己发的单；
+              发帖在 GitHub 上会显示为仓库机器人，正文里标注你的昵称。
+            </p>
+
+            <div class="flex flex-col gap-1.5">
+              <Label for="qq-email" class="text-xs text-muted-foreground">QQ 邮箱</Label>
+              <div class="flex gap-2">
+                <Input id="qq-email" v-model="qqEmail" placeholder="12345678@qq.com" class="flex-1" />
+                <Button
+                  variant="outline"
+                  class="shrink-0"
+                  :disabled="!qqCanSend"
+                  @click="sendQqCode"
+                >
+                  {{ qqSending ? '发送中…' : qqCooldown > 0 ? qqCooldown + 's' : '发验证码' }}
+                </Button>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-1.5">
+              <Label for="qq-code" class="text-xs text-muted-foreground">验证码</Label>
+              <Input
+                id="qq-code"
+                v-model="qqCode"
+                placeholder="6 位数字"
+                inputmode="numeric"
+                maxlength="6"
+              />
+            </div>
+
+            <div class="flex flex-col gap-1.5">
+              <Label for="qq-nick" class="text-xs text-muted-foreground">显示名（可选）</Label>
+              <Input id="qq-nick" v-model="qqNick" placeholder="别人看到的名字" maxlength="16" />
+            </div>
+
+            <p v-if="qqError" class="text-destructive text-xs leading-relaxed">{{ qqError }}</p>
+
+            <Button class="mt-auto w-full" :disabled="!qqCanVerify" @click="verifyQqCode">
+              {{ qqVerifying ? '验证中…' : '登录' }}
             </Button>
           </TabsContent>
         </Tabs>

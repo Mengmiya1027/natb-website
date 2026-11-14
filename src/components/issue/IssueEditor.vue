@@ -9,6 +9,7 @@ import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
 import { githubApi, githubWriteApi } from '@/api/github'
+import { qqWriteApi } from '@/api/qqWrite'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,6 +43,9 @@ const titleInvalid = ref(false)
 
 const canSubmit = computed(() => Boolean(title.value.trim()) && !submitting.value)
 
+/** QQ 身份没有自己的 GitHub 账号，写操作走中转代发 */
+const writeApi = computed(() => (store.writeMode === 'qq' ? qqWriteApi : githubWriteApi))
+
 /* ---------------- 前置选择带来的预填 ---------------- */
 
 const route = useRoute()
@@ -53,7 +57,8 @@ const preset = ref({ target: '', type: '' })
 const SKELETON_MIN_MS = 360
 
 async function applyPreset() {
-  if (!store.isLoggedIn) {
+  // 只读的标签与里程碑列表，两种身份都能拉；未登录时没人能用上表单，直接跳过
+  if (!store.canWrite) {
     presetLoading.value = false
     return
   }
@@ -101,8 +106,10 @@ function resetError() {
 }
 
 async function submit() {
-  if (!store.isLoggedIn) {
-    toast.error('请先登录 GitHub 后再发布 issue')
+  if (!store.canWrite) {
+    toast.error(
+      store.qqBanned ? '该 QQ 账号已被封禁，无法发布' : '请先登录后再发布 issue',
+    )
     return
   }
   const cleanTitle = title.value.trim()
@@ -117,7 +124,7 @@ async function submit() {
   submitting.value = true
   resetError()
   try {
-    const issue = await githubWriteApi.createIssue({
+    const issue = await writeApi.value.createIssue({
       title: cleanTitle,
       body: body.value,
       labels: labels.value,
@@ -145,14 +152,20 @@ async function submit() {
 </script>
 
 <template>
-  <div v-if="!store.isLoggedIn" class="mx-auto max-w-lg">
+  <div v-if="!store.canWrite" class="mx-auto max-w-lg">
     <div class="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-6 py-12 text-center shadow-sm">
       <div class="grid size-11 place-items-center rounded-full bg-accent text-accent-foreground">
         <IconLock class="size-5" />
       </div>
-      <p class="text-base font-semibold text-foreground">请先登录</p>
+      <p class="text-base font-semibold text-foreground">
+        {{ store.qqBanned ? '账号已被封禁' : '请先登录' }}
+      </p>
       <p class="max-w-sm text-sm text-muted-foreground">
-        发布 Issue 需要 GitHub 身份。请点击右上角的头像按钮完成登录，然后回到本页新建 Issue。
+        {{
+          store.qqBanned
+            ? '这个 QQ 账号已被封禁，暂时不能发布内容。如有疑问请到 GitHub 仓库留言。'
+            : '发布 Issue 需要身份：GitHub 账号或 QQ 邮箱都可以。点右上角的登录按钮完成登录后再回来。'
+        }}
       </p>
       <Button type="button" variant="outline" size="sm" class="mt-2" @click="emit('cancel')">
         返回列表

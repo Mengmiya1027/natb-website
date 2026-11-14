@@ -3,6 +3,7 @@
  *  左：圆角方块里放状态图标　中：标题 + 副标题　右：标签徽章 + 「更新」与时间。 */
 import { computed } from 'vue'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { parseQqMarker } from '@/utils/qqMarker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,7 +42,11 @@ const stateTone = computed(() =>
 const labels = computed(() => (props.issue?.labels || []).slice(0, 1))
 const moreLabels = computed(() => Math.max(0, (props.issue?.labels || []).length - 1))
 const author = computed(() => props.issue?.user || {})
-const initial = computed(() => (author.value.login || '?').slice(0, 1).toUpperCase())
+const qqMarker = computed(() => parseQqMarker(props.issue?.body))
+const authorName = computed(() =>
+  qqMarker.value ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4)) : author.value.login || 'ghost',
+)
+const initial = computed(() => authorName.value.slice(0, 1).toUpperCase())
 
 function relativeTime(input) {
   if (!input) return ''
@@ -94,10 +99,14 @@ async function copyLink() {
         <span class="font-medium tabular-nums">#{{ issue.number }}</span>
         <span class="inline-flex items-center gap-1.5">
           <Avatar class="size-4">
-            <AvatarImage v-if="author.avatar_url" :src="author.avatar_url" :alt="author.login" />
+            <AvatarImage
+              v-if="author.avatar_url && !qqMarker"
+              :src="author.avatar_url"
+              :alt="author.login"
+            />
             <AvatarFallback class="text-[8px]">{{ initial }}</AvatarFallback>
           </Avatar>
-          {{ author.login }}
+          {{ authorName }}
         </span>
         <span class="inline-flex items-center gap-1">
           <IconMessageSquare class="size-3.5" />

@@ -8,6 +8,7 @@ import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
 import { githubWriteApi } from '@/api/github'
+import { qqWriteApi } from '@/api/qqWrite'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import MarkdownEditor from '@/components/issue/MarkdownEditor.vue'
@@ -32,9 +33,12 @@ const errorText = ref('')
 
 const canSubmit = computed(() => Boolean(body.value.trim()) && !submitting.value)
 
+/** QQ 身份由中转代发，与 GitHub 身份共用同一套入参 */
+const writeApi = computed(() => (store.writeMode === 'qq' ? qqWriteApi : githubWriteApi))
+
 async function submit() {
-  if (!store.isLoggedIn) {
-    toast.error('请先登录 GitHub 后再发表评论')
+  if (!store.canWrite) {
+    toast.error(store.qqBanned ? '该 QQ 账号已被封禁，无法评论' : '请先登录后再发表评论')
     return
   }
   if (!props.issueNumber) {
@@ -50,7 +54,7 @@ async function submit() {
   submitting.value = true
   errorText.value = ''
   try {
-    await githubWriteApi.createComment(props.issueNumber, content)
+    await writeApi.value.createComment(props.issueNumber, content)
     toast.success('评论已发布')
     body.value = ''
     emit('submitted')

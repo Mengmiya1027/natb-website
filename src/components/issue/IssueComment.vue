@@ -10,6 +10,7 @@ import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
 import MarkdownView from './MarkdownView.vue'
+import { parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -42,10 +43,19 @@ const store = useIssueStore()
 /* ---------------- 展示数据 ---------------- */
 
 const author = computed(() => props.comment?.user || {})
-const login = computed(() => author.value.login || 'ghost')
-const avatarUrl = computed(() => author.value.avatar_url || '')
+/** QQ 用户代发的评论，作者显示成「QQ 用户 xxx」，且不再链接到机器人主页 */
+const qqMarker = computed(() => parseQqMarker(props.comment?.body))
+const login = computed(() =>
+  qqMarker.value
+    ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4))
+    : author.value.login || 'ghost',
+)
+const avatarUrl = computed(() => (qqMarker.value ? '' : author.value.avatar_url || ''))
 const initial = computed(() => String(login.value).slice(0, 1).toUpperCase())
-const profileUrl = computed(() => `https://github.com/${login.value}`)
+const profileUrl = computed(() =>
+  qqMarker.value ? '' : `https://github.com/${author.value.login || 'ghost'}`,
+)
+const cleanBody = computed(() => stripQqMarker(props.comment?.body))
 
 const createdAt = computed(() => props.comment?.created_at || '')
 const updatedAt = computed(() => props.comment?.updated_at || createdAt.value)
@@ -231,7 +241,7 @@ function requestReply() {
     </header>
 
     <div v-if="!editing" class="natb-comment__body">
-      <MarkdownView v-if="comment.body" :content="comment.body" />
+      <MarkdownView v-if="cleanBody" :content="cleanBody" />
       <p v-else class="natb-comment__empty">（这条评论没有正文）</p>
     </div>
 
