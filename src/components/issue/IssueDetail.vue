@@ -504,7 +504,7 @@ async function onSidebarChanged() {
             <IconLock class="size-4" />
             <template v-if="store.qqBanned">
               <span>这个 QQ 账号已被封禁，暂时不能参与讨论</span>
-              <Button size="sm" class="h-8 gap-1.5 rounded-lg px-3.5 text-[13px]" @click="banOpen = true">
+              <Button size="sm" class="h-8 gap-1.5 rounded-md px-3.5 text-[13px]" @click="banOpen = true">
                 <IconInfo class="size-3.5" />
                 了解详情
               </Button>
