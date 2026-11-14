@@ -531,7 +531,6 @@ async function handleAuth(env, request, url, cors) {
     const body = await readJsonBody(request)
     const email = normalizeEmail(body && body.email)
     const code = String((body && body.code) || '').trim()
-    const nick = String((body && body.nick) || '').trim().slice(0, 16)
     if (!email || !mailDomainAllowed(email) || !/^\d{6}$/.test(code)) {
       return json({ error: 'invalid_input' }, 400, origin, env)
     }
@@ -562,8 +561,9 @@ async function handleAuth(env, request, url, cors) {
 
     await env.NATB_KV.delete('code:' + sub)
     const masked = maskEmail(email)
+    // 昵称只在个人中心里设；首次登录给个占位，登录表单不再收这个字段
     const profile = (await kvJson(env, 'user:' + sub)) || { created: Date.now(), issues: 0, comments: 0 }
-    const finalNick = nick || profile.nick || ('QQ用户' + sub.slice(0, 4))
+    const finalNick = profile.nick || 'QQ用户' + sub.slice(0, 4)
     await kvSet(
       env,
       'user:' + sub,
@@ -576,6 +576,34 @@ async function handleAuth(env, request, url, cors) {
     return json({ ok: true, token, exp, user: { sub, nick: finalNick, masked } }, 200, origin, env)
   }
 
+  if (url.pathname === '/auth/profile' && request.method === 'POST') {
+    const session = await verifySession(env, request)
+    if (!session) return json({ error: 'unauthorized' }, 401, origin, env)
+    const body = await readJsonBody(request)
+    const nick = String((body && body.nick) || '').trim()
+
+    if (nick.length < 2 || nick.length > 16) {
+      return json({ error: 'invalid_nick', message: '昵称要 2-16 个字符' }, 400, origin, env)
+    }
+    if (/[<>\r\n\t]/.test(nick)) {
+      return json({ error: 'invalid_nick', message: '昵称不能包含尖括号或换行' }, 400, origin, env)
+    }
+
+    const profile = (await kvJson(env, 'user:' + session.sub)) || {}
+    const updated = { ...profile, nick, lastSeen: Date.now() }
+    await kvSet(env, 'user:' + session.sub, updated, 90 * 86400)
+
+    // 昵称在令牌载荷里，改完必须重签，否则后续发帖署的还是旧名字
+    const exp = Math.floor(Date.now() / 1000) + SESSION_TTL
+    const token = await signSession(env, { sub: session.sub, nick, exp })
+    return json(
+      { ok: true, token, user: { sub: session.sub, nick, masked: updated.masked || '' } },
+      200,
+      origin,
+      env,
+    )
+  }
+
   if (url.pathname === '/auth/me' && request.method === 'GET') {
     const session = await verifySession(env, request)
     if (!session) return json({ error: 'unauthorized' }, 401, origin, env)
@@ -586,7 +614,14 @@ async function handleAuth(env, request, url, cors) {
     return json(
       {
         ok: true,
-        user: { sub: session.sub, nick: session.nick, masked: profile.masked || '' },
+        user: {
+          sub: session.sub,
+          nick: session.nick,
+          masked: profile.masked || '',
+          created: profile.created || 0,
+          issues: profile.issues || 0,
+          comments: profile.comments || 0,
+        },
         banned: Boolean(banned),
         until: banned ? ban.until : 0,
       },

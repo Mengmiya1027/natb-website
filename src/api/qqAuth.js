@@ -103,8 +103,37 @@ export async function sendCode(email) {
 }
 
 /** 校验验证码并拿到会话令牌 */
-export async function verifyCode(email, code, nick) {
-  const data = await post('/auth/token', { email, code, nick })
+export async function verifyCode(email, code) {
+  const data = await post('/auth/token', { email, code })
+  if (data && data.token) {
+    setQqToken(data.token)
+    setQqUser(data.user || null)
+  }
+  return data
+}
+
+/** 改昵称：服务端会重签令牌，返回值里的 token 要覆盖本地的 */
+export async function updateProfile(nick) {
+  const token = getQqToken()
+  if (!token) throw new QqAuthError(401, '请先登录')
+  const root = base()
+  if (!root) throw new QqAuthError(0, '没有配置中转地址')
+
+  let res
+  try {
+    res = await fetch(root + '/auth/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ nick }),
+    })
+  } catch (err) {
+    throw new QqAuthError(0, '连不上中转服务', err)
+  }
+
+  const data = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new QqAuthError(res.status, (data && (data.message || data.error)) || '保存失败', data)
+  }
   if (data && data.token) {
     setQqToken(data.token)
     setQqUser(data.user || null)

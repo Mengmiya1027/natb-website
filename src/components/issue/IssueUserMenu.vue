@@ -48,6 +48,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import QqProfileDialog from './QqProfileDialog.vue'
 
 import IconGitHub from '~icons/simple-icons/github'
 import IconLogOut from '~icons/lucide/log-out'
@@ -139,7 +140,6 @@ async function startDeviceFlowLogin() {
 
 const qqEmail = ref('')
 const qqCode = ref('')
-const qqNick = ref('')
 const qqSending = ref(false)
 const qqCooldown = ref(0)
 const qqVerifying = ref(false)
@@ -186,7 +186,7 @@ async function verifyQqCode() {
   qqVerifying.value = true
   qqError.value = ''
   try {
-    const data = await verifyQqCodeMail(qqEmail.value.trim(), qqCode.value.trim(), qqNick.value.trim())
+    const data = await verifyQqCodeMail(qqEmail.value.trim(), qqCode.value.trim())
     store.setQqSession(data.user, data.token)
     toast.success('欢迎，' + (data.user?.nick || 'QQ 用户'))
     authOpenModel.value = false
@@ -281,6 +281,7 @@ const logoutConfirmOpen = ref(false)
 
 
 const isQqOnly = computed(() => store.isQqLoggedIn && !store.isLoggedIn)
+const profileOpen = ref(false)
 
 function requestLogout() {
   settingsOpenModel.value = false
@@ -345,6 +346,10 @@ onBeforeUnmount(resetFlow)
           <Badge v-else-if="isQqOnly" variant="secondary" class="ml-auto text-[10px]">QQ</Badge>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem v-if="isQqOnly" @select="profileOpen = true">
+          <IconUserRound class="size-4" />
+          <span>个人中心</span>
+        </DropdownMenuItem>
         <DropdownMenuItem @select="settingsOpenModel = true">
           <IconSettings class="size-4" />
           <span>连接设置</span>
@@ -362,6 +367,8 @@ onBeforeUnmount(resetFlow)
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+
+    <QqProfileDialog v-model:open="profileOpen" />
 
     <!-- 登录面板 -->
     <Dialog v-model:open="authOpenModel">
@@ -561,11 +568,6 @@ onBeforeUnmount(resetFlow)
                 inputmode="numeric"
                 maxlength="6"
               />
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <Label for="qq-nick" class="text-xs text-muted-foreground">显示名（可选）</Label>
-              <Input id="qq-nick" v-model="qqNick" placeholder="别人看到的名字" maxlength="16" />
             </div>
 
             <p v-if="qqError" class="text-destructive text-xs leading-relaxed">{{ qqError }}</p>
