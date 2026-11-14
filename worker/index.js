@@ -552,7 +552,12 @@ async function handleAuth(env, request, url, cors) {
       await env.NATB_KV.delete('code:' + sub)
       const until = ban.until === 0 ? '永久' : new Date(ban.until).toISOString().slice(0, 10)
       return json(
-        { error: 'banned', until, message: '该账号已被封禁（' + until + '），无法登录' },
+        {
+          error: 'banned',
+          until,
+          reason: ban.reason || '',
+          message: '该账号已被封禁（' + until + '），无法登录',
+        },
         403,
         origin,
         env,
@@ -624,6 +629,7 @@ async function handleAuth(env, request, url, cors) {
         },
         banned: Boolean(banned),
         until: banned ? ban.until : 0,
+        reason: banned ? ban.reason || '' : '',
       },
       200,
       origin,

@@ -67,6 +67,7 @@ export const useIssueStore = defineStore('issue', () => {
   const qqUser = ref(getQqUser())
   const qqBanned = ref(false)
   const qqBanUntil = ref(0)
+  const qqBanReason = ref('')
 
   const isQqLoggedIn = computed(() => Boolean(qqToken.value))
 
@@ -94,6 +95,7 @@ export const useIssueStore = defineStore('issue', () => {
     qqUser.value = null
     qqBanned.value = false
     qqBanUntil.value = 0
+    qqBanReason.value = ''
   }
 
   /** 校验本地 QQ 令牌是否还有效，顺带同步封禁状态 */
@@ -106,6 +108,7 @@ export const useIssueStore = defineStore('issue', () => {
     }
     qqBanned.value = Boolean(data.banned)
     qqBanUntil.value = data.until || 0
+    qqBanReason.value = data.reason || ''
     if (data.user) qqUser.value = data.user
   }
 
@@ -300,6 +303,7 @@ export const useIssueStore = defineStore('issue', () => {
     qqToken,
     qqBanned,
     qqBanUntil,
+    qqBanReason,
     isQqLoggedIn,
     writeMode,
     setQqSession,

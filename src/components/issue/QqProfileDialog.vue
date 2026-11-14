@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 
 import IconLogOut from '~icons/lucide/log-out'
+import IconBan from '~icons/lucide/ban'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['update:open'])
@@ -32,9 +33,18 @@ const saving = ref(false)
 watch(
   () => props.open,
   (open) => {
-    if (open) nick.value = store.qqUser?.nick || ''
+    if (!open) return
+    nick.value = store.qqUser?.nick || ''
+    // 封禁状态可能在别处被改过，打开时刷新一次
+    store.refreshQq().catch(() => {})
   },
 )
+
+const untilText = computed(() => {
+  if (!store.qqBanUntil) return '永久封禁'
+  const d = new Date(store.qqBanUntil)
+  return '解封时间：' + d.getFullYear() + '-' + d.getMonth() + 1 + '-' + d.getDate()
+})
 
 const displayNick = computed(() => store.qqUser?.nick || 'QQ 用户')
 const initial = computed(() => displayNick.value.slice(0, 1).toUpperCase())
@@ -114,21 +124,36 @@ function formatDate(ms) {
           <p class="text-muted-foreground text-[11px]">2-16 个字符，不能包含尖括号或换行。</p>
         </div>
 
-        <Separator />
+        <!-- 三列同一套排版：数值统一 text-lg、标签统一 text-[11px]，日期也用同一字号 -->
+        <div class="grid grid-cols-3 items-end gap-2 border-border border-t pt-3 text-center">
+          <div class="flex flex-col items-center gap-0.5">
+            <span class="text-lg leading-none font-semibold tabular-nums">{{ store.qqUser?.issues ?? 0 }}</span>
+            <span class="text-muted-foreground text-[11px]">发布</span>
+          </div>
+          <div class="flex flex-col items-center gap-0.5">
+            <span class="text-lg leading-none font-semibold tabular-nums">{{ store.qqUser?.comments ?? 0 }}</span>
+            <span class="text-muted-foreground text-[11px]">评论</span>
+          </div>
+          <div class="flex flex-col items-center gap-0.5">
+            <span class="text-lg leading-none font-semibold tabular-nums whitespace-nowrap">
+              {{ formatDate(store.qqUser?.created) }}
+            </span>
+            <span class="text-muted-foreground text-[11px]">加入</span>
+          </div>
+        </div>
 
-        <div class="grid grid-cols-3 gap-2 text-center">
-          <div>
-            <p class="text-lg font-semibold tabular-nums">{{ store.qqUser?.issues ?? 0 }}</p>
-            <p class="text-muted-foreground text-[11px]">发布</p>
-          </div>
-          <div>
-            <p class="text-lg font-semibold tabular-nums">{{ store.qqUser?.comments ?? 0 }}</p>
-            <p class="text-muted-foreground text-[11px]">评论</p>
-          </div>
-          <div>
-            <p class="text-sm font-semibold tabular-nums">{{ formatDate(store.qqUser?.created) }}</p>
-            <p class="text-muted-foreground text-[11px]">加入</p>
-          </div>
+        <div
+          v-if="store.qqBanned"
+          class="border-destructive/40 bg-destructive/10 rounded-lg border px-3 py-2.5"
+        >
+          <p class="text-destructive flex items-center gap-1.5 text-xs font-medium">
+            <IconBan class="size-3.5" />
+            账号已被封禁
+          </p>
+          <p class="mt-1 text-xs leading-relaxed">
+            原因：{{ store.qqBanReason || '管理员未填写原因' }}
+          </p>
+          <p class="text-muted-foreground mt-0.5 text-[11px]">{{ untilText }}</p>
         </div>
       </div>
 

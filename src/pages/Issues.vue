@@ -25,6 +25,7 @@ import IssueList from '@/components/issue/IssueList.vue'
 import IssueDetail from '@/components/issue/IssueDetail.vue'
 import IssueEditor from '@/components/issue/IssueEditor.vue'
 import IssueIntakeDialog from '@/components/issue/IssueIntakeDialog.vue'
+import QqBanDialog from '@/components/issue/QqBanDialog.vue'
 import IssueUserMenu from '@/components/issue/IssueUserMenu.vue'
 import IssueAdminPanel from '@/components/issue/IssueAdminPanel.vue'
 import { Toaster } from '@/components/ui/sonner'
@@ -168,12 +169,13 @@ const settingsOpen = ref(false)
 const adminOpen = ref(false)
 
 const intakeOpen = ref(false)
+const banOpen = ref(false)
 
 function startCreate() {
   if (!store.canWrite) {
-    // 被封禁的账号再登录也没用，不要把登录框甩给他
+    // 被封禁的账号再登录也没用：直接开详情框，说清楚原因和解封时间
     if (store.qqBanned) {
-      toast.error('该 QQ 账号已被封禁，无法发布')
+      banOpen.value = true
       return
     }
     toast.error('发布 issue 需要先登录（GitHub 或 QQ 邮箱）')
@@ -438,6 +440,7 @@ function onIssueCreated(number) {
 
     <!-- 新建 Issue 的前置选择：反馈对象 → 反馈类型 -->
     <IssueIntakeDialog v-model:open="intakeOpen" @confirm="onIntakeConfirm" />
+    <QqBanDialog v-model:open="banOpen" />
 
     <!-- 页面滚动条改成浮在内容上的指示条，不再占横向空间 -->
     <ScrollIndicator />

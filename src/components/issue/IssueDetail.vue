@@ -10,6 +10,7 @@ import { toast } from 'vue-sonner'
 
 import { githubApi, githubWriteApi } from '@/api/github'
 import { qqWriteApi } from '@/api/qqWrite'
+import QqBanDialog from './QqBanDialog.vue'
 import { useIssueStore } from '@/stores/issue'
 
 import MarkdownView from './MarkdownView.vue'
@@ -124,6 +125,7 @@ const canQqClose = computed(
   () => store.writeMode === 'qq' && qqOwnIssue.value && issue.value?.state === 'open',
 )
 const qqClosing = ref(false)
+const banOpen = ref(false)
 
 async function closeOwnIssue() {
   if (!canQqClose.value || qqClosing.value) return
@@ -481,7 +483,12 @@ async function onSidebarChanged() {
           />
           <div v-else class="natb-detail__hint">
             <IconLock class="size-4" />
-            <span v-if="store.qqBanned">这个 QQ 账号已被封禁，暂时不能参与讨论</span>
+            <template v-if="store.qqBanned">
+              <span>这个 QQ 账号已被封禁，暂时不能参与讨论</span>
+              <Button variant="link" size="xs" class="h-auto px-1 text-xs" @click="banOpen = true">
+                了解详情
+              </Button>
+            </template>
             <span v-else>登录后即可参与讨论（GitHub 或 QQ 邮箱）</span>
           </div>
         </section>
@@ -571,6 +578,7 @@ async function onSidebarChanged() {
         </section>
       </aside>
     </div>
+    <QqBanDialog v-model:open="banOpen" />
   </div>
 </template>
 
