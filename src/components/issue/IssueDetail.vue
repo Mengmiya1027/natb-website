@@ -481,7 +481,8 @@ async function onSidebarChanged() {
           />
           <div v-else class="natb-detail__hint">
             <IconLock class="size-4" />
-            <span>登录 GitHub 后即可参与讨论</span>
+            <span v-if="store.qqBanned">这个 QQ 账号已被封禁，暂时不能参与讨论</span>
+            <span v-else>登录后即可参与讨论（GitHub 或 QQ 邮箱）</span>
           </div>
         </section>
       </div>

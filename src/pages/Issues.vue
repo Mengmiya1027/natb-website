@@ -171,9 +171,12 @@ const intakeOpen = ref(false)
 
 function startCreate() {
   if (!store.canWrite) {
-    toast.error(
-      store.qqBanned ? '该 QQ 账号已被封禁，无法发布' : '发布 issue 需要先登录（GitHub 或 QQ 邮箱）',
-    )
+    // 被封禁的账号再登录也没用，不要把登录框甩给他
+    if (store.qqBanned) {
+      toast.error('该 QQ 账号已被封禁，无法发布')
+      return
+    }
+    toast.error('发布 issue 需要先登录（GitHub 或 QQ 邮箱）')
     authOpen.value = true
     return
   }

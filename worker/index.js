@@ -547,6 +547,19 @@ async function handleAuth(env, request, url, cors) {
       return json({ error: 'code_wrong', message: '验证码不对' }, 400, origin, env)
     }
 
+    // 验证码对了才告诉对方「你被封了」，避免随便填个邮箱就能探测封禁状态
+    const ban = await kvJson(env, 'ban:' + sub)
+    if (ban && (ban.until === 0 || ban.until > Date.now())) {
+      await env.NATB_KV.delete('code:' + sub)
+      const until = ban.until === 0 ? '永久' : new Date(ban.until).toISOString().slice(0, 10)
+      return json(
+        { error: 'banned', until, message: '该账号已被封禁（' + until + '），无法登录' },
+        403,
+        origin,
+        env,
+      )
+    }
+
     await env.NATB_KV.delete('code:' + sub)
     const masked = maskEmail(email)
     const profile = (await kvJson(env, 'user:' + sub)) || { created: Date.now(), issues: 0, comments: 0 }
