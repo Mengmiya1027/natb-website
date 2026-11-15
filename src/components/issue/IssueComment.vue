@@ -36,7 +36,7 @@ const props = defineProps({
   events: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['edit', 'delete', 'reply'])
+const emit = defineEmits(['edit', 'delete', 'reply', 'blocked'])
 
 const store = useIssueStore()
 
@@ -72,7 +72,8 @@ const qqOwnComment = computed(
   () => Boolean(qqMarker.value?.sub && store.qqUser?.sub && qqMarker.value.sub === store.qqUser.sub),
 )
 
-/** 编辑只给作者本人；删除额外给管理员（可以删别人的） */
+/** 编辑只给作者本人；删除额外给管理员（可以删别人的）。
+ * 被封禁 / 未登录时按钮仍然显示，点下去由 guardWritable() 直接弹封禁说明。 */
 const canEdit = computed(() => isAuthor.value || qqOwnComment.value)
 const canDelete = computed(() => canEdit.value || store.canManage)
 
@@ -135,8 +136,17 @@ function absoluteTime(value) {
 const editing = ref(false)
 const draft = ref('')
 const textareaRef = ref(null)
+const deleteOpen = ref(false)
+
+/* 不可写（未登录 / 被封禁）时直接上报，不要先让用户走一遍编辑或确认流程 */
+function guardWritable() {
+  if (store.canWrite) return true
+  emit('blocked')
+  return false
+}
 
 function startEdit() {
+  if (!guardWritable()) return
   draft.value = props.comment?.body || ''
   editing.value = true
   nextTick(() => {
@@ -167,11 +177,18 @@ function saveEdit() {
   editing.value = false
 }
 
+/** 点垃圾桶先过一遍可写检查：被封的人不该看到「删除这条评论？」再被拒绝 */
+function askDelete() {
+  if (!guardWritable()) return
+  deleteOpen.value = true
+}
+
 function requestDelete() {
   emit('delete', props.comment.id)
 }
 
 function requestReply() {
+  if (!guardWritable()) return
   emit('reply', login.value)
 }
 </script>
@@ -222,12 +239,15 @@ function requestReply() {
         </button>
 
         <template v-if="canDelete">
-          <AlertDialog>
-            <AlertDialogTrigger as-child>
-              <button type="button" class="natb-comment__action natb-comment__action--danger" title="删除评论">
-                <IconTrash2 class="size-3.5" />
-              </button>
-            </AlertDialogTrigger>
+          <AlertDialog v-model:open="deleteOpen">
+            <button
+              type="button"
+              class="natb-comment__action natb-comment__action--danger"
+              title="删除评论"
+              @click="askDelete"
+            >
+              <IconTrash2 class="size-3.5" />
+            </button>
             <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
               <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
                 <div class="flex items-center gap-3">

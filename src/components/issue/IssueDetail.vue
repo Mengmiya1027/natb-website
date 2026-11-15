@@ -14,8 +14,10 @@ import { updateIssueMeta } from '@/api/issueMeta'
 import QqBanDialog from './QqBanDialog.vue'
 import DisabledPicker from './DisabledPicker.vue'
 import { useIssueStore } from '@/stores/issue'
+import { ISSUE_REPO_FULL } from '@/config/github'
 
 import MarkdownView from './MarkdownView.vue'
+import MarkdownEditor from './MarkdownEditor.vue'
 import { parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
 import IssueTimeline from './IssueTimeline.vue'
 
@@ -30,6 +32,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   AlertDialog,
@@ -45,6 +48,9 @@ import {
 
 import IconAlertTriangle from '~icons/lucide/triangle-alert'
 import IconArrowLeft from '~icons/lucide/arrow-left'
+import IconPencil from '~icons/lucide/pencil'
+import IconLink from '~icons/lucide/link'
+import IconFileCode from '~icons/lucide/file-code'
 import IconCircleCheck from '~icons/lucide/circle-check'
 import IconCircleDot from '~icons/lucide/circle-dot'
 import IconExternalLink from '~icons/lucide/external-link'
@@ -136,12 +142,57 @@ const cleanBody = computed(() => stripQqMarker(issue.value?.body))
 const qqOwnIssue = computed(
   () => Boolean(qqMarker.value?.sub && store.qqUser?.sub && qqMarker.value.sub === store.qqUser.sub),
 )
-const canQqClose = computed(
-  () => store.writeMode === 'qq' && qqOwnIssue.value && issue.value?.state === 'open',
-)
+/* 按钮的可见性只看「是不是我这条、还开着没」；能不能写由点击时判断——
+ * 之前把 writeMode 写进条件，被封禁时会误显示成「已关闭」。 */
+const canQqClose = computed(() => qqOwnIssue.value && issue.value?.state === 'open')
+const closeConfirmOpen = ref(false)
+const deleteConfirmOpen = ref(false)
 const qqClosing = ref(false)
 const qqDeleting = ref(false)
 const banOpen = ref(false)
+
+/* 分享链接与 Markdown 引用：任何身份、任何 issue 都能用 */
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function issueShareUrl() {
+  return issue.value?.html_url || `https://github.com/${ISSUE_REPO_FULL}/issues/${props.number}`
+}
+
+async function copyIssueLink() {
+  const ok = await copyTextToClipboard(issueShareUrl())
+  ok ? toast.success('链接已复制') : toast.error('复制失败，请手动复制')
+}
+
+async function copyIssueMarkdown() {
+  const text = `[${issue.value?.title || 'issue #' + props.number}](${issueShareUrl()})`
+  const ok = await copyTextToClipboard(text)
+  ok ? toast.success('Markdown 引用已复制') : toast.error('复制失败，请手动复制')
+}
+
+function askCloseOwnIssue() {
+  if (!store.canWrite) {
+    if (store.qqBanned || store.ghBanned) banOpen.value = true
+    else toast.error('请先登录后再操作')
+    return
+  }
+  closeConfirmOpen.value = true
+}
+
+function askDeleteOwnIssue() {
+  if (!store.canWrite) {
+    if (store.qqBanned || store.ghBanned) banOpen.value = true
+    else toast.error('请先登录后再操作')
+    return
+  }
+  deleteConfirmOpen.value = true
+}
 
 async function deleteOwnIssue() {
   if (qqDeleting.value) return
@@ -236,6 +287,10 @@ async function load() {
       githubApi.getIssuePinned(props.number).catch(() => null),
     ])
     if (issueData && pinned !== null) issueData.pinned = pinned
+    // 顺带刷新一次封禁状态：封禁/解封可能发生在别的设备上，页面自己不会知道，
+    // 否则会一直拿旧的 canWrite 判断，解封了也看不到编辑入口
+    store.refreshQq().catch(() => {})
+    store.refreshGhLink().catch(() => {})
     issue.value = issueData
     comments.value = Array.isArray(commentData) ? commentData : []
     events.value = Array.isArray(timelineData) ? timelineData : []
@@ -287,6 +342,56 @@ const isIssueAuthor = computed(() => {
   return Boolean(me && owner && String(me).toLowerCase() === String(owner).toLowerCase())
 })
 const canEditTags = computed(() => store.canManage || isIssueAuthor.value)
+
+/* 改标题与正文：GitHub 允许作者本人和管理编辑，走自己的 token 直连；
+ * QQ 身份暂不支持（中转那条 PATCH 只处理标签/里程碑/指派）。 */
+/* 编辑入口只要「管理或作者」就显示；被封/未登录时点下去由 startEditIssue 拦下弹窗，
+ * 与评论上的编辑、删除按钮保持同一套行为。 */
+const editing = ref(false)
+const editTitle = ref('')
+const editBody = ref('')
+const savingEdit = ref(false)
+
+function startEditIssue() {
+  if (!store.canWrite) {
+    if (store.qqBanned || store.ghBanned) banOpen.value = true
+    else toast.error('请先登录后再编辑')
+    return
+  }
+  editTitle.value = issue.value?.title || ''
+  editBody.value = issue.value?.body || ''
+  editing.value = true
+}
+
+function cancelEditIssue() {
+  editing.value = false
+}
+
+async function saveEditIssue() {
+  const title = editTitle.value.trim()
+  if (!title) {
+    toast.error('标题不能为空')
+    return
+  }
+  savingEdit.value = true
+  try {
+    if (store.writeMode === 'qq') {
+      // QQ 身份经中转代写；隐藏标记由 Worker 拼回正文尾部
+      await updateIssueMeta(props.number, { title, body: editBody.value })
+    } else {
+      await githubApi.updateIssue(props.number, { title, body: editBody.value })
+    }
+    editing.value = false
+    toast.success('已保存')
+    // 重新拉一次：QQ 那条的 marker 是服务端补回去的，本地这份正文里没有它
+    await load()
+    emit('changed')
+  } catch (err) {
+    toast.error(err?.message || '保存失败')
+  } finally {
+    savingEdit.value = false
+  }
+}
 const canEditAssignees = computed(() => store.canManage)
 
 watch(labels, async (next) => {
@@ -354,20 +459,47 @@ watch(milestone, async (next) => {
 
 /* ---------------- 评论操作 ---------------- */
 
+/** 不可写时点编辑/删除/回复：被封就弹详情框，没登录就提示登录 */
+function onBlocked() {
+  if (store.qqBanned || store.ghBanned) banOpen.value = true
+  else toast.error('请先登录后再操作')
+}
+
 async function onEditComment(id, body) {
+  // 被封禁 / 未登录时连请求都别发：那条路只会换来一句 GitHub 的英文原话
+  if (!store.canWrite) {
+    if (store.qqBanned || store.ghBanned) banOpen.value = true
+    else toast.error('请先登录后再编辑评论')
+    return
+  }
   try {
-    const updated = await githubWriteApi.updateComment(id, body)
+    // QQ 身份没有 GitHub token，编辑评论必须由中转用 App 凭据代写
+    const updated =
+      store.writeMode === 'qq'
+        ? await qqWriteApi.updateComment(id, body)
+        : await githubWriteApi.updateComment(id, body)
     comments.value = comments.value.map((comment) =>
       comment.id === id ? { ...comment, ...(updated || {}), body } : comment,
     )
     toast.success('评论已更新')
     emit('changed')
   } catch (err) {
+    // GitHub 说「Must have admin rights」时，多半是这个账号已经被踢出协作者了
+    // （被封禁的人会先被 GitHub 从协作者里移除）。顺手把封禁状态刷新一下。
+    if (err?.status === 403) {
+      store.refreshQq()
+      store.refreshGhLink()
+    }
     toast.error(err?.message || '更新评论失败')
   }
 }
 
 async function onDeleteComment(id) {
+  if (!store.canWrite) {
+    if (store.qqBanned || store.ghBanned) banOpen.value = true
+    else toast.error('请先登录后再删除评论')
+    return
+  }
   try {
     // QQ 身份走中转代删，管理员与 GitHub 用户直接走 GitHub
     if (store.writeMode === 'qq' && !store.canManage) await qqWriteApi.deleteComment(id)
@@ -459,7 +591,8 @@ async function onSidebarChanged() {
           </Button>
 
           <div class="natb-detail__head-main">
-            <h1 class="natb-detail__title">{{ issue.title }}</h1>
+            <h1 v-if="!editing" class="natb-detail__title">{{ issue.title }}</h1>
+            <Input v-else v-model="editTitle" class="h-9 max-w-xl text-base font-semibold" placeholder="标题" />
             <div class="natb-detail__meta">
               <Badge :variant="isOpen ? 'default' : 'secondary'" class="gap-1">
                 <IconCircleDot v-if="isOpen" class="size-3" />
@@ -509,11 +642,30 @@ async function onSidebarChanged() {
                 {{ relativeTime(issue.created_at) }}
               </time>
             </span>
+            <Button
+              v-if="canEditTags && !editing"
+              variant="ghost"
+              size="sm"
+              class="ml-auto gap-1.5 text-xs"
+              @click="startEditIssue"
+            >
+              <IconPencil class="size-3.5" />
+              编辑
+            </Button>
           </header>
 
-          <div class="natb-detail__card-body">
+          <div v-if="!editing" class="natb-detail__card-body">
             <MarkdownView v-if="issue.body" :content="cleanBody" />
             <p v-else class="natb-detail__empty">这条 issue 没有正文。</p>
+          </div>
+          <div v-else class="flex flex-col gap-2 px-4 pb-3">
+            <MarkdownEditor v-model="editBody" placeholder="写下正文…支持 Markdown" />
+            <div class="flex items-center justify-end gap-2">
+              <Button variant="ghost" size="sm" :disabled="savingEdit" @click="cancelEditIssue">取消</Button>
+              <Button size="sm" :disabled="savingEdit" @click="saveEditIssue">
+                {{ savingEdit ? '保存中…' : '保存' }}
+              </Button>
+            </div>
           </div>
         </article>
 
@@ -526,6 +678,7 @@ async function onSidebarChanged() {
             @edit="onEditComment"
             @delete="onDeleteComment"
             @reply="onReply"
+            @blocked="onBlocked"
           />
         </section>
 
@@ -623,16 +776,30 @@ async function onSidebarChanged() {
 
         <!-- 操作卡片的样式由 IssueSidebarActions 自己提供，这里只负责摆位置 -->
         <!-- QQ 身份没有标签/锁定/指派这些能力，只给「关闭自己发的单」一个入口 -->
-        <section v-if="store.writeMode === 'qq' && qqOwnIssue" class="natb-detail__actions">
+        <!-- QQ 身份（含被封禁、writeMode 为 none 时）看自己的单：走这一支，只给关闭/删除 -->
+        <template v-if="qqOwnIssue && store.writeMode !== 'github'">
+        <section class="natb-detail__actions">
+          <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
+            <p class="text-xs font-medium text-muted-foreground">操作</p>
+            <Button variant="outline" size="sm" class="w-full justify-start gap-2" @click="copyIssueLink">
+              <IconLink class="size-4 text-muted-foreground" />
+              复制链接
+            </Button>
+            <Button variant="outline" size="sm" class="w-full justify-start gap-2" @click="copyIssueMarkdown">
+              <IconFileCode class="size-4 text-muted-foreground" />
+              复制 Markdown 引用
+            </Button>
+          </div>
+        </section>
+
+        <section class="natb-detail__actions">
           <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-xs">
             <p class="text-xs font-medium text-muted-foreground">这是你发的 issue</p>
-            <AlertDialog v-if="canQqClose">
-              <AlertDialogTrigger as-child>
-                <Button variant="outline" size="sm" class="w-full" :disabled="qqClosing">
-                  <IconCircleCheck class="size-4" />
-                  {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
-                </Button>
-              </AlertDialogTrigger>
+            <AlertDialog v-if="canQqClose" v-model:open="closeConfirmOpen">
+              <Button variant="outline" size="sm" class="w-full" :disabled="qqClosing" @click="askCloseOwnIssue">
+                <IconCircleCheck class="size-4" />
+                {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
+              </Button>
               <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
                 <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
                   <div class="flex items-center gap-3">
@@ -668,19 +835,18 @@ async function onSidebarChanged() {
             </AlertDialog>
             <p v-else class="text-muted-foreground text-xs">已关闭。</p>
 
-            <AlertDialog>
-              <AlertDialogTrigger as-child>
+            <AlertDialog v-model:open="deleteConfirmOpen">
                 <Button
                   variant="ghost"
                   size="sm"
                   class="text-destructive hover:bg-destructive/10 hover:text-destructive active:bg-destructive/15 w-full gap-1.5 transition-colors"
                   :disabled="qqDeleting"
+                  @click="askDeleteOwnIssue"
                 >
                   <IconLoader v-if="qqDeleting" class="size-4 animate-spin" />
                   <IconTrash2 v-else class="size-4" />
                   {{ qqDeleting ? '正在删除…' : '删除这个 issue' }}
                 </Button>
-              </AlertDialogTrigger>
               <!-- 内容区居中竖排，按钮区单独成条：浅灰底 + 顶部分隔线 + 右对齐（同「关闭 issue」那份） -->
               <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
                 <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
@@ -719,9 +885,11 @@ async function onSidebarChanged() {
             </AlertDialog>
           </div>
         </section>
+        </template>
 
-        <section v-else-if="store.writeMode === 'github'" class="natb-detail__actions">
-          <IssueSidebarActions :issue="issue" @changed="onSidebarChanged" />
+        <!-- 其余情况（非管理、非本单作者的任何人）：只给分享类操作，具体能点到哪些由组件内部判断 -->
+        <section v-else class="natb-detail__actions">
+          <IssueSidebarActions :issue="issue" @changed="onSidebarChanged" @blocked="onBlocked" />
         </section>
       </aside>
     </div>

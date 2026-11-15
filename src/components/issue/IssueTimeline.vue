@@ -40,7 +40,7 @@ const props = defineProps({
   comments: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['open', 'edit', 'delete', 'reply'])
+const emit = defineEmits(['open', 'edit', 'delete', 'reply', 'blocked'])
 
 /* ---------------- 时间工具 ---------------- */
 
@@ -334,6 +334,7 @@ const items = computed(() => {
             @edit="forwardEdit"
             @delete="forwardDelete"
             @reply="forwardReply"
+            @blocked="emit('blocked')"
           />
 
           <div v-else class="natb-timeline__event">

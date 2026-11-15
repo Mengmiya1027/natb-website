@@ -542,6 +542,22 @@ async function handleIssueMeta(env, request, url, match) {
     }
     patch.assignees = Array.isArray(body.assignees) ? body.assignees.slice(0, 5) : []
   }
+  if (body.title !== undefined) {
+    const title = String(body.title || '').trim()
+    if (!title || title.length > 200) {
+      return json({ error: 'invalid_title', message: '标题要 1-200 个字符' }, 400, origin, env)
+    }
+    patch.title = title
+  }
+  if (body.body !== undefined) {
+    let text = String(body.body || '')
+    if (text.length > 60000) return json({ error: 'invalid_body', message: '正文太长了' }, 400, origin, env)
+    // QQ 代发的正文尾部带着隐藏标记，那是作者身份的凭据；前端看到的是剥掉标记后的正文，
+    // 提交回来时不含它，这里必须原样拼回，否则改一次正文这条 issue 就不认作者了。
+    const marker = String(issue.body || '').match(/<!--\s*natb:qq\s+\{[\s\S]*?\}\s*-->/)
+    if (marker && !/<!--\s*natb:qq/.test(text)) text = text.trimEnd() + '\n\n' + marker[0]
+    patch.body = text
+  }
 
   if (!Object.keys(patch).length) return json({ error: 'nothing_to_update' }, 400, origin, env)
 
@@ -549,7 +565,21 @@ async function handleIssueMeta(env, request, url, match) {
     method: 'PATCH',
     body: JSON.stringify(patch),
   })
-  return json({ ok: true, issue: { labels: updated.labels || [], milestone: updated.milestone || null, assignees: updated.assignees || [] } }, 200, origin, env)
+  return json(
+    {
+      ok: true,
+      issue: {
+        title: updated.title || '',
+        body: updated.body || '',
+        labels: updated.labels || [],
+        milestone: updated.milestone || null,
+        assignees: updated.assignees || [],
+      },
+    },
+    200,
+    origin,
+    env,
+  )
 }
 
 
@@ -1487,6 +1517,40 @@ async function handleQq(env, request, url, cors) {
     }
     await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, { method: 'DELETE' })
     return json({ ok: true }, 200, origin, env)
+  }
+
+  /* 编辑自己发的评论。QQ 身份没有 GitHub token，只能由中转用 App 凭据代写；
+   * 正文尾部那串 marker 是作者身份凭据，必须按原样保留，否则改一次就不认作者了。 */
+  if (commentDeleteMatch && request.method === 'PATCH') {
+    const commentId = Number(commentDeleteMatch[1])
+    const body = await readJsonBody(request)
+    const text = String((body && body.body) || '').slice(0, 10000)
+    if (!text.trim()) return json({ error: 'body_required', message: '评论不能为空' }, 400, origin, env)
+    const comment = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
+      method: 'GET',
+    })
+    const original = String(comment.body || '')
+    const marker = original.match(/<!-- natb:qq (\{.*?\}) -->/)
+    let owner = null
+    if (marker) {
+      try {
+        owner = JSON.parse(marker[1]).sub
+      } catch {
+        owner = null
+      }
+    }
+    if (owner !== session.sub) {
+      return json({ error: 'forbidden', message: '只能编辑自己发的评论' }, 403, origin, env)
+    }
+    // 可见署名 + 隐藏注释一起搬过去（原文里 marker 之前那段 <sub>…</sub>）
+    const markerAt = original.indexOf(marker[0])
+    const subAt = original.lastIndexOf('<sub>', markerAt)
+    const tail = original.slice(subAt >= 0 ? subAt : markerAt)
+    const updated = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
+      method: 'PATCH',
+      body: JSON.stringify({ body: text.trimEnd() + '\n\n' + tail.trimStart() }),
+    })
+    return json({ ok: true, comment: { id: updated.id, body: updated.body } }, 200, origin, env)
   }
 
   const closeMatch = url.pathname.match(/^\/qq\/issue\/(\d+)$/)

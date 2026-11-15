@@ -47,7 +47,7 @@ const props = defineProps({
   issue: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['changed'])
+const emit = defineEmits(['changed', 'blocked'])
 
 const store = useIssueStore()
 
@@ -61,6 +61,14 @@ const isLocked = computed(() => Boolean(props.issue?.locked))
 const isPinned = computed(() => Boolean(props.issue?.pinned))
 const isLoggedIn = computed(() => Boolean(store.isLoggedIn))
 const canManage = computed(() => Boolean(store.canManage))
+/* 关闭 / 重开 / 锁定只给「管理员」或「这条 issue 的作者」——
+ * 普通路人看别人的单，这几个按钮不该出现 */
+const canOperate = computed(() => {
+  if (canManage.value) return true
+  const mine = store.user?.login
+  const owner = props.issue?.user?.login
+  return Boolean(mine && owner && String(mine).toLowerCase() === String(owner).toLowerCase())
+})
 
 const subscriptionTitle = computed(() => {
   if (!isLoggedIn.value) return '登录后可订阅'
@@ -72,15 +80,20 @@ const issueUrl = computed(
   () => props.issue?.html_url || `https://github.com/${ISSUE_REPO_FULL}/issues/${number.value}`,
 )
 
-function requireLogin() {
-  if (isLoggedIn.value) return true
+/** 点下去的那一刻再判断能不能写：被封禁就上报给详情页弹说明，而不是先发一次注定失败的请求 */
+function requireWritable() {
+  if (store.canWrite) return true
+  if (store.qqBanned || store.ghBanned) {
+    emit('blocked')
+    return false
+  }
   toast.error('请先登录 GitHub 后再执行这个操作')
   return false
 }
 
 /** 统一的操作包装：串行、成功 toast + changed、失败原样提示 */
 async function run(key, action, successMessage) {
-  if (!requireLogin()) return
+  if (!requireWritable()) return
   if (busy.value) return
   if (!number.value) {
     toast.error('缺少 issue 编号，无法操作')
@@ -153,7 +166,7 @@ async function loadSubscription() {
 }
 
 function toggleSubscription() {
-  if (!requireLogin()) return
+  if (!requireWritable()) return
   const next = !subscribed.value
   run(
     'subscribe',
@@ -241,7 +254,7 @@ watch(
   <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
     <p class="text-xs font-medium text-muted-foreground">操作</p>
 
-    <DropdownMenu v-if="!isClosed">
+    <DropdownMenu v-if="!isClosed && canOperate">
       <DropdownMenuTrigger as-child>
         <Button type="button" variant="outline" size="sm" class="w-full justify-start gap-2" :disabled="Boolean(busy)">
           <IconLoader2 v-if="busy === 'close'" class="size-4 animate-spin" />
@@ -262,7 +275,7 @@ watch(
     </DropdownMenu>
 
     <Button
-      v-else
+      v-else-if="canOperate"
       type="button"
       variant="outline"
       size="sm"
@@ -276,6 +289,7 @@ watch(
     </Button>
 
     <Button
+      v-if="canOperate"
       type="button"
       variant="outline"
       size="sm"
@@ -289,7 +303,9 @@ watch(
       <span>{{ isLocked ? '解锁会话' : '锁定会话' }}</span>
     </Button>
 
+    <!-- 订阅是 GitHub 账号的行为，QQ 身份没有对应的令牌，不显示 -->
     <Button
+      v-if="store.isLoggedIn"
       type="button"
       variant="outline"
       size="sm"
