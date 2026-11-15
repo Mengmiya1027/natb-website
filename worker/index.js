@@ -644,8 +644,12 @@ async function handleIssueDelete(env, request, url, match) {
   try {
     await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'DELETE' })
   } catch (err) {
+    // 把 GitHub 的原话透出来：403 通常是权限不够，别的会直接说明原因
     return json(
-      { error: 'delete_failed', message: '删除失败：机器人没有仓库管理权限，请去 GitHub App 设置里补上' },
+      {
+        error: 'delete_failed',
+        message: '删除失败（HTTP ' + (err && err.status ? err.status : '?') + '）：' + ((err && err.message) || '未知原因'),
+      },
       502,
       origin,
       env,

@@ -417,7 +417,7 @@ async function saveEditIssue() {
       // QQ 身份经中转代写；隐藏标记由 Worker 拼回正文尾部
       await updateIssueMeta(props.number, { title, body: editBody.value })
     } else {
-      await githubApi.updateIssue(props.number, { title, body: editBody.value })
+      await githubWriteApi.updateIssue(props.number, { title, body: editBody.value })
     }
     editing.value = false
     toast.success('已保存')
