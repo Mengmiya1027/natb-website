@@ -39,9 +39,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import IconSun from '~icons/lucide/sun'
 import IconMoon from '~icons/lucide/moon'
 import IconMonitor from '~icons/lucide/monitor'
-import IconSettings2 from '~icons/lucide/settings-2'
 import IconPlus from '~icons/lucide/plus'
 import IconShieldCheck from '~icons/lucide/shield-check'
+import IconSettings2 from '~icons/lucide/settings-2'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconCircleDot from '~icons/lucide/circle-dot'
 import IconTag from '~icons/lucide/tag'
@@ -304,7 +304,8 @@ function onIssueCreated(number) {
               <TooltipContent>{{ themeLabel }}</TooltipContent>
             </Tooltip>
 
-            <Tooltip>
+            <!-- 登录后才有下拉菜单可用；未登录时顶栏保持干净，靠登录面板里的提示引导 -->
+            <Tooltip v-if="store.isLoggedIn || store.isQqLoggedIn">
               <TooltipTrigger as-child>
                 <Button variant="ghost" size="icon" class="size-8" @click="settingsOpen = true">
                   <IconSettings2 class="size-[18px]" />

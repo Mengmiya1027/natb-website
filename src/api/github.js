@@ -126,15 +126,22 @@ export function clearToken() {
   }
 }
 
-/** 登录成功后向中转报一次「我来过」，管理面板才看得见没发过言的账号 */
+/**
+ * 登录成功后向中转报一次「我来过」，管理面板才看得见没发过言的账号。
+ * 返回值是「注册本站」的时间戳：中转只在第一次记下它，
+ * 拿不到就是 0，由调用方决定怎么兜底。
+ */
 export function reportLoginSeen(token) {
   const root = (getProxyBase() || '').replace(/\/$/, '')
-  if (!root || !token) return
+  if (!root || !token) return Promise.resolve(0)
   // 失败不打扰用户：这只是一条运营记录，丢了下次登录还会再报
-  fetch(root + '/auth/seen', {
+  return fetch(root + '/auth/seen', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token },
-  }).catch(() => {})
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => Number(data?.joinedAt) || 0)
+    .catch(() => 0)
 }
 
 export function getProxyBase() {
@@ -340,6 +347,27 @@ export async function countIssues(state = 'open') {
   // 还有下一页说明真实数量超过 100；统计卡只显示数字，给个下限就够，别装作精确
   const hasMore = /rel="next"/.test(res.headers.get('link') || '')
   return hasMore ? 100 : items.length
+}
+
+/**
+ * GitHub 身份的「发布 / 评论」计数。
+ *
+ * 发布：/issues?creator= 一次拉 100 条自己数（与 countIssues 同一套取舍）。
+ * 评论：REST 没有「按人统计评论条数」的端点，只能拉仓库最近 100 条评论本地过滤；
+ *      拉满 100 条时数值是下限，不装作精确。
+ */
+export async function countUserActivity(login) {
+  const who = String(login || '').toLowerCase()
+  if (!who) return { issues: 0, comments: 0 }
+  const [issueList, commentList] = await Promise.all([
+    gh(`/repos/${ISSUE_REPO.owner}/${ISSUE_REPO.name}/issues?state=all&per_page=100&creator=${encodeURIComponent(login)}`),
+    gh(`/repos/${ISSUE_REPO.owner}/${ISSUE_REPO.name}/issues/comments?per_page=100`),
+  ])
+  const issues = (Array.isArray(issueList) ? issueList : []).filter((i) => !i.pull_request).length
+  const comments = (Array.isArray(commentList) ? commentList : []).filter(
+    (c) => String(c.user?.login || '').toLowerCase() === who,
+  ).length
+  return { issues, comments }
 }
 
 /** GraphQL 入口，用于 REST 覆盖不到的能力（置顶、删除 issue、转移 issue） */

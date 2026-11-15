@@ -99,6 +99,8 @@ export const useIssueStore = defineStore('issue', () => {
   const ghBanned = ref(false)
   const ghBanUntil = ref(0)
   const ghBanReason = ref('')
+  /** 「注册本站」的时间戳（中转只在第一次登录时记下），0 表示拿不到 */
+  const ghJoinedAt = ref(0)
 
   /**
    * 写操作走哪条通道。
@@ -227,7 +229,9 @@ export const useIssueStore = defineStore('issue', () => {
         return
       }
       // 老会话也补报一次（中转那边一天只落一次盘），免得早先登录的人永远不进名单
-      reportLoginSeen(token.value)
+      reportLoginSeen(token.value).then((at) => {
+        if (at) ghJoinedAt.value = at
+      })
       user.value = me
       setCachedUser(me)
       setToken(token.value)
@@ -285,7 +289,9 @@ export const useIssueStore = defineStore('issue', () => {
       setCachedUser(me)
       authState.value = 'ok'
       // 让中转记一笔「这个人来登录过」，管理面板才看得见没发过言的账号
-      reportLoginSeen(value)
+      reportLoginSeen(value).then((at) => {
+        if (at) ghJoinedAt.value = at
+      })
       await refreshPermission()
       await refreshGhLink()
       return me
@@ -354,6 +360,7 @@ export const useIssueStore = defineStore('issue', () => {
     ghBanned.value = false
     ghBanUntil.value = 0
     ghBanReason.value = ''
+    ghJoinedAt.value = 0
   }
 
   /* 凭据失效：当场退出、给出提示、弹出登录框。
@@ -461,6 +468,7 @@ export const useIssueStore = defineStore('issue', () => {
     ghBanned,
     ghBanUntil,
     ghBanReason,
+    ghJoinedAt,
     displayAsGithub,
     writeMode,
     setQqSession,

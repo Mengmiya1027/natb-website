@@ -369,11 +369,13 @@ onBeforeUnmount(resetFlow)
       v-if="!store.isLoggedIn && !store.isQqLoggedIn"
       size="sm"
       variant="outline"
-      class="gap-1.5"
+      class="gap-1"
       @click="authOpenModel = true"
     >
-      <IconGitHub class="size-3.5" />
-      <span class="hidden sm:inline">登录</span>
+      <IconQQ class="size-4" />
+      <span class="bg-foreground/25 h-3 w-px" aria-hidden="true" />
+      <IconGitHub class="size-4" />
+      <span class="hidden pl-1 sm:inline">登录</span>
     </Button>
 
     <DropdownMenu v-else>

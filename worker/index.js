@@ -113,6 +113,12 @@ function maskEmail(email) {
   return head + '***@' + domain
 }
 
+/** 东八区的昨天零点：用户眼里的「昨天」，不跟 Worker 的 UTC 走 */
+function yesterdayStartCst() {
+  const dayStart = Math.floor((Date.now() + 8 * 3600 * 1000) / 86400000) * 86400000
+  return dayStart - 8 * 3600 * 1000 - 86400000
+}
+
 async function kvJson(env, key) {
   const raw = await env.NATB_KV.get(key)
   if (!raw) return null
@@ -1292,12 +1298,19 @@ async function handleAuth(env, request, url, cors) {
     const me = await loginOfGhToken(raw)
     if (!me) return json({ error: 'token_invalid' }, 401, origin, env)
     const login = String(me.login).toLowerCase()
+    const now = Date.now()
     // 一天内不重复写：每次开页面都报一次，不节流会把 KV 写额度耗光
     const prev = await kvJson(env, 'ghseen:' + login)
-    if (!prev || Date.now() - (prev.at || 0) > 86400000) {
-      await kvSet(env, 'ghseen:' + login, { login, at: Date.now() }, 180 * 86400)
+    if (!prev || now - (prev.at || 0) > 86400000) {
+      await kvSet(env, 'ghseen:' + login, { login, at: now }, 180 * 86400)
     }
-    return json({ ok: true, login }, 200, origin, env)
+    // 「注册本站」只写一次。没有记录的一律按东八区昨天零点建档，前端显示 1 天。
+    let joined = await kvJson(env, 'ghjoined:' + login)
+    if (!joined) {
+      joined = { login, at: yesterdayStartCst() }
+      await kvSet(env, 'ghjoined:' + login, joined, 3650 * 86400)
+    }
+    return json({ ok: true, login, joinedAt: joined.at }, 200, origin, env)
   }
 
   if (url.pathname === '/auth/me' && request.method === 'GET') {

@@ -35,17 +35,19 @@ const untilText = computed(() => {
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
     <DialogContent class="w-[min(400px,92vw)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
-      <div class="flex flex-col items-center gap-2 px-5 pt-6 pb-4 text-center">
-        <div class="bg-destructive/10 text-destructive grid size-11 place-items-center rounded-full">
-          <IconBan class="size-5" />
+      <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+        <div class="flex items-center gap-3">
+          <div class="bg-destructive/10 text-destructive grid size-9 shrink-0 place-items-center rounded-[10px]">
+            <IconBan class="size-4" />
+          </div>
+          <DialogTitle class="text-xl font-bold">账号已被封禁</DialogTitle>
         </div>
-        <DialogTitle class="text-base">账号已被封禁</DialogTitle>
-        <DialogDescription class="text-xs leading-relaxed">
+        <DialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
           你可以继续浏览 issue，但暂时不能发帖、评论或关闭 issue。
         </DialogDescription>
       </div>
 
-      <div class="flex flex-col gap-2 px-5 pb-4">
+      <div class="flex flex-col gap-2 px-7 pb-5">
         <div class="bg-muted/60 rounded-lg px-3 py-2.5">
           <p class="text-muted-foreground text-[11px]">原因</p>
           <p class="mt-0.5 text-sm leading-relaxed">
@@ -55,7 +57,7 @@ const untilText = computed(() => {
         <p class="text-muted-foreground text-center text-xs">{{ untilText }}</p>
       </div>
 
-      <div class="border-border flex items-center justify-between gap-2 border-t px-5 py-3">
+      <div class="border-border bg-muted/70 flex items-center justify-between gap-2 border-t px-5 py-4">
         <a
           :href="ISSUE_REPO_URL"
           target="_blank"
@@ -65,7 +67,7 @@ const untilText = computed(() => {
           去仓库留言申诉
           <IconExternalLink class="size-3" />
         </a>
-        <Button variant="outline" size="sm" @click="emit('update:open', false)">知道了</Button>
+        <Button size="sm" class="font-semibold" @click="emit('update:open', false)">知道了</Button>
       </div>
     </DialogContent>
   </Dialog>
