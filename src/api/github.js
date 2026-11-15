@@ -323,9 +323,11 @@ export async function gh(path, { method = 'GET', body, auth = true, headers = {}
  * 将来有 PR 的话这里要按 pull_request 字段再减一次。
  */
 export async function countIssues(state = 'open') {
+  // 一次拉满 100 条自己数。不能靠 Link 头的 rel="last"：GitHub 的 issues 列表
+  // 是 cursor 分页，只给 rel="next"，取最后一页页码那条路永远走不通（结果恒等于 per_page）。
   const url =
     apiBase() +
-    `/repos/${ISSUE_REPO.owner}/${ISSUE_REPO.name}/issues?state=${state}&per_page=1`
+    `/repos/${ISSUE_REPO.owner}/${ISSUE_REPO.name}/issues?state=${state}&per_page=100`
   const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
   const token = getEffectiveToken()
   if (token) headers.Authorization = `Bearer ${token}`
@@ -334,10 +336,10 @@ export async function countIssues(state = 'open') {
   const payload = await parseBody(res)
   if (!res.ok) throw new GitHubError(res.status, humanize(res.status, payload), payload)
 
-  const items = Array.isArray(payload) ? payload : []
-  const link = res.headers.get('link') || ''
-  const last = link.match(/[?&]page=(\d+)>;\s*rel="last"/)
-  return last ? Number(last[1]) : items.length
+  const items = (Array.isArray(payload) ? payload : []).filter((item) => !item.pull_request)
+  // 还有下一页说明真实数量超过 100；统计卡只显示数字，给个下限就够，别装作精确
+  const hasMore = /rel="next"/.test(res.headers.get('link') || '')
+  return hasMore ? 100 : items.length
 }
 
 /** GraphQL 入口，用于 REST 覆盖不到的能力（置顶、删除 issue、转移 issue） */
@@ -356,7 +358,7 @@ const repo = (suffix = '') => `/repos/${ISSUE_REPO_FULL}${suffix}`
 
 export const githubApi = {
   /** 仓库元信息：issue 开关、计数、权限 */
-  getRepo: () => gh(repo()),
+  getRepo: (opts) => gh(repo(), opts),
 
   /** issue 列表。parameters 直接透传 GitHub 的查询参数 */
   listIssues: ({ state = 'open', labels = '', assignee = '', milestone = '', sort = 'created', direction = 'desc', page = 1, per_page = 20, since = '' } = {}) => {

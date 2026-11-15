@@ -93,14 +93,29 @@ function openBan(user) {
   banOpen.value = true
 }
 
+/** 把 GitHub 那一层的同步结果翻成一句能懂的话，管理员当场就知道有没有生效 */
+function ghBlockHint(info) {
+  if (info.reason === 'no_token') return 'GitHub 侧未同步：服务器没配 GITHUB_ADMIN_TOKEN'
+  if (info.reason === 'network') return 'GitHub 侧未同步：连不上 GitHub'
+  if (info.status) {
+    const scopes = info.scopes ? ' · scopes: ' + (info.scopes || '无') : ''
+    const hint = info.tokenHint ? ' · token: ' + info.tokenHint : ''
+    return 'GitHub 侧未同步（HTTP ' + info.status + '）' + scopes + hint
+  }
+  return 'GitHub 侧未同步'
+}
+
 async function confirmBan() {
   if (!banTarget.value || banning.value) return
   banning.value = true
   const payload = { reason: banReason.value.trim(), days: banDays.value, banIp: banIp.value }
   try {
-    if (isGh.value) await adminApi.banGh(banTarget.value.login, payload)
-    else await adminApi.banQq(banTarget.value.sub, payload)
+    const res = isGh.value
+      ? await adminApi.banGh(banTarget.value.login, payload)
+      : await adminApi.banQq(banTarget.value.sub, payload)
     toast.success(isGh.value ? '已封禁，绑定的 QQ 身份一并封禁' : '已封禁')
+    // 本站封禁已经生效，但 GitHub 那边可能没同步上——这一层不能装没看见
+    if (res && res.ghBlock && res.ghBlock.ok === false) toast.error(ghBlockHint(res.ghBlock))
     banOpen.value = false
     await load()
   } catch (err) {
@@ -114,9 +129,9 @@ async function unban(user) {
   if (busyKey.value) return
   busyKey.value = rowKey(user)
   try {
-    if (isGh.value) await adminApi.unbanGh(user.login)
-    else await adminApi.unbanQq(user.sub)
+    const res = isGh.value ? await adminApi.unbanGh(user.login) : await adminApi.unbanQq(user.sub)
     toast.success('已解封')
+    if (res && res.ghBlock && res.ghBlock.ok === false) toast.error(ghBlockHint(res.ghBlock))
     await load()
   } catch (err) {
     toast.error(err?.message || String(err))

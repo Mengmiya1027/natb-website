@@ -248,8 +248,23 @@ export const useIssueStore = defineStore('issue', () => {
   async function refreshPermission() {
     if (!user.value?.login) return
     try {
-      const data = await githubApi.getPermission(user.value.login)
-      permission.value = data?.permission || ''
+      /* 用仓库对象里的 permissions 字段：它描述的是「当前这枚 token 在这个仓库能做什么」，
+       * 任何读得了这个仓库的 token 都拿得到。
+       * 原来的 /collaborators/{login}/permission 只有仓库管理员能查，普通协作者查自己会 404，
+       * 于是 write 协作者一律被判成「没有管理员权限」——这就是 SSS133 遇到的情况。 */
+      const data = await githubApi.getRepo({ noCache: true })
+      const p = data?.permissions || {}
+      permission.value = p.admin
+        ? 'admin'
+        : p.maintain
+          ? 'maintain'
+          : p.push
+            ? 'write'
+            : p.triage
+              ? 'triage'
+              : p.pull
+                ? 'read'
+                : ''
     } catch {
       permission.value = ''
     }

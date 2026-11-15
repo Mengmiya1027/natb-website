@@ -683,8 +683,11 @@ async function putBan(env, key, record) {
  * 没配就整段跳过 —— 封禁本身照常生效，只是少这一层。
  */
 async function ghBlockUser(env, login, blocked) {
-  const token = env.GITHUB_ADMIN_TOKEN
-  if (!token || !login) return
+  // PowerShell 管道有时会带一个 BOM(\uFEFF) 进 secret，GitHub 会把它当成 token 的一部分
+  // 从而判成 Bad credentials。这里先剥掉再判断，省得为了一个看不见的字符重配一次。
+  const token = String(env.GITHUB_ADMIN_TOKEN || '').replace(/^\uFEFF/, '').trim()
+  if (!login) return { ok: false, reason: 'no_login' }
+  if (!token) return { ok: false, reason: 'no_token' }
   const who = encodeURIComponent(String(login))
   try {
     const res = await fetch('https://api.github.com/user/blocks/' + who, {
@@ -696,10 +699,24 @@ async function ghBlockUser(env, login, blocked) {
         'User-Agent': 'natb-issue-proxy',
       },
     })
-    // 失败不阻断封禁流程：KV 里的记录才是权威，GitHub 这一层是加固
-    if (!res.ok) console.warn('ghBlockUser', blocked ? 'block' : 'unblock', login, res.status)
+    // 失败不阻断封禁流程：KV 里的记录才是权威，GitHub 这一层是加固。
+    // 但结果要回传给管理面板，否则管理员根本不知道这层没生效。
+    if (res.ok) return { ok: true }
+    // 失败时把 GitHub 的原话和这枚 token 的 scopes 一起带回去：
+    // 管理面板要能直接看出是「token 没勾 user」「token 是空的」还是「根本没权限」
+    const detail = await res.text().catch(() => '')
+    console.warn('ghBlockUser', blocked ? 'block' : 'unblock', login, res.status, detail.slice(0, 120))
+    return {
+      ok: false,
+      status: res.status,
+      detail: String(detail || '').slice(0, 160),
+      scopes: res.headers.get('x-oauth-scopes') || '',
+      // 只回前 6 位和长度：够判断「存进去的到底是不是一串 ghp_」，又不泄露内容
+      tokenHint: token.slice(0, 6) + '… len=' + token.length,
+    }
   } catch (err) {
     console.warn('ghBlockUser network', login, err && err.message)
+    return { ok: false, reason: 'network' }
   }
 }
 
@@ -709,7 +726,8 @@ async function banClass(env, { sub, login, record }) {
   if (login) await putBan(env, 'ban:gh:' + String(login).toLowerCase(), record)
   // 纯 QQ 用户没有 GitHub 账号，没有可 block 的对象；
   // 只有 GitHub 身份、以及 QQ 绑定了 GitHub 的身份走到这里
-  if (login) await ghBlockUser(env, login, true)
+  if (login) return await ghBlockUser(env, login, true)
+  return null
 }
 
 /**
@@ -732,7 +750,8 @@ async function unbanClass(env, { sub, login }) {
   if (sub) await env.NATB_KV.delete('ban:' + sub)
   if (login) await env.NATB_KV.delete('ban:gh:' + String(login).toLowerCase())
   // 解封要把 GitHub 侧的 block 一并撤掉，否则人放回来了却还是发不了言
-  if (login) await ghBlockUser(env, login, false)
+  if (login) return await ghBlockUser(env, login, false)
+  return null
 }
 
 /** 一个 QQ 身份的完整视图：绑定关系 + 合并角色 + 合并封禁 */
@@ -983,21 +1002,21 @@ async function handleAdmin(env, request, url) {
         return json({ error: 'self_ban', message: '不能封禁自己' }, 400, origin, env)
       }
       // 封禁沿等价类传播：只封一半的话另一半照样能写
-      await banClass(env, { sub, login, record })
+      const ghBlock = await banClass(env, { sub, login, record })
       let ips = []
       if (sub) {
         const profile = (await kvJson(env, 'user:' + sub)) || {}
         ips = (profile.ips || []).slice(0, 5)
         for (const ip of ips) await kvSet(env, 'ban:ip:' + ip, actor, 86400)
       }
-      return json({ ok: true, target, login, sub, until, ips }, 200, origin, env)
+      return json({ ok: true, target, login, sub, until, ips, ghBlock }, 200, origin, env)
     }
 
     const sub = String((body && body.sub) || '')
     if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
     if (me.sub && sub === me.sub) return json({ error: 'self_ban', message: '不能封禁自己' }, 400, origin, env)
     const login = await bindOfQq(env, sub)
-    await banClass(env, { sub, login, record })
+    const ghBlock = await banClass(env, { sub, login, record })
 
     let ips = []
     if (body && body.banIp) {
@@ -1005,7 +1024,7 @@ async function handleAdmin(env, request, url) {
       ips = (profile.ips || []).slice(0, 5)
       for (const ip of ips) await kvSet(env, 'ban:ip:' + ip, actor, 86400)
     }
-    return json({ ok: true, target, sub, login, until, ips }, 200, origin, env)
+    return json({ ok: true, target, sub, login, until, ips, ghBlock }, 200, origin, env)
   }
 
   if (url.pathname === '/admin/unban' && request.method === 'POST') {
@@ -1013,8 +1032,8 @@ async function handleAdmin(env, request, url) {
     if (body && body.target === 'gh') {
       const login = String((body && body.login) || '').toLowerCase()
       if (!/^[a-z0-9][a-z0-9-]{0,38}$/.test(login)) return json({ error: 'invalid_login' }, 400, origin, env)
-      await unbanClass(env, { login, sub: await bindOfGh(env, login) })
-      return json({ ok: true, target: 'gh', login }, 200, origin, env)
+      const ghBlock = await unbanClass(env, { login, sub: await bindOfGh(env, login) })
+      return json({ ok: true, target: 'gh', login, ghBlock }, 200, origin, env)
     }
     const sub = String((body && body.sub) || '')
     if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
