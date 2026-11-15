@@ -288,8 +288,9 @@ watch(
       <span>重开 Issue</span>
     </Button>
 
+    <!-- 锁定会话要仓库 write 权限，issue 作者本人也没这个权力，只有管理能点 -->
     <Button
-      v-if="canOperate"
+      v-if="canManage"
       type="button"
       variant="outline"
       size="sm"

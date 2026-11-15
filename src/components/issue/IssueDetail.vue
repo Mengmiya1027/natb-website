@@ -56,6 +56,7 @@ import IconCircleDot from '~icons/lucide/circle-dot'
 import IconExternalLink from '~icons/lucide/external-link'
 import IconLoader from '~icons/lucide/loader-circle'
 import IconLock from '~icons/lucide/lock'
+import IconUnlock from '~icons/lucide/lock-open'
 import IconInfo from '~icons/lucide/info'
 import IconMessageSquare from '~icons/lucide/message-square'
 import IconMilestone from '~icons/lucide/milestone'
@@ -142,9 +143,18 @@ const cleanBody = computed(() => stripQqMarker(issue.value?.body))
 const qqOwnIssue = computed(
   () => Boolean(qqMarker.value?.sub && store.qqUser?.sub && qqMarker.value.sub === store.qqUser.sub),
 )
+/** GitHub 身份认定自己是作者 */
+const ghOwnIssue = computed(() => {
+  const me = store.user?.login
+  const owner = issue.value?.user?.login
+  return Boolean(me && owner && String(me).toLowerCase() === String(owner).toLowerCase())
+})
+/** 两种身份任一认定是作者即可 —— 两种登录方式看到的操作面板应当一致 */
+const ownIssue = computed(() => qqOwnIssue.value || ghOwnIssue.value)
 /* 按钮的可见性只看「是不是我这条、还开着没」；能不能写由点击时判断——
  * 之前把 writeMode 写进条件，被封禁时会误显示成「已关闭」。 */
-const canQqClose = computed(() => qqOwnIssue.value && issue.value?.state === 'open')
+const canQqClose = computed(() => ownIssue.value && issue.value?.state === 'open')
+const ownLocking = ref(false)
 const closeConfirmOpen = ref(false)
 const deleteConfirmOpen = ref(false)
 const qqClosing = ref(false)
@@ -198,7 +208,9 @@ async function deleteOwnIssue() {
   if (qqDeleting.value) return
   qqDeleting.value = true
   try {
-    await qqWriteApi.deleteIssue(issue.value.number)
+    // QQ 身份没有 GitHub 令牌，删除要走中转；GitHub 身份直连（需要仓库 admin，普通作者会被拒）
+    if (store.writeMode === 'qq') await qqWriteApi.deleteIssue(issue.value.number)
+    else await githubWriteApi.deleteIssue(issue.value.number)
     toast.success('Issue 已删除')
     // 先让宿主把列表重新拉一遍，再退回去：只 emit('back') 的话列表还是那份旧数据
     emit('changed')
@@ -210,11 +222,38 @@ async function deleteOwnIssue() {
   }
 }
 
+/** 锁定会话要仓库 write 权限；QQ 身份没有 GitHub 令牌，这里不支持 */
+async function toggleOwnLock() {
+  if (!store.canWrite) {
+    if (store.qqBanned || store.ghBanned) banOpen.value = true
+    else toast.error('请先登录后再操作')
+    return
+  }
+  if (store.writeMode !== 'github') {
+    toast.error('QQ 身份不支持锁定会话')
+    return
+  }
+  if (ownLocking.value) return
+  ownLocking.value = true
+  try {
+    if (issue.value?.locked) await githubWriteApi.unlockIssue(issue.value.number)
+    else await githubWriteApi.lockIssue(issue.value.number)
+    toast.success(issue.value?.locked ? '已解锁会话' : '已锁定会话')
+    await load()
+    emit('changed')
+  } catch (err) {
+    toast.error(err?.message || '操作失败')
+  } finally {
+    ownLocking.value = false
+  }
+}
+
 async function closeOwnIssue() {
   if (!canQqClose.value || qqClosing.value) return
   qqClosing.value = true
   try {
-    await qqWriteApi.closeIssue(issue.value.number)
+    if (store.writeMode === 'qq') await qqWriteApi.closeIssue(issue.value.number)
+    else await githubWriteApi.closeIssue(issue.value.number, 'completed')
     toast.success('已关闭这个 issue')
     await load()
     emit('changed')
@@ -777,7 +816,7 @@ async function onSidebarChanged() {
         <!-- 操作卡片的样式由 IssueSidebarActions 自己提供，这里只负责摆位置 -->
         <!-- QQ 身份没有标签/锁定/指派这些能力，只给「关闭自己发的单」一个入口 -->
         <!-- QQ 身份（含被封禁、writeMode 为 none 时）看自己的单：走这一支，只给关闭/删除 -->
-        <template v-if="qqOwnIssue && store.writeMode !== 'github'">
+        <template v-if="ownIssue">
         <section class="natb-detail__actions">
           <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
             <p class="text-xs font-medium text-muted-foreground">操作</p>
@@ -834,6 +873,20 @@ async function onSidebarChanged() {
               </AlertDialogContent>
             </AlertDialog>
             <p v-else class="text-muted-foreground text-xs">已关闭。</p>
+
+            <Button
+              v-if="store.writeMode === 'github'"
+              variant="outline"
+              size="sm"
+              class="w-full gap-2"
+              :disabled="ownLocking"
+              @click="toggleOwnLock"
+            >
+              <IconLoader v-if="ownLocking" class="size-4 animate-spin" />
+              <IconLock v-else-if="!issue.locked" class="size-4" />
+              <IconUnlock v-else class="size-4" />
+              {{ issue.locked ? '解锁会话' : '锁定会话' }}
+            </Button>
 
             <AlertDialog v-model:open="deleteConfirmOpen">
                 <Button
