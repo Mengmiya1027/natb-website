@@ -583,6 +583,77 @@ async function handleIssueMeta(env, request, url, match) {
 }
 
 
+
+/**
+ * 删除 issue。GitHub 的规则是「只有仓库 admin 能删」，普通作者直连一定 403，
+ * 所以这条走中转：用 App 的 installation token 代删（需要 App 带 repository administration 权限）。
+ * 权限只放给「这条 issue 的作者本人」或「管理」，等价类两端口径一致。
+ */
+async function handleIssueDelete(env, request, url, match) {
+  const origin = request.headers.get('Origin') || ''
+  const number = Number(match[1])
+  const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+  if (!raw) return json({ error: 'unauthorized', message: '请先登录' }, 401, origin, env)
+
+  let sub = null
+  let login = null
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) {
+    const session = await verifySession(env, request)
+    if (!session) return json({ error: 'unauthorized', message: 'QQ 登录已失效' }, 401, origin, env)
+    sub = session.sub
+    const ban = await banStateOfQq(env, sub)
+    if (banActive(ban)) return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
+  } else {
+    const me = await loginOfGhToken(raw)
+    if (!me || !me.login) return json({ error: 'token_invalid', message: 'GitHub 登录已失效' }, 401, origin, env)
+    login = me.login
+    if (banActive(await banStateOfGh(env, login))) {
+      return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
+    }
+  }
+
+  let issue
+  try {
+    issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
+  } catch {
+    return json({ error: 'not_found', message: '这条 issue 不存在或已被删除' }, 404, origin, env)
+  }
+
+  const marker = String(issue.body || '').match(/<!-- natb:qq (\{.*?\}) -->/)
+  let ownerSub = null
+  if (marker) {
+    try {
+      ownerSub = JSON.parse(marker[1]).sub
+    } catch {
+      ownerSub = null
+    }
+  }
+
+  const isAdmin = login ? await callerIsAdmin(env, login, raw) : await qqCallerIsAdmin(env, sub)
+  const classSub = sub || (login ? await bindOfGh(env, login) : '')
+  const classLogin = login || (sub ? await bindOfQq(env, sub) : '')
+  const isAuthor = Boolean(
+    (classSub && ownerSub && classSub === ownerSub) ||
+      (classLogin && issue.user && issue.user.login && issue.user.login.toLowerCase() === classLogin.toLowerCase()),
+  )
+  if (!isAdmin && !isAuthor) {
+    return json({ error: 'forbidden', message: '只能删除自己发的 issue' }, 403, origin, env)
+  }
+
+  // App 的 installation token 需要 repository administration 权限才能删 issue
+  try {
+    await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'DELETE' })
+  } catch (err) {
+    return json(
+      { error: 'delete_failed', message: '删除失败：机器人没有仓库管理权限，请去 GitHub App 设置里补上' },
+      502,
+      origin,
+      env,
+    )
+  }
+  return json({ ok: true }, 200, origin, env)
+}
+
 /**
  * 解析一个身份在本仓库里的角色，返回 'admin' / 'maintain' / 'write' / 'triage' / 'read' / ''
  * 与登录方式无关：GitHub 身份查它自己的 permission，QQ 身份查「授予的角色」或「绑定账号的角色」。
@@ -1608,6 +1679,10 @@ export default {
       }
       if (url.pathname.startsWith('/admin/')) {
         return await handleAdmin(env, request, url)
+      }
+      const deleteMatch = url.pathname.match(/^\/issue\/(\d+)$/)
+      if (deleteMatch && request.method === 'DELETE') {
+        return await handleIssueDelete(env, request, url, deleteMatch)
       }
       const metaMatch = url.pathname.match(/^\/issue\/(\d+)\/meta$/)
       if (metaMatch && request.method === 'PATCH') {

@@ -12,6 +12,32 @@ function identityToken() {
   return getToken() || getQqToken()
 }
 
+/** 删除 issue：GitHub 只允许仓库 admin 删，普通作者直连必失败，所以统一走中转由机器人代删 */
+export async function deleteIssue(number) {
+  const token = identityToken()
+  if (!token) throw new Error('请先登录')
+  const root = (getProxyBase() || DEFAULT_PROXY_BASE || '').replace(/\/$/, '')
+  if (!root) throw new Error('没有配置中转地址')
+
+  let res
+  try {
+    res = await fetch(root + '/issue/' + number, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + token },
+    })
+  } catch {
+    throw new Error('连不上中转服务')
+  }
+
+  const data = await res.json().catch(() => null)
+  if (!res.ok) {
+    if (isCredentialInvalid(res.status, data)) notifyCredentialExpired(getToken() ? 'gh' : 'qq')
+    throw new Error(errorText(data, '删除失败'))
+  }
+  clearApiCache()
+  return data
+}
+
 export async function updateIssueMeta(number, patch) {
   const token = identityToken()
   if (!token) throw new Error('请先登录')

@@ -10,7 +10,7 @@ import { toast } from 'vue-sonner'
 
 import { githubApi, githubWriteApi } from '@/api/github'
 import { qqWriteApi } from '@/api/qqWrite'
-import { updateIssueMeta } from '@/api/issueMeta'
+import { updateIssueMeta, deleteIssue as deleteIssueViaProxy } from '@/api/issueMeta'
 import QqBanDialog from './QqBanDialog.vue'
 import DisabledPicker from './DisabledPicker.vue'
 import { useIssueStore } from '@/stores/issue'
@@ -208,9 +208,8 @@ async function deleteOwnIssue() {
   if (qqDeleting.value) return
   qqDeleting.value = true
   try {
-    // QQ 身份没有 GitHub 令牌，删除要走中转；GitHub 身份直连（需要仓库 admin，普通作者会被拒）
-    if (store.writeMode === 'qq') await qqWriteApi.deleteIssue(issue.value.number)
-    else await githubWriteApi.deleteIssue(issue.value.number)
+    // 统一走中转：实测 App 现有权限就够删 issue，不需要开仓库管理权限
+    await deleteIssueViaProxy(issue.value.number)
     toast.success('Issue 已删除')
     // 先让宿主把列表重新拉一遍，再退回去：只 emit('back') 的话列表还是那份旧数据
     emit('changed')
@@ -875,7 +874,7 @@ async function onSidebarChanged() {
             <p v-else class="text-muted-foreground text-xs">已关闭。</p>
 
             <Button
-              v-if="store.writeMode === 'github'"
+              v-if="store.canManage"
               variant="outline"
               size="sm"
               class="w-full gap-2"
