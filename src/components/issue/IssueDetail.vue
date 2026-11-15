@@ -10,7 +10,7 @@ import { toast } from 'vue-sonner'
 
 import { githubApi, githubWriteApi } from '@/api/github'
 import { qqWriteApi } from '@/api/qqWrite'
-import { updateIssueMeta, deleteIssue as deleteIssueViaProxy } from '@/api/issueMeta'
+import { updateIssueMeta } from '@/api/issueMeta'
 import QqBanDialog from './QqBanDialog.vue'
 import DisabledPicker from './DisabledPicker.vue'
 import { useIssueStore } from '@/stores/issue'
@@ -196,6 +196,11 @@ function askCloseOwnIssue() {
 }
 
 function askDeleteOwnIssue() {
+  // 删除 issue 需要仓库管理员本人身份：QQ 身份和普通作者都做不到
+  if (!store.canManage || store.writeMode !== 'github') {
+    toast.error('只有仓库管理员能删除 issue')
+    return
+  }
   if (!store.canWrite) {
     if (store.qqBanned || store.ghBanned) banOpen.value = true
     else toast.error('请先登录后再操作')
@@ -208,8 +213,9 @@ async function deleteOwnIssue() {
   if (qqDeleting.value) return
   qqDeleting.value = true
   try {
-    // 统一走中转：实测 App 现有权限就够删 issue，不需要开仓库管理权限
-    await deleteIssueViaProxy(issue.value.number)
+    // GitHub 的删除 issue 只认仓库管理员本人的账号：App 就算给了 administration
+    // 权限，installation token 调这个端点仍然 404。所以这里直接用自己的 token。
+    await githubWriteApi.deleteIssue(issue.value.number)
     toast.success('Issue 已删除')
     // 先让宿主把列表重新拉一遍，再退回去：只 emit('back') 的话列表还是那份旧数据
     emit('changed')
@@ -815,7 +821,8 @@ async function onSidebarChanged() {
         <!-- 操作卡片的样式由 IssueSidebarActions 自己提供，这里只负责摆位置 -->
         <!-- QQ 身份没有标签/锁定/指派这些能力，只给「关闭自己发的单」一个入口 -->
         <!-- QQ 身份（含被封禁、writeMode 为 none 时）看自己的单：走这一支，只给关闭/删除 -->
-        <template v-if="ownIssue">
+        <!-- 管理员统一走下面那套完整操作，不再单独出「这是你发的 issue」 -->
+        <template v-if="ownIssue && !store.canManage">
         <section class="natb-detail__actions">
           <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
             <p class="text-xs font-medium text-muted-foreground">操作</p>
@@ -887,7 +894,7 @@ async function onSidebarChanged() {
               {{ issue.locked ? '解锁会话' : '锁定会话' }}
             </Button>
 
-            <AlertDialog v-model:open="deleteConfirmOpen">
+            <AlertDialog v-if="store.canManage && store.writeMode === 'github'" v-model:open="deleteConfirmOpen">
                 <Button
                   variant="ghost"
                   size="sm"

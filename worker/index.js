@@ -612,6 +612,10 @@ async function handleIssueDelete(env, request, url, match) {
     }
   }
 
+  // 权限刚变更过：强制换一枚新令牌。旧令牌是在 administration 生效之前签发的，
+  // 带上它去删只会拿到 404，看起来像是「没权限」。
+  installationCache = { token: '', expiresAt: 0 }
+
   let issue
   try {
     issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
