@@ -107,13 +107,15 @@ export const useIssueStore = defineStore('issue', () => {
    */
   const writeMode = computed(() => {
     if (isLoggedIn.value) {
+      // 被封禁的身份不能写。封禁的权威判定在服务端，这里只负责别把输入框摆给人家看
+      if (ghBanned.value) return 'none'
       // 绑了 A 却拿 B 登录：这种状态本不该存在（一对一），出现了就不许写
       if (qqLinkedGh.value && user.value?.login?.toLowerCase() !== qqLinkedGh.value.login.toLowerCase()) {
         return 'none'
       }
       return 'github'
     }
-    if (isQqLoggedIn.value) return 'qq'
+    if (isQqLoggedIn.value) return qqBanned.value ? 'none' : 'qq'
     return 'none'
   })
 

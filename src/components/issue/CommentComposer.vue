@@ -23,7 +23,7 @@ const props = defineProps({
   replyTo: { type: String, default: '' },
 })
 
-const emit = defineEmits(['submitted', 'cancel'])
+const emit = defineEmits(['submitted', 'cancel', 'banned'])
 
 const store = useIssueStore()
 
@@ -38,7 +38,12 @@ const writeApi = computed(() => (store.writeMode === 'qq' ? qqWriteApi : githubW
 
 async function submit() {
   if (!store.canWrite) {
-    toast.error(store.qqBanned ? '该账号已被封禁，无法评论' : '请先登录后再发表评论')
+    // 已知被封：直接把详情框交给父级弹出来，不要只留一句 toast
+    if (store.qqBanned || store.ghBanned) {
+      emit('banned')
+      return
+    }
+    toast.error('请先登录后再发表评论')
     return
   }
   if (!props.issueNumber) {
@@ -60,6 +65,12 @@ async function submit() {
     emit('submitted')
   } catch (err) {
     errorText.value = err?.message || String(err)
+    // 前端不知道已被封时，服务端会用 403 告诉我们：补上封禁状态并弹出详情
+    if (err?.status === 403 && /封禁|blocked/i.test(errorText.value)) {
+      store.refreshQq()
+      store.refreshGhLink()
+      emit('banned')
+    }
     toast.error(errorText.value)
   } finally {
     submitting.value = false

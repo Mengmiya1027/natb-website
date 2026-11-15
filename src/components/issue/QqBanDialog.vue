@@ -18,9 +18,16 @@ const emit = defineEmits(['update:open'])
 
 const store = useIssueStore()
 
+/* QQ 与 GitHub 任一端被封，等价类里的两个都算封；优先展示 QQ 那份记录 */
+const activeBan = computed(() =>
+  store.qqBanned
+    ? { until: store.qqBanUntil, reason: store.qqBanReason }
+    : { until: store.ghBanUntil, reason: store.ghBanReason },
+)
+
 const untilText = computed(() => {
-  if (!store.qqBanUntil) return '永久封禁'
-  const d = new Date(store.qqBanUntil)
+  if (!activeBan.value.until) return '永久封禁'
+  const d = new Date(activeBan.value.until)
   return '解封时间：' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 })
 </script>
@@ -42,7 +49,7 @@ const untilText = computed(() => {
         <div class="bg-muted/60 rounded-lg px-3 py-2.5">
           <p class="text-muted-foreground text-[11px]">原因</p>
           <p class="mt-0.5 text-sm leading-relaxed">
-            {{ store.qqBanReason || '管理员未填写原因' }}
+            {{ activeBan.reason || '管理员未填写原因' }}
           </p>
         </div>
         <p class="text-muted-foreground text-center text-xs">{{ untilText }}</p>

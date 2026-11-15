@@ -188,7 +188,7 @@ const banOpen = ref(false)
 function startCreate() {
   if (!store.canWrite) {
     // 被封禁的账号再登录也没用：直接开详情框，说清楚原因和解封时间
-    if (store.qqBanned) {
+    if (store.qqBanned || store.ghBanned) {
       banOpen.value = true
       return
     }

@@ -25,6 +25,7 @@ import IconLock from '~icons/lucide/lock'
 import IconLoader2 from '~icons/lucide/loader-2'
 import IconTriangleAlert from '~icons/lucide/triangle-alert'
 import DisabledPicker from './DisabledPicker.vue'
+import QqBanDialog from './QqBanDialog.vue'
 
 const emit = defineEmits(['created', 'cancel'])
 
@@ -38,6 +39,7 @@ const milestone = ref(null)
 
 const submitting = ref(false)
 const errorText = ref('')
+const banOpen = ref(false)
 const errorDetails = ref([])
 
 const titleInvalid = ref(false)
@@ -111,9 +113,12 @@ function resetError() {
 
 async function submit() {
   if (!store.canWrite) {
-    toast.error(
-      store.qqBanned ? '该 QQ 账号已被封禁，无法发布' : '请先登录后再发布 issue',
-    )
+    // 已知被封：直接弹详情框，而不是留一句 toast
+    if (store.qqBanned || store.ghBanned) {
+      banOpen.value = true
+      return
+    }
+    toast.error('请先登录后再发布 issue')
     return
   }
   const cleanTitle = title.value.trim()
@@ -148,6 +153,12 @@ async function submit() {
     errorDetails.value = details
       .map((item) => [item.field, item.code, item.message].filter(Boolean).join(' · '))
       .filter(Boolean)
+    // 前端不知道已被封时，服务端会用 403 告诉我们
+    if (err?.status === 403 && /封禁|blocked/i.test(errorText.value)) {
+      store.refreshQq()
+      store.refreshGhLink()
+      banOpen.value = true
+    }
     toast.error(errorText.value)
   } finally {
     submitting.value = false
@@ -162,19 +173,29 @@ async function submit() {
         <IconLock class="size-5" />
       </div>
       <p class="text-base font-semibold text-foreground">
-        {{ store.qqBanned ? '账号已被封禁' : '请先登录' }}
+        {{ store.qqBanned || store.ghBanned ? '账号已被封禁' : '请先登录' }}
       </p>
       <p class="max-w-sm text-sm text-muted-foreground">
         {{
-          store.qqBanned
+          store.qqBanned || store.ghBanned
             ? '这个账号已被封禁，暂时不能发布内容。如有疑问请到 GitHub 仓库留言。'
             : '发布 Issue 需要身份：GitHub 账号或 QQ 邮箱都可以。点右上角的登录按钮完成登录后再回来。'
         }}
       </p>
-      <Button type="button" variant="outline" size="sm" class="mt-2" @click="emit('cancel')">
-        返回列表
-      </Button>
+      <div class="mt-2 flex items-center gap-2">
+        <Button
+          v-if="store.qqBanned || store.ghBanned"
+          type="button"
+          variant="outline"
+          size="sm"
+          @click="banOpen = true"
+        >
+          了解详情
+        </Button>
+        <Button type="button" variant="outline" size="sm" @click="emit('cancel')">返回列表</Button>
+      </div>
     </div>
+    <QqBanDialog v-model:open="banOpen" />
   </div>
 
   <!-- 进编写页先出骨架：等标签与里程碑列表到齐，表单才一次性渲染 -->

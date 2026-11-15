@@ -537,11 +537,12 @@ async function onSidebarChanged() {
             :reply-to="replyTo"
             @submitted="onCommentSubmitted"
             @cancel="replyTo = ''"
+            @banned="banOpen = true"
           />
           <div v-else class="natb-detail__hint">
             <IconLock class="size-4" />
-            <template v-if="store.qqBanned">
-              <span>这个 QQ 账号已被封禁，暂时不能参与讨论</span>
+            <template v-if="store.qqBanned || store.ghBanned">
+              <span>这个账号已被封禁，暂时不能参与讨论</span>
               <Button size="sm" class="h-8 gap-1.5 rounded-md px-3.5 text-[13px]" @click="banOpen = true">
                 <IconInfo class="size-3.5" />
                 了解详情
