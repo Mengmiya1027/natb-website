@@ -49,6 +49,11 @@ const filtered = computed(() => {
   })
 })
 
+/* 触发器上要显示颜色圆点，名字得映射回标签对象 */
+const selectedLabels = computed(() =>
+  selected.value.map((name) => labels.value.find((label) => label.name === name)).filter(Boolean),
+)
+
 function dotStyle(label) {
   const color = String(label?.color || '').replace(/^#/, '')
   return color ? { backgroundColor: `#${color}` } : { backgroundColor: 'currentColor', opacity: 0.35 }
@@ -96,9 +101,21 @@ onMounted(load)
         class="w-full justify-between gap-2 font-normal"
         :title="failed ? '标签加载失败，稍后可重试' : '选择标签'"
       >
-        <span class="flex items-center gap-1.5 min-w-0">
-          <IconTag class="size-3.5 shrink-0 text-muted-foreground" />
-          <span class="truncate">{{ triggerText }}</span>
+        <span class="flex items-center gap-1.5 min-w-0 overflow-hidden">
+          <template v-if="selectedLabels.length">
+            <template v-for="(label, i) in selectedLabels.slice(0, 2)" :key="label.name">
+              <span v-if="i" class="text-muted-foreground shrink-0">、</span>
+              <span class="size-2.5 shrink-0 rounded-full ring-1 ring-border" :style="dotStyle(label)" />
+              <span class="truncate">{{ label.name }}</span>
+            </template>
+            <span v-if="selectedLabels.length > 2" class="text-muted-foreground shrink-0">
+              +{{ selectedLabels.length - 2 }}
+            </span>
+          </template>
+          <template v-else>
+            <IconTag class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate">{{ triggerText }}</span>
+          </template>
         </span>
         <IconChevronDown class="size-3.5 shrink-0 opacity-60" />
       </Button>

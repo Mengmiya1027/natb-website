@@ -4,7 +4,7 @@
  * 前端只负责把当前身份的令牌带上。
  */
 import { DEFAULT_PROXY_BASE } from '@/config/github'
-import { getProxyBase, getToken } from '@/api/github'
+import { getProxyBase, getToken, isCredentialInvalid, notifyCredentialExpired, clearApiCache, errorText } from '@/api/github'
 import { getQqToken } from '@/api/qqAuth'
 
 function identityToken() {
@@ -31,7 +31,12 @@ export async function updateIssueMeta(number, patch) {
 
   const data = await res.json().catch(() => null)
   if (!res.ok) {
-    throw new Error((data && (data.message || data.error)) || '保存失败')
+    // 凭据失效：让 store 过 2 秒退出并弹登录框，而不是留着一个假的登录态
+    if (isCredentialInvalid(res.status, data)) notifyCredentialExpired(getToken() ? 'gh' : 'qq')
+    throw new Error(errorText(data, '保存失败'))
   }
+  // 这条写路径不经过 gh()，那一层 60 秒 GET 缓存不知道有人写过东西；
+  // 不作废的话，紧接着重拉时间线拿到的还是改之前的内容。
+  clearApiCache()
   return data
 }

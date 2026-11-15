@@ -365,34 +365,37 @@ watch(
           <span>删除 Issue</span>
         </Button>
       </AlertDialogTrigger>
-      <AlertDialogContent class="gap-0 overflow-hidden p-0 sm:max-w-[460px] sm:rounded-2xl">
-        <div class="px-6 pt-6 pb-5">
-          <AlertDialogHeader class="gap-2 text-left">
-            <AlertDialogTitle class="text-2xl font-semibold tracking-tight">
-              确认删除这个 Issue？
-            </AlertDialogTitle>
-            <AlertDialogDescription class="text-[15px] leading-relaxed">
-              删除后无法恢复，评论与时间线也会一并消失。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+      <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
+        <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+          <div class="flex items-center gap-3">
+            <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+              <IconTrash2 class="size-4" />
+            </div>
+            <AlertDialogTitle class="text-xl font-bold">确认删除这个 Issue？</AlertDialogTitle>
+          </div>
+
+          <AlertDialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
+            删除后这条 issue 与它的全部评论、时间线都会被永久移除，而且不会进入任何回收站。
+          </AlertDialogDescription>
 
           <p
-            class="border-border text-muted-foreground mt-6 rounded-xl border px-4 py-3.5 text-[13px] leading-relaxed"
+            class="border-border text-muted-foreground mt-4 w-full rounded-xl border px-4 py-3 text-left text-[12.5px] leading-relaxed"
           >
             这个操作只有仓库管理员可以执行，且没有撤销入口。
           </p>
         </div>
 
-        <!-- 与退出登录确认框同一套尺寸：shadcn sm = h-8 / px-3 / gap-1.5 / text-sm -->
-        <AlertDialogFooter class="border-border bg-muted/60 gap-2.5 border-t px-6 py-4">
-          <AlertDialogCancel class="h-8 gap-1.5 px-3 text-sm">取消</AlertDialogCancel>
-          <AlertDialogAction
-            class="bg-destructive hover:bg-destructive/90 h-8 gap-1.5 px-3 text-sm font-semibold text-white"
-            @click="removeIssue"
-          >
-            删除
-          </AlertDialogAction>
-        </AlertDialogFooter>
+        <div class="border-border bg-muted/70 border-t px-5 py-4">
+          <div class="grid w-full grid-cols-2 gap-2">
+            <AlertDialogCancel class="h-8 rounded-md px-3 text-sm font-medium">取消</AlertDialogCancel>
+            <AlertDialogAction
+              class="bg-destructive hover:bg-destructive hover:brightness-95 h-8 rounded-md px-3 text-sm font-semibold text-white transition-[filter] duration-200"
+              @click="removeIssue"
+            >
+              删除
+            </AlertDialogAction>
+          </div>
+        </div>
       </AlertDialogContent>
     </AlertDialog>
   </div>

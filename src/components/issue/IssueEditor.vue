@@ -167,7 +167,7 @@ async function submit() {
       <p class="max-w-sm text-sm text-muted-foreground">
         {{
           store.qqBanned
-            ? '这个 QQ 账号已被封禁，暂时不能发布内容。如有疑问请到 GitHub 仓库留言。'
+            ? '这个账号已被封禁，暂时不能发布内容。如有疑问请到 GitHub 仓库留言。'
             : '发布 Issue 需要身份：GitHub 账号或 QQ 邮箱都可以。点右上角的登录按钮完成登录后再回来。'
         }}
       </p>

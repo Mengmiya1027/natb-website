@@ -360,24 +360,41 @@ async function confirmDelete() {
 
     <!-- 删除二次确认 -->
     <AlertDialog v-model:open="deleteOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除里程碑「{{ deleteTarget?.title }}」？</AlertDialogTitle>
-          <AlertDialogDescription>
-            里程碑会被移除，已经关联的 issue 不会删除，只是不再归属任何里程碑。
+      <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
+        <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+          <div class="flex items-center gap-3">
+            <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+              <IconTrash2 class="size-4" />
+            </div>
+            <AlertDialogTitle class="text-xl font-bold">
+              删除里程碑「{{ deleteTarget?.title }}」？
+            </AlertDialogTitle>
+          </div>
+
+          <AlertDialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
+            里程碑会从仓库里移除，已关联的 issue 不会被删除，只是不再归属任何里程碑，进度统计也随之变化。
           </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel :disabled="deleting">取消</AlertDialogCancel>
-          <AlertDialogAction
-            class="bg-destructive hover:bg-destructive/90 font-semibold text-white"
-            :disabled="deleting"
-            @click.prevent="confirmDelete"
+
+          <p
+            class="border-border text-muted-foreground mt-4 w-full rounded-xl border px-4 py-3 text-left text-[12.5px] leading-relaxed"
           >
-            <IconLoader v-if="deleting" class="size-4 animate-spin" />
-            确认删除
-          </AlertDialogAction>
-        </AlertDialogFooter>
+            已经关闭的 issue 同样会脱离这个里程碑，需要重新指定归属。
+          </p>
+        </div>
+
+        <div class="border-border bg-muted/70 border-t px-5 py-4">
+          <div class="grid w-full grid-cols-2 gap-2">
+            <AlertDialogCancel class="h-8 rounded-md px-3 text-sm font-medium" :disabled="deleting">取消</AlertDialogCancel>
+            <AlertDialogAction
+              class="bg-destructive hover:bg-destructive hover:brightness-95 h-8 rounded-md px-3 text-sm font-semibold text-white transition-[filter] duration-200"
+              :disabled="deleting"
+              @click.prevent="confirmDelete"
+            >
+              <IconLoader v-if="deleting" class="size-3.5 animate-spin" />
+              确认删除
+            </AlertDialogAction>
+          </div>
+        </div>
       </AlertDialogContent>
     </AlertDialog>
   </div>

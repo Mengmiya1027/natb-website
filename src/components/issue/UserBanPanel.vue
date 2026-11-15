@@ -1,9 +1,12 @@
 <script setup>
 /**
- * 管理面板的「用户」页：列出用 QQ 邮箱登录过的人，可以封禁 / 解封。
- * 列表来自 Worker 的 /admin/users，凭据是管理员的 GitHub token。
+ * 管理面板的「用户」页。两种身份分两个视图，共用同一套行布局与封禁弹窗：
+ *   QQ 用户    —— 用邮箱登录过的人（KV 里的 user:<sub>）
+ *   GitHub 账号 —— 在仓库里发过言的、已绑定的、已被封的（中转合并三路来源）
+ *
+ * 封禁按身份等价类传播：封一端，与它绑定的另一端一起封。只封一半等于没封。
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { adminApi } from '@/api/admin'
@@ -18,19 +21,22 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 
 import IconRefresh from '~icons/lucide/refresh-cw'
 import IconBan from '~icons/lucide/ban'
 import IconShieldCheck from '~icons/lucide/shield-check'
+import IconGitHub from '~icons/lucide/github'
+import IconMail from '~icons/lucide/mail'
+import IconLink from '~icons/lucide/link-2'
 
+const scope = ref('qq')
 const users = ref([])
 const loading = ref(true)
 const error = ref('')
 const cursor = ref(null)
-const busySub = ref('')
+const busyKey = ref('')
 
 const banOpen = ref(false)
 const banTarget = ref(null)
@@ -45,6 +51,9 @@ const DURATIONS = [
   { value: 0, label: '永久' },
 ]
 
+const isGh = computed(() => scope.value === 'gh')
+const rowKey = (user) => (isGh.value ? user.login : user.sub)
+
 function relativeTime(input) {
   if (!input) return '—'
   const diff = Date.now() - input
@@ -58,7 +67,7 @@ async function load(next) {
   loading.value = true
   error.value = ''
   try {
-    const data = await adminApi.listUsers(next || undefined)
+    const data = isGh.value ? await adminApi.listGhUsers() : await adminApi.listUsers(next || undefined)
     users.value = next ? [...users.value, ...data.users] : data.users
     cursor.value = data.cursor
   } catch (err) {
@@ -66,6 +75,14 @@ async function load(next) {
   } finally {
     loading.value = false
   }
+}
+
+function switchScope(next) {
+  if (scope.value === next) return
+  scope.value = next
+  users.value = []
+  cursor.value = null
+  load()
 }
 
 function openBan(user) {
@@ -79,13 +96,11 @@ function openBan(user) {
 async function confirmBan() {
   if (!banTarget.value || banning.value) return
   banning.value = true
+  const payload = { reason: banReason.value.trim(), days: banDays.value, banIp: banIp.value }
   try {
-    await adminApi.ban(banTarget.value.sub, {
-      reason: banReason.value.trim(),
-      days: banDays.value,
-      banIp: banIp.value,
-    })
-    toast.success('已封禁')
+    if (isGh.value) await adminApi.banGh(banTarget.value.login, payload)
+    else await adminApi.banQq(banTarget.value.sub, payload)
+    toast.success(isGh.value ? '已封禁，绑定的 QQ 身份一并封禁' : '已封禁')
     banOpen.value = false
     await load()
   } catch (err) {
@@ -96,16 +111,17 @@ async function confirmBan() {
 }
 
 async function unban(user) {
-  if (busySub.value) return
-  busySub.value = user.sub
+  if (busyKey.value) return
+  busyKey.value = rowKey(user)
   try {
-    await adminApi.unban(user.sub)
+    if (isGh.value) await adminApi.unbanGh(user.login)
+    else await adminApi.unbanQq(user.sub)
     toast.success('已解封')
     await load()
   } catch (err) {
     toast.error(err?.message || String(err))
   } finally {
-    busySub.value = ''
+    busyKey.value = ''
   }
 }
 
@@ -114,15 +130,36 @@ onMounted(load)
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-2">
-    <div class="flex items-center justify-between">
-      <p class="text-muted-foreground text-xs">
-        用 QQ 邮箱登录过的人。封禁后仍可浏览，但所有写操作都会被拒绝。
-      </p>
+    <div class="flex items-center justify-between gap-2">
+      <div class="bg-muted inline-flex rounded-md p-0.5">
+        <button
+          v-for="tab in [
+            { key: 'qq', label: 'QQ 用户', icon: IconMail },
+            { key: 'gh', label: 'GitHub 账号', icon: IconGitHub },
+          ]"
+          :key="tab.key"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs transition"
+          :class="scope === tab.key ? 'bg-background text-foreground shadow-xs font-medium' : 'text-muted-foreground'"
+          @click="switchScope(tab.key)"
+        >
+          <component :is="tab.icon" class="size-3.5" />
+          {{ tab.label }}
+        </button>
+      </div>
       <Button variant="ghost" size="xs" class="gap-1" :disabled="loading" @click="load()">
         <IconRefresh class="size-3.5" :class="loading ? 'animate-spin' : ''" />
         刷新
       </Button>
     </div>
+
+    <p class="text-muted-foreground text-[11px] leading-relaxed">
+      {{
+        isGh
+          ? '封禁会拦掉本站所有写操作（发帖、评论、打标签、管理接口）。对方若完全不用本站、自己直连 GitHub，仍需要在仓库设置里 block 该用户。'
+          : '封禁后仍可浏览，但所有写操作都会被拒绝。已绑定 GitHub 的会连坐封禁。'
+      }}
+    </p>
 
     <div v-if="error" class="border-destructive/40 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-xs">
       {{ error }}
@@ -135,33 +172,59 @@ onMounted(load)
 
       <!-- 加载失败时不要再显示「还没有用户」，否则错误被伪装成空数据 -->
       <p v-else-if="!users.length && !error" class="text-muted-foreground py-8 text-center text-xs">
-        还没有 QQ 用户发过言
+        {{ isGh ? '还没有 GitHub 账号参与过' : '还没有 QQ 用户发过言' }}
       </p>
 
       <div v-else class="divide-border divide-y">
         <div
           v-for="user in users"
-          :key="user.sub"
+          :key="rowKey(user)"
           class="flex items-center gap-3 py-2.5"
           :class="user.banned ? 'opacity-55' : ''"
         >
-          <div class="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground text-xs font-semibold">
+          <img
+            v-if="isGh"
+            :src="user.avatar"
+            :alt="user.login"
+            class="size-8 shrink-0 rounded-full object-cover"
+          />
+          <div
+            v-else
+            class="bg-accent text-accent-foreground grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold"
+          >
             {{ (user.nick || '?').slice(0, 1) }}
           </div>
+
           <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium truncate">
-              {{ user.nick || '未命名' }}
-              <span class="text-muted-foreground ml-1.5 text-xs font-normal">{{ user.masked }}</span>
+            <p class="flex items-center gap-1.5 truncate text-sm font-medium">
+              <span class="truncate">{{ isGh ? '@' + user.login : user.nick || '未命名' }}</span>
+              <span v-if="!isGh" class="text-muted-foreground truncate text-xs font-normal">{{ user.masked }}</span>
+              <span
+                v-if="isGh && user.linkedSub"
+                class="text-muted-foreground inline-flex shrink-0 items-center gap-0.5 text-[10px]"
+                title="已绑定 QQ 身份"
+              >
+                <IconLink class="size-3" />QQ
+              </span>
+              <span
+                v-if="!isGh && user.linkedGh"
+                class="text-muted-foreground inline-flex shrink-0 items-center gap-0.5 text-[10px]"
+                :title="'已绑定 @' + user.linkedGh"
+              >
+                <IconLink class="size-3" />@{{ user.linkedGh }}
+              </span>
             </p>
             <p class="text-muted-foreground text-[11px]">
-              发帖 {{ user.issues }} · 评论 {{ user.comments }} · 最后活跃 {{ relativeTime(user.lastSeen) }}
+              <template v-if="isGh">
+                发帖 {{ user.issues }} · 最后活跃 {{ relativeTime(user.lastActivity) }}
+              </template>
+              <template v-else>
+                发帖 {{ user.issues }} · 评论 {{ user.comments }} · 最后活跃 {{ relativeTime(user.lastSeen) }}
+              </template>
             </p>
           </div>
 
-          <Badge
-            :variant="user.banned ? 'destructive' : 'secondary'"
-            class="shrink-0 text-[10px]"
-          >
+          <Badge :variant="user.banned ? 'destructive' : 'secondary'" class="shrink-0 text-[10px]">
             {{ user.banned ? (user.until ? '封禁中' : '永久封禁') : '正常' }}
           </Badge>
 
@@ -170,7 +233,7 @@ onMounted(load)
             variant="outline"
             size="xs"
             class="shrink-0 gap-1"
-            :disabled="busySub === user.sub"
+            :disabled="busyKey === rowKey(user)"
             @click="unban(user)"
           >
             <IconShieldCheck class="size-3.5" />
@@ -199,9 +262,15 @@ onMounted(load)
     <Dialog v-model:open="banOpen">
       <DialogContent class="w-[min(420px,92vw)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
         <div class="border-border border-b px-5 py-4 pr-14">
-          <DialogTitle class="text-base">封禁 {{ banTarget?.nick || '这个用户' }}</DialogTitle>
-          <DialogDescription class="mt-1 text-xs">
-            封禁后他仍能浏览，但发帖、评论、关单都会被拒绝。
+          <DialogTitle class="text-base">
+            封禁 {{ isGh ? '@' + (banTarget?.login || '') : banTarget?.nick || '这个用户' }}
+          </DialogTitle>
+          <DialogDescription class="mt-1 text-xs leading-relaxed">
+            {{
+              isGh
+                ? '会同时封掉与它绑定的 QQ 身份（若有）。本站所有写操作都会被拒绝。'
+                : '封禁后他仍能浏览，但发帖、评论、关单都会被拒绝。'
+            }}
           </DialogDescription>
         </div>
 
@@ -230,7 +299,7 @@ onMounted(load)
 
           <label class="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox :model-value="banIp" @update:model-value="(v) => (banIp = Boolean(v))" />
-            同时封禁他最近使用的 IP（24 小时，可能误伤同网络的人）
+            同时封禁最近使用的 IP（24 小时，可能误伤同网络的人）
           </label>
         </div>
 

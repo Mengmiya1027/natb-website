@@ -8,6 +8,7 @@
  * 令牌存 localStorage，服务端无状态（只验签），所以退出登录纯粹是本地清除。
  */
 import { DEFAULT_PROXY_BASE, STORAGE_KEYS } from '@/config/github'
+import { errorText } from '@/api/github'
 import { getProxyBase } from '@/api/github'
 
 const QQ_TOKEN_KEY = 'natb:qq:token'
@@ -61,9 +62,25 @@ export function setQqUser(user) {
   writeStore(QQ_USER_KEY, user ? JSON.stringify(user) : null)
 }
 
+/* 与 github.js 的 tokenClearedListeners 同一个道理：401 清掉会话后，
+ * Pinia 里的 QQ 登录态是另一份内存副本，不跟着清就会留下「顶栏已登录、请求却不带凭据」的假象。 */
+const qqClearedListeners = new Set()
+
+export function onQqSessionCleared(fn) {
+  qqClearedListeners.add(fn)
+  return () => qqClearedListeners.delete(fn)
+}
+
 export function clearQqSession() {
   writeStore(QQ_TOKEN_KEY, null)
   writeStore(QQ_USER_KEY, null)
+  for (const fn of qqClearedListeners) {
+    try {
+      fn()
+    } catch {
+      /* 监听方自己出错不该影响清会话 */
+    }
+  }
 }
 
 function base() {
@@ -91,7 +108,7 @@ async function post(path, body, { token } = {}) {
   }
   const data = await res.json().catch(() => null)
   if (!res.ok) {
-    const message = (data && (data.message || data.error)) || '请求失败（HTTP ' + res.status + '）'
+    const message = errorText(data, '请求失败（HTTP ' + res.status + '）')
     throw new QqAuthError(res.status, message, data)
   }
   return data
@@ -110,6 +127,14 @@ export async function verifyCode(email, code) {
     setQqUser(data.user || null)
   }
   return data
+}
+
+/**
+ * 只校验验证码拿令牌，不写本地会话。
+ * 绑定流程要用它证明另一侧的身份，不能顺手把当前登录的人顶掉。
+ */
+export async function verifyCodeOnly(email, code) {
+  return post('/auth/token', { email, code })
 }
 
 /** 改昵称：服务端会重签令牌，返回值里的 token 要覆盖本地的 */
@@ -132,7 +157,7 @@ export async function updateProfile(nick) {
 
   const data = await res.json().catch(() => null)
   if (!res.ok) {
-    throw new QqAuthError(res.status, (data && (data.message || data.error)) || '保存失败', data)
+    throw new QqAuthError(res.status, errorText(data, '保存失败'), data)
   }
   if (data && data.token) {
     setQqToken(data.token)

@@ -14,7 +14,7 @@ import { toast } from 'vue-sonner'
 import '@/styles/issue.css'
 import { useIssueStore } from '@/stores/issue'
 import { useAnimationStore } from '@/stores/animation'
-import { clearApiCache, githubApi } from '@/api/github'
+import { clearApiCache, countIssues, githubApi } from '@/api/github'
 import ScrollIndicator from '@/components/issue/ScrollIndicator.vue'
 import { ISSUE_REPO_FULL, ISSUE_REPO_URL } from '@/config/github'
 
@@ -74,13 +74,21 @@ function openIssue(number) {
 const stats = ref({ open: 0, labels: 0, milestones: 0, loaded: false })
 
 async function loadStats() {
-  const [repo, labels, milestones] = await Promise.allSettled([
+  // 未关闭数走列表端点现数（countIssues），仓库对象里的 open_issues_count
+  // 是 GitHub 侧异步更新的，关/删之后要等好一会儿才对得上列表。
+  const [count, repo, labels, milestones] = await Promise.allSettled([
+    countIssues('open'),
     githubApi.getRepo(),
     githubApi.listLabels(),
     githubApi.listMilestones({ state: 'all' }),
   ])
   stats.value = {
-    open: repo.status === 'fulfilled' ? repo.value.open_issues_count || 0 : 0,
+    open:
+      count.status === 'fulfilled'
+        ? count.value
+        : repo.status === 'fulfilled'
+          ? repo.value.open_issues_count || 0
+          : 0,
     labels: labels.status === 'fulfilled' ? (labels.value || []).length : 0,
     milestones: milestones.status === 'fulfilled' ? (milestones.value || []).length : 0,
     loaded: true,
@@ -164,7 +172,13 @@ function onRateLimit(event) {
 
 /* ---------------- 交互 ---------------- */
 
-const authOpen = ref(false)
+/* 登录面板的开关住在 store 里：凭据失效时那边会自动弹出来 */
+const authOpen = computed({
+  get: () => store.authOpen,
+  set: (v) => {
+    store.authOpen = v
+  },
+})
 const settingsOpen = ref(false)
 const adminOpen = ref(false)
 

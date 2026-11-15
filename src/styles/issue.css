@@ -291,6 +291,13 @@
   }
 }
 
+/* 对话框打开时 reka-ui 会给 body 挂 pointer-events: none 来做「点外面关闭」，
+ * 提示条是 body 的后代，会一并变成不可点——右上角那个关闭按钮就点不动了。
+ * 这里把可点性单独还回来。 */
+.natb-issue [data-sonner-toaster] {
+  pointer-events: auto;
+}
+
 /* ---------- toast 浮层（DESIGN.md 4.1 浮层档 / 4.3 双层阴影） ----------
  * sonner 自带的是单层 0 4 12 rgba(0,0,0,.1)，层级感不够；这里换成规范里
  * 的 contact + ambient 两层。特异性压过 [data-sonner-toast][data-styled]。 */

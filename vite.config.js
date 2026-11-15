@@ -73,5 +73,8 @@ export default defineConfig({
     },
     host: '0.0.0.0',
     port: 5173,
+    allowedHosts: ['natb-test-frp.wgdocs.ddns-ip.net'],
+    // 走隧道时 HMR 的 ws 也要指到 443
+    hmr: { host: 'natb-test-frp.wgdocs.ddns-ip.net', clientPort: 443, protocol: 'wss' },
   },
 })

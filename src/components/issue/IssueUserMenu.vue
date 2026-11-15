@@ -45,10 +45,16 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSeparator,
+  InputOTPSlot,
+} from '@/components/ui/input-otp'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import QqProfileDialog from './QqProfileDialog.vue'
+import AccountCenterDialog from './AccountCenterDialog.vue'
 import QqBanDialog from './QqBanDialog.vue'
 
 import IconGitHub from '~icons/simple-icons/github'
@@ -61,6 +67,8 @@ import IconLoader from '~icons/lucide/loader-circle'
 import IconWifi from '~icons/lucide/wifi'
 import IconWifiOff from '~icons/lucide/wifi-off'
 import IconKey from '~icons/lucide/key-round'
+import IconCircleAlert from '~icons/lucide/circle-alert'
+import IconQQ from '~icons/simple-icons/qq'
 import IconBookMarked from '~icons/lucide/book-marked'
 import IconUserRound from '~icons/lucide/user-round'
 
@@ -123,10 +131,11 @@ async function startDeviceFlowLogin() {
     await store.completeDeviceLogin(data, { signal: controller.signal })
     flowState.value = 'success'
     toast.success(`欢迎回来，${store.user?.login || 'GitHub 用户'}`)
+    // 结果页要让人看清楚是谁登录了，700ms 只够看见一闪
     window.setTimeout(() => {
       authOpenModel.value = false
       resetFlow()
-    }, 700)
+    }, 1300)
   } catch (err) {
     // 用户主动取消：安静收场，不要把「已取消」当成错误弹出来
     if (controller?.signal.aborted) return
@@ -141,6 +150,10 @@ async function startDeviceFlowLogin() {
 
 const qqEmail = ref('')
 const qqCode = ref('')
+/** 两步走：先填邮箱拿验证码（email），再输六位码登录（code） */
+const qqStep = ref('email')
+/** 这一轮已经发过验证码：第一页据此给出「返回输入」，免得手滑回来只能干等冷却 */
+const qqSent = ref(false)
 const qqSending = ref(false)
 const qqCooldown = ref(0)
 const qqVerifying = ref(false)
@@ -150,7 +163,7 @@ let qqTimer = 0
 const qqEmailValid = computed(() => /^[^\s@]+@(qq|foxmail)\.com$/i.test(qqEmail.value.trim()))
 const qqCanSend = computed(() => qqEmailValid.value && qqCooldown.value === 0 && !qqSending.value)
 const qqCanVerify = computed(
-  () => qqEmailValid.value && /^\d{6}$/.test(qqCode.value.trim()) && !qqVerifying.value,
+  () => qqStep.value === 'code' && /^\d{6}$/.test(qqCode.value.trim()) && !qqVerifying.value,
 )
 
 function startQqCooldown() {
@@ -168,6 +181,8 @@ async function sendQqCode() {
   qqError.value = ''
   try {
     const data = await sendQqCodeMail(qqEmail.value.trim())
+    qqCode.value = ''
+    qqSent.value = true
     toast.success('验证码已发送，请查收邮箱（垃圾箱也看一眼）')
     // 服务端没配发信通道时会把码回在 debug 字段里，本地联调直接填上
     if (data?.debug && data.code) {
@@ -175,6 +190,7 @@ async function sendQqCode() {
       toast.info('开发模式：验证码已自动填入')
     }
     startQqCooldown()
+    qqStep.value = 'code'
   } catch (err) {
     qqError.value = err?.message || String(err)
   } finally {
@@ -190,8 +206,11 @@ async function verifyQqCode() {
     const data = await verifyQqCodeMail(qqEmail.value.trim(), qqCode.value.trim())
     store.setQqSession(data.user, data.token)
     store.applyQqRole(data.role)
+    store.applyLink(data.linkedGh)
     authOpenModel.value = false
     qqCode.value = ''
+    qqStep.value = 'email'
+    qqSent.value = false
 
     // 封禁不拦登录，只在登录后弹一次说明；写操作由服务端每次拦
     if (data.banned) {
@@ -206,6 +225,28 @@ async function verifyQqCode() {
     qqVerifying.value = false
   }
 }
+
+/** 输入提示兼错误位：这一行始终占位，换行或报错都不会把按钮顶走 */
+const qqHint = computed(() => {
+  if (qqStep.value === 'email') return '验证码 10 分钟内有效，若未收到请检查垃圾邮件文件夹。'
+  if ((qqCode.value || '').length === 6) return '已经填满，点下面的按钮登录。'
+  return '填满 6 位数字后即可登录。'
+})
+
+/** 回第一步。已输入的码留着：上一步多半是手滑，回来应该接着填 */
+function backToEmail() {
+  qqStep.value = 'email'
+  qqError.value = ''
+}
+
+/** 关掉登录面板就回到第一步，下次打开不会停在上次的验证码页 */
+watch(authOpenModel, (open) => {
+  if (open) return
+  qqStep.value = 'email'
+  qqSent.value = false
+  qqCode.value = ''
+  qqError.value = ''
+})
 
 const copied = ref(false)
 let copiedTimer = 0
@@ -306,12 +347,17 @@ function logout() {
   settingsOpenModel.value = false
 }
 
-const displayName = computed(() =>
-  store.isLoggedIn
-    ? store.user?.name || store.user?.login || ''
-    : store.qqUser?.nick || 'QQ 用户',
-)
-const avatarUrl = computed(() => (store.isLoggedIn ? store.user?.avatar_url || '' : ''))
+const displayName = computed(() => {
+  if (store.isLoggedIn) return store.user?.name || store.user?.login || ''
+  // 绑定之后对外就是那位 GitHub 账号，QQ 昵称退回内部备注
+  if (store.qqLinkedGh?.login) return '@' + store.qqLinkedGh.login
+  return store.qqUser?.nick || 'QQ 用户'
+})
+const avatarUrl = computed(() => {
+  if (store.isLoggedIn) return store.user?.avatar_url || ''
+  if (store.qqLinkedGh?.login) return 'https://github.com/' + store.qqLinkedGh.login + '.png?size=64'
+  return ''
+})
 const initial = computed(() => (displayName.value || '?').slice(0, 1).toUpperCase())
 
 onBeforeUnmount(resetFlow)
@@ -347,10 +393,11 @@ onBeforeUnmount(resetFlow)
           </Avatar>
           <span class="truncate">{{ displayName }}</span>
           <Badge v-if="store.canManage" variant="secondary" class="ml-auto text-[10px]">管理</Badge>
+          <Badge v-else-if="store.qqLinkedGh?.login" variant="secondary" class="ml-auto text-[10px]">已绑定</Badge>
           <Badge v-else-if="isQqOnly" variant="secondary" class="ml-auto text-[10px]">QQ</Badge>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem v-if="isQqOnly" @select="profileOpen = true">
+        <DropdownMenuItem @select="profileOpen = true">
           <IconUserRound class="size-4" />
           <span>个人中心</span>
         </DropdownMenuItem>
@@ -372,14 +419,14 @@ onBeforeUnmount(resetFlow)
       </DropdownMenuContent>
     </DropdownMenu>
 
-    <QqProfileDialog v-model:open="profileOpen" />
+    <AccountCenterDialog v-model:open="profileOpen" />
     <QqBanDialog v-model:open="banOpen" />
 
     <!-- 登录面板 -->
     <Dialog v-model:open="authOpenModel">
       <DialogContent class="sm:max-w-[820px]">
         <DialogHeader>
-          <DialogTitle>登录</DialogTitle>
+          <DialogTitle class="font-bold">登录</DialogTitle>
           <DialogDescription>
             发布 issue 与评论需要身份。GitHub 账号功能最全，QQ 邮箱登录门槛最低。
           </DialogDescription>
@@ -453,7 +500,10 @@ onBeforeUnmount(resetFlow)
 
           <!-- 以「未生成验证码」那一态的高度为准（263px）：
                给它设成固定高度，并把等待态的间距收紧，切过去时右侧不会长高 -->
-          <TabsContent value="device" class="mt-4 flex h-[263px] shrink-0 flex-col">
+          <!-- 三栏用 min-height 而不是 height：TabsContent 基类带 flex-1，
+               height 会被 flex-basis 覆盖、失效；min-height 不受影响。
+               210 是能同时容纳 GitHub 与 Token 两栏内容的最小值，两者因此等高。 -->
+          <TabsContent value="device" class="mt-4 flex min-h-[210px] flex-col">
             <div v-if="!deviceFlowReady" class="flex flex-1 flex-col gap-3">
               <p class="text-muted-foreground text-sm leading-relaxed">
                 GitHub 的授权端点不允许浏览器跨域直连，账号登录需要先给本站配置一个加速中转
@@ -470,16 +520,30 @@ onBeforeUnmount(resetFlow)
               <p class="text-muted-foreground text-sm leading-relaxed">
                 点击下面的按钮，我们会给你一串 8 位验证码，在 GitHub 页面输入即可完成授权。
               </p>
-              <p v-if="flowError" class="text-destructive text-sm">{{ flowError }}</p>
+              <div
+                v-if="flowError"
+                class="border-destructive/25 bg-destructive/5 text-destructive flex items-center gap-2 rounded-lg border px-3 py-2.5"
+              >
+                <IconCircleAlert class="size-3.5 shrink-0" />
+                <p class="text-[12.5px] leading-relaxed">{{ flowError }}</p>
+              </div>
               <Button class="mt-auto w-full gap-2" @click="startDeviceFlowLogin">
                 <IconGitHub class="size-4" />
                 生成验证码
               </Button>
             </div>
 
-            <div v-else-if="flowState === 'requesting'" class="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-              <IconLoader class="size-4 animate-spin" />
-              正在申请验证码…
+            <!-- 与成功态同构：图标块 + 标题 + 一句说明 -->
+            <div v-else-if="flowState === 'requesting'" class="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+              <div class="bg-muted grid size-12 place-items-center rounded-xl">
+                <IconLoader class="size-5 animate-spin" />
+              </div>
+              <div class="flex flex-col gap-1">
+                <p class="text-base font-semibold">正在申请验证码</p>
+                <p class="text-muted-foreground max-w-[280px] text-xs leading-relaxed">
+                  正在向 GitHub 申请授权码，通常只需要几秒钟。
+                </p>
+              </div>
             </div>
 
             <div v-else-if="flowState === 'waiting'" class="flex flex-1 flex-col gap-2">
@@ -516,70 +580,146 @@ onBeforeUnmount(resetFlow)
               <Button variant="secondary" size="sm" class="w-full" @click="resetFlow">取消</Button>
             </div>
 
-            <div v-else-if="flowState === 'success'" class="flex items-center justify-center gap-2 py-6 text-sm">
-              <IconCheck class="size-4" />
-              登录成功
+            <!-- 成功态不是一个字：图标块 + 标题 + 一句说明，和面板里其它空状态同一套版式 -->
+            <div v-else-if="flowState === 'success'" class="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+              <div class="bg-muted grid size-12 place-items-center rounded-xl">
+                <IconCheck class="size-5" />
+              </div>
+              <div class="flex flex-col gap-1">
+                <p class="text-base font-semibold">登录成功</p>
+                <p class="text-muted-foreground max-w-[280px] text-xs leading-relaxed">
+                  现在的身份是 @{{ store.user?.login || 'GitHub 用户' }}，可以发 issue 与评论了。
+                </p>
+              </div>
             </div>
           </TabsContent>
 
-          <TabsContent value="token" class="mt-4 flex flex-1 flex-col gap-3">
+          <TabsContent value="token" class="mt-4 flex min-h-[210px] flex-col gap-3">
             <p class="text-muted-foreground text-sm leading-relaxed">
-              点下面的按钮打开 GitHub 创建页，权限已预填（public_repo + read:user），生成后把 token 粘回来。
+              还没有 Token？点下面的按钮打开 GitHub 创建页，权限已预填（public_repo + read:user），生成后粘回来。
             </p>
-            <Button as-child variant="outline" class="w-full gap-2">
+            <div class="grid gap-1.5">
+              <Label for="pat">Personal Access Token</Label>
+              <Input id="pat" v-model="patValue" type="password" placeholder="ghp_… 或 github_pat_…" @keyup.enter="submitPat" />
+            </div>
+            <!-- 创建与登录是同一个动作的前后两步，贴在一起沉到栏底 -->
+            <Button as-child variant="outline" class="mt-auto w-full gap-2">
               <a :href="PAT_CREATE_URL" target="_blank" rel="noopener">
                 <IconExternalLink class="size-4" />
                 打开 GitHub 创建 Token
               </a>
             </Button>
-            <div class="grid gap-1.5">
-              <Label for="pat">Personal Access Token</Label>
-              <Input id="pat" v-model="patValue" type="password" placeholder="ghp_… 或 github_pat_…" @keyup.enter="submitPat" />
-            </div>
-            <Button class="mt-auto w-full gap-2" :disabled="patLoading || !patValue.trim()" @click="submitPat">
+            <Button class="w-full gap-2" :disabled="patLoading || !patValue.trim()" @click="submitPat">
               <IconKey class="size-4" />
               {{ patLoading ? '验证中…' : '用 Token 登录' }}
             </Button>
           </TabsContent>
 
-          <!-- QQ 邮箱：没有 GitHub 账号也能发言，由服务器以机器人身份代发 -->
-          <TabsContent value="qq" class="mt-4 flex min-h-[263px] shrink-0 flex-col gap-3">
-            <p class="text-muted-foreground text-xs leading-relaxed">
-              只收 @qq.com 与 @foxmail.com。登录后可以发 issue、评论、关闭自己发的单；
-              发帖在 GitHub 上会显示为仓库机器人，正文里标注你的昵称。
-            </p>
+          <!-- QQ 邮箱：两步走。切换时整块横向滑动，与管理面板的「新建」滑板同一手法 -->
+          <TabsContent value="qq" class="mt-4 flex min-h-[210px] flex-col">
+            <div class="relative flex-1 overflow-hidden">
+              <!-- 第一步：证明邮箱 -->
+              <div
+                class="absolute inset-0 flex flex-col gap-2 px-1 transition-[transform,translate,opacity] duration-300 ease-[ease]"
+                :class="
+                  qqStep === 'email'
+                    ? 'translate-x-0 opacity-100'
+                    : 'pointer-events-none -translate-x-full opacity-0'
+                "
+                :aria-hidden="qqStep !== 'email'"
+              >
+                <h3 class="text-[17px] font-bold tracking-tight">用 QQ 邮箱登录</h3>
+                <p class="text-muted-foreground text-xs leading-relaxed">
+                  只收 @qq.com 与 @foxmail.com。发帖在 GitHub 上会显示为仓库机器人，正文里标注你的昵称。
+                </p>
 
-            <div class="flex flex-col gap-1.5">
-              <Label for="qq-email" class="text-xs text-muted-foreground">QQ 邮箱</Label>
-              <div class="flex gap-2">
-                <Input id="qq-email" v-model="qqEmail" placeholder="12345678@qq.com" class="flex-1" />
-                <Button
-                  variant="outline"
-                  class="shrink-0"
-                  :disabled="!qqCanSend"
-                  @click="sendQqCode"
+                <div class="flex flex-col gap-1.5">
+                  <Label for="qq-email" class="text-xs text-muted-foreground">QQ 邮箱</Label>
+                  <div class="flex gap-2">
+                    <Input
+                      id="qq-email"
+                      v-model="qqEmail"
+                      placeholder="12345678@qq.com"
+                      class="flex-1"
+                      @keyup.enter="sendQqCode"
+                    />
+                    <Button
+                      variant="outline"
+                      class="shrink-0"
+                      :disabled="!qqCanSend"
+                      @click="sendQqCode"
+                    >
+                      {{ qqSending ? '发送中…' : qqCooldown > 0 ? qqCooldown + 's' : '获取验证码' }}
+                    </Button>
+                  </div>
+                </div>
+
+                <p
+                  class="min-h-4 text-xs leading-4"
+                  :class="qqError ? 'text-destructive' : 'text-muted-foreground'"
                 >
-                  {{ qqSending ? '发送中…' : qqCooldown > 0 ? qqCooldown + 's' : '发验证码' }}
+                  {{ qqError || qqHint }}
+                </p>
+
+                <!-- 发过码之后才知道「返回输入」要有：没发过码时就只有一个占满宽度的登录 -->
+                <div class="mt-auto grid gap-2" :class="qqSent ? 'grid-cols-2' : 'grid-cols-1'">
+                  <Button v-if="qqSent" variant="outline" class="w-full" @click="qqStep = 'code'">
+                    返回输入
+                  </Button>
+                  <Button class="w-full gap-2" :disabled="!qqCanVerify" @click="verifyQqCode">
+                    <IconQQ class="size-4" />
+                    {{ qqVerifying ? '验证中…' : '登录' }}
+                  </Button>
+                </div>
+              </div>
+
+              <!-- 第二步：输入验证码 -->
+              <div
+                class="absolute inset-0 flex flex-col gap-2 px-1 transition-[transform,translate,opacity] duration-300 ease-[ease]"
+                :class="
+                  qqStep === 'code'
+                    ? 'translate-x-0 opacity-100'
+                    : 'pointer-events-none translate-x-full opacity-0'
+                "
+                :aria-hidden="qqStep !== 'code'"
+              >
+                <h3 class="text-[17px] font-bold tracking-tight">输入验证码</h3>
+                <!-- 这一行兼职错误位：出错时换成红字，不再额外占一行 -->
+                <p
+                  class="text-xs leading-relaxed"
+                  :class="qqError ? 'text-destructive' : 'text-muted-foreground'"
+                >
+                  <template v-if="qqError">{{ qqError }}</template>
+                  <template v-else>
+                    验证码已发到 <span class="text-foreground font-medium">{{ qqEmail }}</span>，10 分钟内有效。
+                  </template>
+                </p>
+
+                <!-- 六格均分整栏宽度：格子吃掉容器的剩余宽度，比默认的 36px 高一档 -->
+                <InputOTP v-model="qqCode" :maxlength="6" class="w-full">
+                  <InputOTPGroup class="flex-1">
+                    <InputOTPSlot :index="0" class="h-12 w-auto flex-1 font-mono text-lg font-semibold tabular-nums" />
+                    <InputOTPSlot :index="1" class="h-12 w-auto flex-1 font-mono text-lg font-semibold tabular-nums" />
+                    <InputOTPSlot :index="2" class="h-12 w-auto flex-1 font-mono text-lg font-semibold tabular-nums" />
+                  </InputOTPGroup>
+                  <InputOTPSeparator />
+                  <InputOTPGroup class="flex-1">
+                    <InputOTPSlot :index="3" class="h-12 w-auto flex-1 font-mono text-lg font-semibold tabular-nums" />
+                    <InputOTPSlot :index="4" class="h-12 w-auto flex-1 font-mono text-lg font-semibold tabular-nums" />
+                    <InputOTPSlot :index="5" class="h-12 w-auto flex-1 font-mono text-lg font-semibold tabular-nums" />
+                  </InputOTPGroup>
+                </InputOTP>
+
+                <!-- 与主按钮同高（都是 h-9），只靠描边区分主次 -->
+                <Button variant="outline" class="mt-auto w-full" @click="backToEmail">
+                  上一步
+                </Button>
+                <Button class="w-full gap-2" :disabled="!qqCanVerify" @click="verifyQqCode">
+                  <IconQQ class="size-4" />
+                  {{ qqVerifying ? '验证中…' : '登录' }}
                 </Button>
               </div>
             </div>
-
-            <div class="flex flex-col gap-1.5">
-              <Label for="qq-code" class="text-xs text-muted-foreground">验证码</Label>
-              <Input
-                id="qq-code"
-                v-model="qqCode"
-                placeholder="6 位数字"
-                inputmode="numeric"
-                maxlength="6"
-              />
-            </div>
-
-            <p v-if="qqError" class="text-destructive text-xs leading-relaxed">{{ qqError }}</p>
-
-            <Button class="mt-auto w-full" :disabled="!qqCanVerify" @click="verifyQqCode">
-              {{ qqVerifying ? '验证中…' : '登录' }}
-            </Button>
           </TabsContent>
         </Tabs>
           </div>
@@ -654,39 +794,42 @@ onBeforeUnmount(resetFlow)
 
     <!-- 退出登录二次确认 -->
     <AlertDialog v-model:open="logoutConfirmOpen">
-      <AlertDialogContent class="gap-0 overflow-hidden p-0 sm:max-w-[460px] sm:rounded-2xl">
-        <div class="px-6 pt-6 pb-5">
-          <AlertDialogHeader class="gap-2 text-left">
-            <AlertDialogTitle class="text-2xl font-semibold tracking-tight">
-              确认退出登录？
-            </AlertDialogTitle>
-            <AlertDialogDescription class="text-[15px] leading-relaxed">
-              {{
-                isQqOnly
-                  ? '退出后会清除这台设备上保存的 QQ 登录状态，重新登录需要再收一次验证码。'
-                  : '退出后会清除这台设备上保存的 GitHub 授权凭据。'
-              }}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+      <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
+        <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+          <div class="flex items-center gap-3">
+            <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+              <IconLogOut class="size-4" />
+            </div>
+            <AlertDialogTitle class="text-xl font-bold">确认退出登录？</AlertDialogTitle>
+          </div>
+
+          <AlertDialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
+            {{
+              isQqOnly
+                ? '退出后会清除这台设备上保存的 QQ 登录状态，下次进入需要重新走一遍邮箱验证码流程。'
+                : '退出后会清除这台设备上保存的 GitHub 授权凭据，下次进入需要重新完成一次授权。'
+            }}
+          </AlertDialogDescription>
 
           <p
-            class="border-border text-muted-foreground mt-6 rounded-xl border px-4 py-3.5 text-[13px] leading-relaxed"
+            class="border-border text-muted-foreground mt-4 w-full rounded-xl border px-4 py-3 text-left text-[12.5px] leading-relaxed"
           >
             {{
               isQqOnly
-                ? '昵称与已经发布的内容都会保留，不会因为退出而被删除。'
-                : '只影响这台设备的登录状态，账号与仓库权限不受任何影响。'
+                ? '昵称与已经发布的内容都会完整保留，不会因为退出登录而被删除或隐藏，随时可以用同一个邮箱重新登录。'
+                : '只影响这台设备的登录状态，账号本身与仓库里的权限都不受影响，随时可以重新授权登录。'
             }}
           </p>
         </div>
 
-        <!-- 按钮尺寸对齐页头的「新建 Issue」：shadcn sm = h-8 / px-3 / gap-1.5 / text-sm -->
-        <AlertDialogFooter class="border-border bg-muted/60 gap-2.5 border-t px-6 py-4">
-          <AlertDialogCancel class="h-8 gap-1.5 px-3 text-sm">取消</AlertDialogCancel>
-          <AlertDialogAction class="h-8 gap-1.5 px-3 text-sm font-semibold" @click="logout">
-            退出登录
-          </AlertDialogAction>
-        </AlertDialogFooter>
+        <div class="border-border bg-muted/70 border-t px-5 py-4">
+          <div class="grid w-full grid-cols-2 gap-2">
+            <AlertDialogCancel class="h-8 rounded-md px-3 text-sm font-medium">取消</AlertDialogCancel>
+            <AlertDialogAction class="h-8 rounded-md px-3 text-sm font-semibold" @click="logout">
+              退出登录
+            </AlertDialogAction>
+          </div>
+        </div>
       </AlertDialogContent>
     </AlertDialog>
   </div>

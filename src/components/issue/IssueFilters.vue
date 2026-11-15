@@ -248,7 +248,7 @@ function resetAll() {
       </Popover>
 
       <Select v-model="milestoneModel">
-        <SelectTrigger class="h-9 w-auto min-w-[130px] gap-1.5 text-sm">
+        <SelectTrigger class="h-9 w-auto min-w-[130px] gap-1.5 text-sm border bg-background shadow-xs transition-[color,box-shadow,background-color] hover:bg-accent hover:text-accent-foreground">
           <IconFlag class="size-4 shrink-0 text-foreground" />
           <SelectValue placeholder="里程碑" />
         </SelectTrigger>
@@ -261,7 +261,7 @@ function resetAll() {
       </Select>
 
       <Select v-model="assigneeModel">
-        <SelectTrigger class="h-9 w-auto min-w-[120px] gap-1.5 text-sm">
+        <SelectTrigger class="h-9 w-auto min-w-[120px] gap-1.5 text-sm border bg-background shadow-xs transition-[color,box-shadow,background-color] hover:bg-accent hover:text-accent-foreground">
           <IconUsersRound class="size-4 shrink-0 text-foreground" />
           <SelectValue placeholder="指派" />
         </SelectTrigger>
@@ -272,7 +272,7 @@ function resetAll() {
       </Select>
 
       <Select v-model="sortModel">
-        <SelectTrigger class="h-9 w-auto min-w-[120px] gap-1.5 text-sm">
+        <SelectTrigger class="h-9 w-auto min-w-[120px] gap-1.5 text-sm border bg-background shadow-xs transition-[color,box-shadow,background-color] hover:bg-accent hover:text-accent-foreground">
           <IconArrowDownWideNarrow class="size-4 shrink-0 text-foreground" />
           <SelectValue placeholder="排序" />
         </SelectTrigger>

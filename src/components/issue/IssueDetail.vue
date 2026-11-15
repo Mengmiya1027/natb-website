@@ -149,6 +149,8 @@ async function deleteOwnIssue() {
   try {
     await qqWriteApi.deleteIssue(issue.value.number)
     toast.success('Issue 已删除')
+    // 先让宿主把列表重新拉一遍，再退回去：只 emit('back') 的话列表还是那份旧数据
+    emit('changed')
     emit('back')
   } catch (err) {
     toast.error(err?.message || String(err))
@@ -164,6 +166,7 @@ async function closeOwnIssue() {
     await qqWriteApi.closeIssue(issue.value.number)
     toast.success('已关闭这个 issue')
     await load()
+    emit('changed')
   } catch (err) {
     toast.error(err?.message || String(err))
   } finally {
@@ -225,7 +228,7 @@ async function load() {
   error.value = ''
   try {
     const [issueData, commentData, timelineData, pinned] = await Promise.all([
-      githubApi.getIssue(props.number),
+      githubApi.getIssue(props.number, { noCache: true }),
       // 评论与时间线失败不该拖垮整页，退化成空即可
       githubApi.listComments(props.number, { per_page: 100 }).catch(() => []),
       githubApi.listTimeline(props.number, { per_page: 100 }).catch(() => []),
@@ -262,6 +265,16 @@ async function reloadThread() {
   emit('changed')
 }
 
+/** 只重拉时间线：标签 / 里程碑 / 指派都会在时间线上留一条记录，不刷新就看不到 */
+async function refreshTimeline() {
+  try {
+    const data = await githubApi.listTimeline(props.number, { per_page: 100 })
+    events.value = Array.isArray(data) ? data : []
+  } catch {
+    /* 时间线拉不到不影响刚才那次操作本身 */
+  }
+}
+
 /* ---------------- 侧栏写入 ---------------- */
 
 /* 管理 = 拥有者 + 协作者；其余都算非管理。
@@ -286,6 +299,7 @@ watch(labels, async (next) => {
   try {
     const data = await updateIssueMeta(props.number, { labels: nextNames })
     issue.value = { ...issue.value, labels: data?.issue?.labels || [] }
+    await refreshTimeline()
     toast.success('标签已更新')
     emit('changed')
   } catch (err) {
@@ -306,6 +320,7 @@ watch(assignees, async (next) => {
   try {
     const data = await updateIssueMeta(props.number, { assignees: nextLogins })
     issue.value = { ...issue.value, assignees: data?.issue?.assignees || [] }
+    await refreshTimeline()
     toast.success(nextLogins.length ? '指派已更新' : '已清空指派')
     emit('changed')
   } catch (err) {
@@ -326,6 +341,7 @@ watch(milestone, async (next) => {
   try {
     const data = await updateIssueMeta(props.number, { milestone: nextValue })
     issue.value = { ...issue.value, milestone: data?.issue?.milestone ?? null }
+    await refreshTimeline()
     toast.success('里程碑已更新')
     emit('changed')
   } catch (err) {
@@ -616,44 +632,88 @@ async function onSidebarChanged() {
                   {{ qqClosing ? '正在关闭…' : '关闭这个 issue' }}
                 </Button>
               </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>关闭这个 issue？</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    关闭后它仍然可以被别人读到，但你自己无法重新打开。
+              <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
+                <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+                  <div class="flex items-center gap-3">
+                    <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+                      <IconCircleCheck class="size-4" />
+                    </div>
+                    <AlertDialogTitle class="text-xl font-bold">关闭这个 issue？</AlertDialogTitle>
+                  </div>
+
+                  <AlertDialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
+                    关闭后这条 issue 会从「未关闭」列表里移出，其他成员仍然可以查看它的内容与历史讨论。
                   </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction @click="closeOwnIssue">关闭</AlertDialogAction>
-                </AlertDialogFooter>
+
+                  <p
+                    class="border-border text-muted-foreground mt-4 w-full rounded-xl border px-4 py-3 text-left text-[12.5px] leading-relaxed"
+                  >
+                    关闭不等于删除：内容与评论都会留下，只是不再接受新的回复。想重新打开需要请管理员处理。
+                  </p>
+                </div>
+
+                <div class="border-border bg-muted/70 border-t px-5 py-4">
+                  <div class="grid w-full grid-cols-2 gap-2">
+                    <AlertDialogCancel class="h-8 rounded-md px-3 text-sm font-medium">取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      class="h-8 rounded-md px-3 text-sm font-semibold"
+                      @click="closeOwnIssue"
+                    >
+                      关闭
+                    </AlertDialogAction>
+                  </div>
+                </div>
               </AlertDialogContent>
             </AlertDialog>
             <p v-else class="text-muted-foreground text-xs">已关闭。</p>
 
             <AlertDialog>
               <AlertDialogTrigger as-child>
-                <Button variant="ghost" size="sm" class="text-destructive w-full gap-1.5" :disabled="qqDeleting">
-                  <IconTrash2 class="size-4" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-destructive hover:bg-destructive/10 hover:text-destructive active:bg-destructive/15 w-full gap-1.5 transition-colors"
+                  :disabled="qqDeleting"
+                >
+                  <IconLoader v-if="qqDeleting" class="size-4 animate-spin" />
+                  <IconTrash2 v-else class="size-4" />
                   {{ qqDeleting ? '正在删除…' : '删除这个 issue' }}
                 </Button>
               </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>删除这个 issue？</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    删除后无法恢复，评论与时间线会一并消失。
+              <!-- 内容区居中竖排，按钮区单独成条：浅灰底 + 顶部分隔线 + 右对齐（同「关闭 issue」那份） -->
+              <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
+                <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+                  <div class="flex items-center gap-3">
+                    <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+                      <IconTrash2 class="size-4" />
+                    </div>
+                    <AlertDialogTitle class="text-xl font-bold">删除这个 issue？</AlertDialogTitle>
+                  </div>
+
+                  <AlertDialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
+                    删除后这条 issue 与它的全部评论、时间线都会被永久移除，且无法恢复，请确认后再继续。
                   </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction
-                    class="bg-destructive hover:bg-destructive/90 font-semibold text-white"
-                    @click="deleteOwnIssue"
+
+                  <p
+                    class="border-border text-muted-foreground mt-4 w-full rounded-xl border px-4 py-3 text-left text-[12.5px] leading-relaxed"
                   >
-                    删除
-                  </AlertDialogAction>
-                </AlertDialogFooter>
+                    该 issue 的编号将随之作废，此前分享出去的链接会失效，其他成员无法再访问或引用它。
+                  </p>
+                </div>
+
+                <!-- 只换这条的背景（浅灰 + 分隔线），按钮仍是等分铺满 -->
+                <div class="border-border bg-muted/70 border-t px-5 py-4">
+                  <div class="grid w-full grid-cols-2 gap-2">
+                    <AlertDialogCancel class="h-8 rounded-md px-3 text-sm font-medium">取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      class="bg-destructive hover:bg-destructive hover:brightness-95 h-8 rounded-md px-3 text-sm font-semibold text-white transition-[filter] duration-200"
+                      @click="deleteOwnIssue"
+                    >
+                      <IconLoader v-if="qqDeleting" class="size-3.5 animate-spin" />
+                      删除
+                    </AlertDialogAction>
+                  </div>
+                </div>
               </AlertDialogContent>
             </AlertDialog>
           </div>

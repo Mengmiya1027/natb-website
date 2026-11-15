@@ -160,7 +160,11 @@ async function signSession(env, payload) {
 
 async function verifySession(env, request) {
   const header = request.headers.get('Authorization') || ''
-  const token = header.replace(/^Bearer\s+/i, '').trim()
+  return await verifyToken(env, header.replace(/^Bearer\s+/i, '').trim())
+}
+
+/** 验一枚具体的 QQ 会话令牌。绑定接口要从请求体里验另一侧的令牌，所以单独拆出来 */
+async function verifyToken(env, token) {
   if (!token || !token.includes('.')) return null
   const [body, sig] = token.split('.')
   const expect = bytesToB64url(await hmac(env, body))
@@ -185,12 +189,68 @@ async function readJsonBody(request) {
 
 /* ---------------- 发信 ---------------- */
 
+/**
+ * 登录验证码邮件。
+ *
+ * 版式照官网那套：白卡片 + 细边 + 等宽的验证码。
+ * 不放「复制」按钮：邮件客户端普遍剥掉 JavaScript，按钮点了也只能跳转，
+ * 与其给一个名不副实的按钮，不如让验证码本身够大够好选。
+ * 全部用内联样式和表格布局 —— Outlook 对 flex/grid 支持很差，<style> 也可能被剥。
+ */
 function codeMailHtml(code) {
+  const mono = "'SF Mono',Consolas,Menlo,monospace"
+  const sans =
+    "'Segoe UI',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif"
+
   return [
-    '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.6;color:#111">',
-    '<p>你在 NATB 官网请求登录，验证码是：</p>',
-    '<p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">' + code + '</p>',
-    '<p style="color:#666">10 分钟内有效。不是你本人操作的话，忽略这封邮件即可。</p>',
+    '<div style="margin:0;padding:32px 16px;background:#f4f4f5;font-family:' + sans + ';">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">',
+
+    '<table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;background:#ffffff;border:1px solid #e4e4e7;border-radius:16px;">',
+
+    // 字标
+    '<tr><td style="padding:28px 32px 0 32px;">',
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>',
+    '<td style="width:34px;height:34px;background:#111113;border-radius:10px;color:#ffffff;font-size:16px;font-weight:700;text-align:center;line-height:34px;">N</td>',
+    '<td style="padding-left:10px;font-size:15px;font-weight:600;color:#111113;">NATB</td>',
+    '</tr></table>',
+    '</td></tr>',
+
+    // 标题 + 说明
+    '<tr><td style="padding:22px 32px 0 32px;">',
+    '<div style="font-size:22px;line-height:1.3;font-weight:700;color:#111113;letter-spacing:-0.01em;">登录验证码</div>',
+    '<div style="margin-top:8px;font-size:14px;line-height:1.6;color:#71717a;">',
+    '你在 NATB 官网的 Issue 页请求登录，请使用下面的验证码完成验证。',
+    '</div>',
+    '</td></tr>',
+
+    // 验证码
+    '<tr><td style="padding:22px 32px 0 32px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fafafa;border:1px solid #ebebee;border-radius:12px;">',
+    '<tr><td style="padding:22px 16px;text-align:center;">',
+    '<span style="font-family:' + mono + ';font-size:34px;line-height:1;font-weight:700;letter-spacing:10px;color:#111113;text-indent:10px;">' + code + '</span>',
+    '</td></tr></table>',
+    '</td></tr>',
+
+    '<tr><td style="padding:16px 32px 0 32px;text-align:center;">',
+    '<span style="font-size:13px;line-height:1.6;color:#a1a1aa;">10 分钟内有效，过期后请回到网站重新获取。</span>',
+    '</td></tr>',
+
+    // 分隔 + 兜底说明
+    '<tr><td style="padding:26px 32px 0 32px;"><div style="height:1px;background:#f0f0f2;"></div></td></tr>',
+    '<tr><td style="padding:16px 32px 28px 32px;">',
+    '<div style="font-size:12.5px;line-height:1.7;color:#a1a1aa;">',
+    '不是你本人操作？忽略这封邮件即可，验证码会自动失效，账号不受影响。',
+    '</div>',
+    '</td></tr>',
+
+    '</table>',
+
+    '<div style="margin-top:16px;font-size:11.5px;line-height:1.6;color:#b4b4bc;">',
+    '本邮件由 NATB 官网系统自动发送，请勿直接回复。',
+    '</div>',
+
+    '</td></tr></table>',
     '</div>',
   ].join('')
 }
@@ -219,6 +279,9 @@ async function sendCodeMail(env, email, code) {
   }
   return { debug: false }
 }
+
+// 供本地预览脚本直接拿到邮件 HTML（Workers 允许 default 之外再有命名导出）
+export { codeMailHtml }
 
 /* ---------------- GitHub App ---------------- */
 
@@ -322,8 +385,8 @@ async function requireWriter(env, request, cors) {
   const session = await verifySession(env, request)
   if (!session) return { error: json({ error: 'unauthorized' }, 401, request.headers.get('Origin') || '', env) }
 
-  const ban = await kvJson(env, 'ban:' + session.sub)
-  if (ban && (ban.until === 0 || ban.until > Date.now())) {
+  const ban = await banStateOfQq(env, session.sub)
+  if (banActive(ban)) {
     const until = ban.until === 0 ? '永久' : new Date(ban.until).toISOString().slice(0, 10)
     return { error: json({ error: 'banned', until }, 403, request.headers.get('Origin') || '', env) }
   }
@@ -337,7 +400,7 @@ async function requireWriter(env, request, cors) {
   if (used > WRITE_LIMIT_PER_MIN) {
     const wait = 60 - (Math.floor(Date.now() / 1000) % 60)
     const out = json(
-      { error: 'rate_limited', limit: WRITE_LIMIT_PER_MIN, window: 60, retryAfter: wait },
+      { error: 'rate_limited', message: '操作太频繁，请 ' + wait + ' 秒后再试', limit: WRITE_LIMIT_PER_MIN, window: 60, retryAfter: wait },
       429,
       request.headers.get('Origin') || '',
       env,
@@ -348,7 +411,14 @@ async function requireWriter(env, request, cors) {
 
   const ipUsed = await bump(env, 'rl:ip:' + clientIp(request) + ':' + hourBucket(), 3600)
   if (ipUsed > 20) {
-    return { error: json({ error: 'rate_limited', retryAfter: 60 }, 429, request.headers.get('Origin') || '', env) }
+    return {
+      error: json(
+        { error: 'rate_limited', message: '这个网络的操作太频繁，请一小时后再试', retryAfter: 3600 },
+        429,
+        request.headers.get('Origin') || '',
+        env,
+      ),
+    }
   }
   return { session }
 }
@@ -358,10 +428,19 @@ async function requireWriter(env, request, cors) {
  * 只能看到一个 bot，看不出是谁发的。因此再加一行给 <sub> 的可见署名，
  * 前端渲染时连同注释一起剥掉（那边已经有作者名了，不需要重复）。
  */
-function qqMarker(session, masked) {
+function qqMarker(session, masked, linkedLogin) {
   const nick = session.nick || '匿名用户'
-  const meta = JSON.stringify({ sub: session.sub, nick, masked: masked || '' })
-  const visible = '<sub>QQ 用户 ' + nick + (masked ? '（' + masked + '）' : '') + ' 通过 NATB 官网提交</sub>'
+  const meta = JSON.stringify({
+    sub: session.sub,
+    nick,
+    masked: masked || '',
+    ...(linkedLogin ? { login: linkedLogin } : {}),
+  })
+  // 绑定了 GitHub 的，署名以 GitHub 为准：读者该看到的是那个 GitHub 账号，
+  // 而不是一个陌生的 QQ 昵称。QQ 昵称退进注释里留档。
+  const visible = linkedLogin
+    ? '<sub>@' + linkedLogin + '（经 QQ 邮箱验证）通过 NATB 官网提交</sub>'
+    : '<sub>QQ 用户 ' + nick + (masked ? '（' + masked + '）' : '') + ' 通过 NATB 官网提交</sub>'
   return '\n\n' + visible + '\n<!-- natb:qq ' + meta + ' -->\n'
 }
 
@@ -391,13 +470,18 @@ async function handleIssueMeta(env, request, url, match) {
     session = await verifySession(env, request)
     if (!session) return json({ error: 'unauthorized', message: 'QQ 登录已失效' }, 401, origin, env)
     sub = session.sub
-    const ban = await kvJson(env, 'ban:' + sub)
-    if (ban && (ban.until === 0 || ban.until > Date.now())) {
+    const ban = await banStateOfQq(env, sub)
+    if (banActive(ban)) {
       return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
     }
     const used = await bump(env, 'rl:' + sub + ':' + minuteBucket(), 120)
     if (used > WRITE_LIMIT_PER_MIN) {
-      return json({ error: 'rate_limited', limit: WRITE_LIMIT_PER_MIN, window: 60 }, 429, origin, env)
+      return json(
+        { error: 'rate_limited', message: '操作太频繁，请一分钟后重试', limit: WRITE_LIMIT_PER_MIN, window: 60, retryAfter: 60 },
+        429,
+        origin,
+        env,
+      )
     }
   } else {
     const meRes = await fetch('https://api.github.com/user', {
@@ -408,6 +492,11 @@ async function handleIssueMeta(env, request, url, match) {
     const me = await meRes.json()
     login = me && me.login
     if (!login) return json({ error: 'token_invalid' }, 401, origin, env)
+    // GitHub 身份同样要查封禁：本站的写路径能拦的一律拦，不能拦的在文档里说明
+    const ghBan = await banStateOfGh(env, login)
+    if (banActive(ghBan)) {
+      return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
+    }
   }
 
   const issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
@@ -425,9 +514,12 @@ async function handleIssueMeta(env, request, url, match) {
   const isAdmin = login
     ? await callerIsAdmin(env, login, raw)
     : await qqCallerIsAdmin(env, sub)
+  // 作者判定按等价类走：绑定之后，GitHub 身份也能改自己过去用 QQ 发的帖子，反之亦然
+  const classSub = sub || (login ? await bindOfGh(env, login) : '')
+  const classLogin = login || (sub ? await bindOfQq(env, sub) : '')
   const isAuthor = Boolean(
-    (sub && ownerSub && sub === ownerSub) ||
-      (login && issue.user && issue.user.login && issue.user.login.toLowerCase() === login.toLowerCase()),
+    (classSub && ownerSub && classSub === ownerSub) ||
+      (classLogin && issue.user && issue.user.login && issue.user.login.toLowerCase() === classLogin.toLowerCase()),
   )
 
   if (!isAdmin && !isAuthor) {
@@ -498,6 +590,165 @@ async function roleOfLogin(env, login) {
   }
 }
 
+/* ---------------- 身份等价类：绑定后 QQ 与 GitHub 是同一个身份 ---------------- */
+
+/**
+ * 绑定关系存在两个方向的键里：
+ *   bind:<sub>      = login（QQ 侧读）
+ *   bind:gh:<login> = sub  （GitHub 侧读，login 一律小写）
+ * 两者要么都在、要么都不在——写和删必须成对，否则身份会分叉成两半。
+ */
+
+function banActive(record) {
+  return Boolean(record) && (record.until === 0 || record.until > Date.now())
+}
+
+async function bindOfQq(env, sub) {
+  if (!sub) return ''
+  return (await env.NATB_KV.get('bind:' + sub)) || ''
+}
+
+async function bindOfGh(env, login) {
+  if (!login) return ''
+  return (await env.NATB_KV.get('bind:gh:' + String(login).toLowerCase())) || ''
+}
+
+/** QQ 等价类的封禁：本身份或绑定账号，任一命中即整类封禁 */
+async function banStateOfQq(env, sub) {
+  const own = await kvJson(env, 'ban:' + sub)
+  if (banActive(own)) return own
+  const login = await bindOfQq(env, sub)
+  if (!login) return null
+  const other = await kvJson(env, 'ban:gh:' + login.toLowerCase())
+  return banActive(other) ? other : null
+}
+
+/** GitHub 等价类的封禁：本账号或绑定身份，任一命中即整类封禁 */
+async function banStateOfGh(env, login) {
+  const own = await kvJson(env, 'ban:gh:' + String(login).toLowerCase())
+  if (banActive(own)) return own
+  const sub = await bindOfGh(env, login)
+  if (!sub) return null
+  const other = await kvJson(env, 'ban:' + sub)
+  return banActive(other) ? other : null
+}
+
+/**
+ * 用用户自己的 token 认人。
+ * 这是「他真的持有这个 GitHub 账号」的唯一证明——App 的 installation token
+ * 只能证明账号存在，证明不了是谁在操作，绝不能拿来替代。
+ */
+async function loginOfGhToken(token) {
+  try {
+    const res = await fetch('https://api.github.com/user', {
+      headers: {
+        Authorization: 'Bearer ' + token,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'natb-issue-proxy',
+      },
+    })
+    if (!res.ok) return null
+    const me = await res.json()
+    if (!me || !me.login) return null
+    return {
+      login: String(me.login).toLowerCase(),
+      name: me.name || '',
+      avatar: me.avatar_url || '',
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 封禁记录统一写法：until=0 是永久（无 TTL），其余按到期时间设 TTL */
+async function putBan(env, key, record) {
+  if (record.until > 0) {
+    await env.NATB_KV.put(key, JSON.stringify(record), {
+      expirationTtl: Math.max(60, Math.floor((record.until - Date.now()) / 1000) + 60),
+    })
+  } else {
+    await env.NATB_KV.put(key, JSON.stringify(record))
+  }
+}
+
+/**
+ * 把被我们封禁的人同时在 GitHub 上 block 掉。
+ *
+ * 为什么非做不可：本站的封禁只在中转层拦住写操作，对方换个客户端直连
+ * api.github.com、或者干脆去网页端发帖，我们拦不住。而「被仓库拥有者 block」
+ * 是 GitHub 自己的限制：那个人无法在这个仓库里开 issue、评论、加反应。
+ *
+ * 为什么只能用 classic PAT：block 是账号级能力（PUT /user/blocks/{login}），
+ * App 的 installation token 权限表里根本没有这一项。所以读 env.GITHUB_ADMIN_TOKEN，
+ * 没配就整段跳过 —— 封禁本身照常生效，只是少这一层。
+ */
+async function ghBlockUser(env, login, blocked) {
+  const token = env.GITHUB_ADMIN_TOKEN
+  if (!token || !login) return
+  const who = encodeURIComponent(String(login))
+  try {
+    const res = await fetch('https://api.github.com/user/blocks/' + who, {
+      method: blocked ? 'PUT' : 'DELETE',
+      headers: {
+        Authorization: 'Bearer ' + token,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'natb-issue-proxy',
+      },
+    })
+    // 失败不阻断封禁流程：KV 里的记录才是权威，GitHub 这一层是加固
+    if (!res.ok) console.warn('ghBlockUser', blocked ? 'block' : 'unblock', login, res.status)
+  } catch (err) {
+    console.warn('ghBlockUser network', login, err && err.message)
+  }
+}
+
+/** 封禁沿等价类传播：封一端必须连坐另一端，否则同一身份封一半等于没封 */
+async function banClass(env, { sub, login, record }) {
+  if (sub) await putBan(env, 'ban:' + sub, record)
+  if (login) await putBan(env, 'ban:gh:' + String(login).toLowerCase(), record)
+  // 纯 QQ 用户没有 GitHub 账号，没有可 block 的对象；
+  // 只有 GitHub 身份、以及 QQ 绑定了 GitHub 的身份走到这里
+  if (login) await ghBlockUser(env, login, true)
+}
+
+/**
+ * GitHub token → login 的短期缓存。
+ * 转发层每个写请求都要知道「这次是谁」，每次打一遍 /user 太贵，用 KV 缓存 30 分钟。
+ * 缓存的是「这枚 token 属于谁」这个不会变的事实；封禁状态每次现查，所以封禁即时生效。
+ */
+async function loginOfTokenCached(env, token) {
+  if (!env.NATB_KV) return ''
+  const cacheKey = 'ghid:' + (await sha256Hex(token)).slice(0, 24)
+  const hit = await env.NATB_KV.get(cacheKey)
+  if (hit) return hit
+  const me = await loginOfGhToken(token)
+  if (!me) return ''
+  await env.NATB_KV.put(cacheKey, me.login, { expirationTtl: 1800 })
+  return me.login
+}
+
+async function unbanClass(env, { sub, login }) {
+  if (sub) await env.NATB_KV.delete('ban:' + sub)
+  if (login) await env.NATB_KV.delete('ban:gh:' + String(login).toLowerCase())
+  // 解封要把 GitHub 侧的 block 一并撤掉，否则人放回来了却还是发不了言
+  if (login) await ghBlockUser(env, login, false)
+}
+
+/** 一个 QQ 身份的完整视图：绑定关系 + 合并角色 + 合并封禁 */
+async function qqIdentityOf(env, sub) {
+  const login = await bindOfQq(env, sub)
+  const ban = await banStateOfQq(env, sub)
+  const banned = banActive(ban)
+  return {
+    linkedGh: login ? { login } : null,
+    role: await resolveQqRole(env, sub),
+    banned,
+    until: banned ? ban.until : 0,
+    reason: banned ? ban.reason || '' : '',
+  }
+}
+
 /**
  * QQ 身份是否有维护者权限。
  * 角色来源有两种：管理员直接授予（role:<sub>），或绑定了的 GitHub 账号在仓库里的角色（bind:<sub>）。
@@ -538,9 +789,28 @@ async function callerIsAdmin(env, login, token) {
 
 const MANAGE_ROLES = ['admin', 'maintain', 'write']
 
+/**
+ * 管理端鉴权。管理 = 这个人在这仓库里的角色落在 admin/maintain/write，与登录方式无关，
+ * 所以这里必须分辨两种凭据：
+ *   QQ 令牌（base64url.base64url 两段）→ 验签 → 等价类角色
+ *   其余                              → 当 GitHub token 用，查 /user + 协作者权限
+ * 两条路径都先过合并封禁：被封的管理员不该还能操作别人。
+ */
 async function requireAdmin(env, request) {
   const auth = request.headers.get('Authorization') || ''
   if (!/^Bearer\s+\S+/i.test(auth)) return { error: 'unauthorized' }
+  const raw = auth.replace(/^Bearer\s+/i, '').trim()
+
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) {
+    const session = await verifySession(env, request)
+    if (!session) return { error: 'token_invalid' }
+    const ban = await banStateOfQq(env, session.sub)
+    if (banActive(ban)) return { error: 'banned' }
+    const role = await resolveQqRole(env, session.sub)
+    if (!MANAGE_ROLES.includes(role)) return { error: 'forbidden', login: session.nick }
+    return { login: (await bindOfQq(env, session.sub)) || '', sub: session.sub }
+  }
+
   const headers = {
     Authorization: auth,
     Accept: 'application/vnd.github+json',
@@ -552,6 +822,9 @@ async function requireAdmin(env, request) {
   if (!meRes.ok) return { error: 'github_unreachable', status: meRes.status }
   const me = await meRes.json()
   if (!me || !me.login) return { error: 'token_invalid' }
+
+  const ghBan = await banStateOfGh(env, me.login)
+  if (banActive(ghBan)) return { error: 'banned', login: me.login }
 
   const permRes = await fetch(
     'https://api.github.com/repos/' + QQ_REPO + '/collaborators/' + encodeURIComponent(me.login) + '/permission',
@@ -572,6 +845,78 @@ async function requireAdmin(env, request) {
   return { error: 'forbidden', login: me.login }
 }
 
+/**
+ * GitHub 账号列表。四路来源去重：
+ *   1. 仓库 issue 作者（state=all，含已关的）——「发过言的人」
+ *   2. KV 里已绑定的 login——没发过帖也要能看到，否则解绑入口找不到
+ *   3. 已存在的 ban:gh: 记录——封了但没发帖的人得能解封
+ *   4. ghseen: 记录——只用 GitHub 登录过、还没发言的账号（否则管理员看不见这些人）
+ * App 只有 Issues/Metadata 权限，拉不到 collaborators 列表，所以角色不在这里展示。
+ */
+async function listGhUsers(env, origin) {
+  const map = new Map()
+  const touch = (raw) => {
+    const key = String(raw || '').toLowerCase()
+    if (!key || /\[bot\]$/.test(key)) return null
+    if (!map.has(key)) map.set(key, { login: key, issues: 0, lastActivity: 0 })
+    return map.get(key)
+  }
+
+  let issues = []
+  try {
+    const page = await githubWrite(env, '/repos/' + QQ_REPO + '/issues?state=all&per_page=100&sort=updated')
+    issues = Array.isArray(page) ? page : []
+  } catch {
+    issues = []
+  }
+  for (const issue of issues) {
+    const row = touch(issue.user && issue.user.login)
+    if (!row) continue
+    row.issues += 1
+    const at = Date.parse(issue.updated_at || issue.created_at || '') || 0
+    if (at > row.lastActivity) row.lastActivity = at
+  }
+
+  const bindKey = await env.NATB_KV.list({ prefix: 'bind:', limit: 120 })
+  for (const key of bindKey.keys) {
+    if (key.name.startsWith('bind:gh:')) continue
+    const login = (await env.NATB_KV.get(key.name)) || ''
+    if (login) touch(login)
+  }
+
+  const banKeys = await env.NATB_KV.list({ prefix: 'ban:gh:', limit: 120 })
+  for (const key of banKeys.keys) touch(key.name.slice('ban:gh:'.length))
+
+  // 第四路：只是登录过、还没发过言的账号（登录成功时由前端上报，见 /auth/seen）
+  const seenKeys = await env.NATB_KV.list({ prefix: 'ghseen:', limit: 200 })
+  for (const key of seenKeys.keys) touch(key.name.slice('ghseen:'.length))
+
+  for (const login of String(env.ADMIN_LOGINS || 'Mengmiya1027')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    touch(login)
+  }
+
+  const users = []
+  for (const row of map.values()) {
+    const ban = await kvJson(env, 'ban:gh:' + row.login)
+    const banned = banActive(ban)
+    users.push({
+      login: row.login,
+      avatar: 'https://github.com/' + row.login + '.png?size=64',
+      linkedSub: await bindOfGh(env, row.login),
+      issues: row.issues,
+      lastActivity: row.lastActivity,
+      banned,
+      until: banned ? ban.until : 0,
+      reason: banned ? ban.reason || '' : '',
+    })
+  }
+  users.sort((a, b) => Number(b.banned) - Number(a.banned) || (b.lastActivity || 0) - (a.lastActivity || 0))
+  return json({ ok: true, target: 'gh', users, cursor: null }, 200, origin, env)
+}
+
 async function handleAdmin(env, request, url) {
   const origin = request.headers.get('Origin') || ''
   const gate = await requireAdmin(env, request)
@@ -581,15 +926,20 @@ async function handleAdmin(env, request, url) {
       gate.error === 'unauthorized'
         ? '缺少 Authorization 头'
         : gate.error === 'token_invalid'
-          ? 'GitHub 登录已失效，请重新登录'
-          : gate.error === 'github_unreachable'
-            ? '中转访问 api.github.com 失败（HTTP ' + gate.status + '），稍后再试'
-            : '需要该仓库的 write 及以上权限（当前账号：' + (gate.login || '未知') + '）'
+          ? '登录已失效，请重新登录'
+          : gate.error === 'banned'
+            ? '这个账号已被封禁，不能进入管理面板'
+            : gate.error === 'github_unreachable'
+              ? '中转访问 api.github.com 失败（HTTP ' + gate.status + '），稍后再试'
+              : '需要该仓库的 write 及以上权限（当前账号：' + (gate.login || '未知') + '）'
     return json({ error: gate.error, message }, 403, origin, env)
   }
-  const me = { login: gate.login }
+  const me = { login: gate.login || '', sub: gate.sub || '' }
+  /** 记录操作人：QQ 管理员没有 login，用 sub 前 6 位标记 */
+  const actor = me.login || 'qq:' + me.sub.slice(0, 6)
 
   if (url.pathname === '/admin/users' && request.method === 'GET') {
+    if (url.searchParams.get('scope') === 'gh') return await listGhUsers(env, origin)
     const cursor = url.searchParams.get('cursor') || undefined
     const list = await env.NATB_KV.list({ prefix: 'user:', limit: 20, cursor })
     const users = []
@@ -600,6 +950,7 @@ async function handleAdmin(env, request, url) {
       const banned = Boolean(ban) && (ban.until === 0 || ban.until > Date.now())
       users.push({
         sub,
+        linkedGh: (await bindOfQq(env, sub)) || '',
         nick: profile.nick || '',
         masked: profile.masked || '',
         created: profile.created || 0,
@@ -617,38 +968,58 @@ async function handleAdmin(env, request, url) {
 
   if (url.pathname === '/admin/ban' && request.method === 'POST') {
     const body = await readJsonBody(request)
-    const sub = String((body && body.sub) || '')
-    if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
+    const target = body && body.target === 'gh' ? 'gh' : 'qq'
     const reason = String((body && body.reason) || '').trim().slice(0, 100) || '管理员封禁'
     const days = Number((body && body.days) || 0)
     const until = days > 0 ? Date.now() + days * 86400000 : 0
-    const record = { reason, by: me.login, at: Date.now(), until }
+    const record = { reason, by: actor, at: Date.now(), until }
 
-    if (until > 0) {
-      await env.NATB_KV.put('ban:' + sub, JSON.stringify(record), {
-        expirationTtl: Math.max(60, Math.floor((until - Date.now()) / 1000) + 60),
-      })
-    } else {
-      await env.NATB_KV.put('ban:' + sub, JSON.stringify(record))
+    if (target === 'gh') {
+      const login = String((body && body.login) || '').toLowerCase()
+      if (!/^[a-z0-9][a-z0-9-]{0,38}$/.test(login)) return json({ error: 'invalid_login' }, 400, origin, env)
+      const sub = await bindOfGh(env, login)
+      // 不能封自己：含等价类，否则管理员会把自己锁在门外
+      if ((me.login && login === me.login.toLowerCase()) || (me.sub && sub && sub === me.sub)) {
+        return json({ error: 'self_ban', message: '不能封禁自己' }, 400, origin, env)
+      }
+      // 封禁沿等价类传播：只封一半的话另一半照样能写
+      await banClass(env, { sub, login, record })
+      let ips = []
+      if (sub) {
+        const profile = (await kvJson(env, 'user:' + sub)) || {}
+        ips = (profile.ips || []).slice(0, 5)
+        for (const ip of ips) await kvSet(env, 'ban:ip:' + ip, actor, 86400)
+      }
+      return json({ ok: true, target, login, sub, until, ips }, 200, origin, env)
     }
+
+    const sub = String((body && body.sub) || '')
+    if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
+    if (me.sub && sub === me.sub) return json({ error: 'self_ban', message: '不能封禁自己' }, 400, origin, env)
+    const login = await bindOfQq(env, sub)
+    await banClass(env, { sub, login, record })
 
     let ips = []
     if (body && body.banIp) {
       const profile = (await kvJson(env, 'user:' + sub)) || {}
       ips = (profile.ips || []).slice(0, 5)
-      for (const ip of ips) {
-        await kvSet(env, 'ban:ip:' + ip, me.login, 86400)
-      }
+      for (const ip of ips) await kvSet(env, 'ban:ip:' + ip, actor, 86400)
     }
-    return json({ ok: true, until, ips }, 200, origin, env)
+    return json({ ok: true, target, sub, login, until, ips }, 200, origin, env)
   }
 
   if (url.pathname === '/admin/unban' && request.method === 'POST') {
     const body = await readJsonBody(request)
+    if (body && body.target === 'gh') {
+      const login = String((body && body.login) || '').toLowerCase()
+      if (!/^[a-z0-9][a-z0-9-]{0,38}$/.test(login)) return json({ error: 'invalid_login' }, 400, origin, env)
+      await unbanClass(env, { login, sub: await bindOfGh(env, login) })
+      return json({ ok: true, target: 'gh', login }, 200, origin, env)
+    }
     const sub = String((body && body.sub) || '')
     if (!/^[0-9a-f]{16}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
-    await env.NATB_KV.delete('ban:' + sub)
-    return json({ ok: true }, 200, origin, env)
+    await unbanClass(env, { sub, login: await bindOfQq(env, sub) })
+    return json({ ok: true, target: 'qq', sub }, 200, origin, env)
   }
 
   return json({ error: 'not_found' }, 404, origin, env)
@@ -674,7 +1045,9 @@ async function handleAuth(env, request, url, cors) {
     }
     const dayKey = 'code:day:' + sub + ':' + today()
     const dayUsed = Number((await env.NATB_KV.get(dayKey)) || 0)
-    if (dayUsed >= 10) return json({ error: 'daily_limit', message: '这个邮箱今天收太多次了' }, 429, origin, env)
+    if (dayUsed >= 10) {
+      return json({ error: 'daily_limit', message: '本邮箱今日已达 10 次发件上限，请明日再试' }, 429, origin, env)
+    }
 
     const ipKey = 'code:ip:' + clientIp(request) + ':' + hourBucket()
     const ipUsed = Number((await env.NATB_KV.get(ipKey)) || 0)
@@ -716,8 +1089,8 @@ async function handleAuth(env, request, url, cors) {
 
     // 封禁不影响登录：只读浏览仍然允许，写操作由 requireWriter 每次拦。
     // 这里把封禁状态一并回给前端，让它登录后弹一次说明。
-    const ban = await kvJson(env, 'ban:' + sub)
-    const isBanned = Boolean(ban) && (ban.until === 0 || ban.until > Date.now())
+    // 合并封禁 + 绑定关系一次算好；登录后前端据此决定弹什么、以什么身份行事
+    const identity = await qqIdentityOf(env, sub)
 
     await env.NATB_KV.delete('code:' + sub)
     const masked = maskEmail(email)
@@ -740,10 +1113,11 @@ async function handleAuth(env, request, url, cors) {
         token,
         exp,
         user: { sub, nick: finalNick, masked },
-        role: await resolveQqRole(env, sub),
-        banned: isBanned,
-        until: isBanned ? ban.until : 0,
-        reason: isBanned ? ban.reason || '' : '',
+        role: identity.role,
+        banned: identity.banned,
+        until: identity.until,
+        reason: identity.reason,
+        linkedGh: identity.linkedGh,
       },
       200,
       origin,
@@ -779,11 +1153,29 @@ async function handleAuth(env, request, url, cors) {
     )
   }
 
+  /* 登录成功时前端来报个到：Device Flow 的 token 直接发给浏览器，
+   * 我们不参与，所以「谁登录过」这件事只有前端知道。记下来，
+   * 管理面板才看得见那些还没发过言的账号。只记 GitHub 身份。 */
+  if (url.pathname === '/auth/seen' && request.method === 'POST') {
+    const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+    if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
+    // 两段 base64url 是本站 QQ 令牌，不是 GitHub 账号，不进这个名单
+    if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) return json({ ok: true }, 200, origin, env)
+    const me = await loginOfGhToken(raw)
+    if (!me) return json({ error: 'token_invalid' }, 401, origin, env)
+    const login = String(me.login).toLowerCase()
+    // 一天内不重复写：每次开页面都报一次，不节流会把 KV 写额度耗光
+    const prev = await kvJson(env, 'ghseen:' + login)
+    if (!prev || Date.now() - (prev.at || 0) > 86400000) {
+      await kvSet(env, 'ghseen:' + login, { login, at: Date.now() }, 180 * 86400)
+    }
+    return json({ ok: true, login }, 200, origin, env)
+  }
+
   if (url.pathname === '/auth/me' && request.method === 'GET') {
     const session = await verifySession(env, request)
     if (!session) return json({ error: 'unauthorized' }, 401, origin, env)
-    const ban = await kvJson(env, 'ban:' + session.sub)
-    const banned = ban && (ban.until === 0 || ban.until > Date.now())
+    const identity = await qqIdentityOf(env, session.sub)
     // 掩码只存在 KV 档案里：令牌载荷里没有邮箱，拿昵称去 maskEmail 只会得到空串
     const profile = (await kvJson(env, 'user:' + session.sub)) || {}
     return json(
@@ -797,8 +1189,44 @@ async function handleAuth(env, request, url, cors) {
           issues: profile.issues || 0,
           comments: profile.comments || 0,
         },
-        role: await resolveQqRole(env, session.sub),
-        banned: Boolean(banned),
+        role: identity.role,
+        banned: identity.banned,
+        until: identity.until,
+        reason: identity.reason,
+        linkedGh: identity.linkedGh,
+      },
+      200,
+      origin,
+      env,
+    )
+  }
+
+  /**
+   * GitHub 身份的绑定状态。
+   * QQ 侧的信息在 /auth/me 里，GitHub 侧没有会话概念，只能每次拿 token 问一次。
+   */
+  if (url.pathname === '/auth/identity' && request.method === 'GET') {
+    const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+    if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
+    const me = await loginOfGhToken(raw)
+    if (!me) return json({ error: 'token_invalid' }, 401, origin, env)
+
+    const sub = await bindOfGh(env, me.login)
+    let linkedQq = null
+    if (sub) {
+      const profile = (await kvJson(env, 'user:' + sub)) || {}
+      linkedQq = { sub, nick: profile.nick || '', masked: profile.masked || '' }
+    }
+    const ban = await banStateOfGh(env, me.login)
+    const banned = banActive(ban)
+    return json(
+      {
+        ok: true,
+        login: me.login,
+        name: me.name,
+        avatar: me.avatar,
+        linkedQq,
+        banned,
         until: banned ? ban.until : 0,
         reason: banned ? ban.reason || '' : '',
       },
@@ -806,6 +1234,118 @@ async function handleAuth(env, request, url, cors) {
       origin,
       env,
     )
+  }
+
+  /**
+   * 绑定 QQ 身份与 GitHub 账号。
+   * 身体里必须带他本人的 GitHub token：绑定要证明两个账号都归一个人，
+   * 而「他持有这个 GitHub 账号」唯一可信的证据就是一枚只有他能拿到的 token。
+   * 用本地已经存着的那枚也不行——公用电脑上那可能是别人的。
+   */
+  if (url.pathname === '/auth/bind' && request.method === 'POST') {
+    const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+    if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
+    const body = await readJsonBody(request)
+
+    /*
+     * 两种发起方向，随便哪一边都能开始绑：
+     *   头里是 QQ 令牌  → 身体里带 ghToken（刚授权拿到的）
+     *   头里是 GitHub token → 身体里带 qqToken（刚收验证码拿到的）
+     * 这样无论用户当前站在哪个身份的个人中心里，都不用先退出再切身份。
+     */
+    let sub = ''
+    let gh = null
+
+    if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) {
+      const session = await verifyToken(env, raw)
+      if (!session) return json({ error: 'unauthorized', message: 'QQ 登录已失效' }, 401, origin, env)
+      sub = session.sub
+      const ghToken = String((body && body.ghToken) || '').trim()
+      if (!ghToken) return json({ error: 'gh_token_required', message: '需要先登录 GitHub' }, 400, origin, env)
+      gh = await loginOfGhToken(ghToken)
+      if (!gh) return json({ error: 'gh_token_invalid', message: 'GitHub 登录已失效，请重新登录' }, 401, origin, env)
+    } else {
+      gh = await loginOfGhToken(raw)
+      if (!gh) return json({ error: 'gh_token_invalid', message: 'GitHub 登录已失效，请重新登录' }, 401, origin, env)
+      const qqToken = String((body && body.qqToken) || '').trim()
+      if (!qqToken) return json({ error: 'qq_token_required', message: '需要先登录 QQ 邮箱' }, 400, origin, env)
+      const session = await verifyToken(env, qqToken)
+      if (!session) return json({ error: 'qq_token_invalid', message: 'QQ 登录已失效，请重新验证' }, 401, origin, env)
+      sub = session.sub
+    }
+
+    // 每个身份每小时 10 次绑定/解绑，挡暴力刷 KV
+    const rlKey = 'brl:' + sub + ':' + hourBucket()
+    if ((await bump(env, rlKey, 3600)) > 10) {
+      return json({ error: 'rate_limited', message: '操作太频繁，请一小时后再试' }, 429, origin, env)
+    }
+
+    // 前提一：QQ 侧没被封
+    if (banActive(await banStateOfQq(env, sub))) {
+      return json({ error: 'banned', message: '该 QQ 身份已被封禁，不能绑定' }, 403, origin, env)
+    }
+
+    if (/\[bot\]$/i.test(gh.login)) {
+      return json({ error: 'bot_not_allowed', message: '不能绑定机器人账号' }, 400, origin, env)
+    }
+
+    // 前提三：另一端没被封，否则绑定等于把封禁洗掉
+    if (banActive(await kvJson(env, 'ban:gh:' + gh.login))) {
+      return json({ error: 'banned_target', message: '这个 GitHub 账号已被封禁，不能绑定' }, 403, origin, env)
+    }
+
+    // 前提四：两边都还没绑过——一对一，不接受一对多
+    const boundSub = await bindOfGh(env, gh.login)
+    if (boundSub) {
+      return json({ error: 'gh_already_bound', message: '这个 GitHub 账号已经绑定过其他 QQ 身份' }, 409, origin, env)
+    }
+    const boundLogin = await bindOfQq(env, sub)
+    if (boundLogin) {
+      return json(
+        { error: 'qq_already_bound', message: '当前 QQ 身份已绑定 ' + boundLogin + '，请先解绑' },
+        409,
+        origin,
+        env,
+      )
+    }
+
+    // 两个方向的键必须成对写入，否则身份会分叉成两半
+    await env.NATB_KV.put('bind:' + sub, gh.login)
+    await env.NATB_KV.put('bind:gh:' + gh.login, sub)
+
+    return json({ ok: true, linkedGh: { login: gh.login, name: gh.name, avatar: gh.avatar } }, 200, origin, env)
+  }
+
+  if (url.pathname === '/auth/unbind' && request.method === 'POST') {
+    const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+    if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
+
+    let sub = ''
+    let login = ''
+    if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) {
+      const session = await verifyToken(env, raw)
+      if (!session) return json({ error: 'unauthorized' }, 401, origin, env)
+      sub = session.sub
+      login = await bindOfQq(env, sub)
+    } else {
+      const me = await loginOfGhToken(raw)
+      if (!me) return json({ error: 'gh_token_invalid' }, 401, origin, env)
+      login = me.login
+      sub = await bindOfGh(env, login)
+    }
+
+    // 解绑也要限频：反复解绑/重绑不该成为洗 reset 的手段
+    if (sub) {
+      const rlKey = 'brl:' + sub + ':' + hourBucket()
+      if ((await bump(env, rlKey, 3600)) > 10) {
+        return json({ error: 'rate_limited', message: '操作太频繁，请一小时后再试' }, 429, origin, env)
+      }
+    }
+
+    if (sub) await env.NATB_KV.delete('bind:' + sub)
+    if (login) await env.NATB_KV.delete('bind:gh:' + login)
+    // 解绑不删封禁记录：否则解绑就成了洗白手段
+    return json({ ok: true, linkedGh: null, linkedQq: null }, 200, origin, env)
   }
 
   return json({ error: 'not_found' }, 404, origin, env)
@@ -836,7 +1376,8 @@ async function handleQq(env, request, url, cors) {
     }
 
     const profile = (await kvJson(env, 'user:' + session.sub)) || {}
-    const content = text + qqMarker(session, profile.masked || '')
+    // 绑定后以 GitHub 身份落款：能力互通，署名也统一
+    const content = text + qqMarker(session, profile.masked || '', await bindOfQq(env, session.sub))
     const issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues', {
       method: 'POST',
       body: JSON.stringify({
@@ -872,7 +1413,9 @@ async function handleQq(env, request, url, cors) {
     const profile = (await kvJson(env, 'user:' + session.sub)) || {}
     const comment = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number + '/comments', {
       method: 'POST',
-      body: JSON.stringify({ body: text + qqMarker(session, profile.masked || '') }),
+      body: JSON.stringify({
+        body: text + qqMarker(session, profile.masked || '', await bindOfQq(env, session.sub)),
+      }),
     })
     await kvSet(env, dayKey, String(Number((await env.NATB_KV.get(dayKey)) || 0) + 1), 86400)
     await kvSet(
@@ -1014,6 +1557,32 @@ async function forwardToApi(request, url, env, cors) {
 
   const apiVersion = request.headers.get('X-GitHub-Api-Version')
   if (apiVersion) headers.set('X-GitHub-Api-Version', apiVersion)
+
+  /**
+   * 写请求的封禁闸门。
+   * 本站把 api.github.com 的全部流量都收进这条转发路，所以「被封的 GitHub 账号
+   * 在本站写不出东西」这件事可以在这里真正落实——不是把按钮变灰，是服务器直接拒绝。
+   * 唯一拦不住的场景是对方完全不用本站、自己写脚本直连 GitHub，那属于 GitHub 侧的
+   * 仓库拉黑能力，不在代码能解决的范围。
+   */
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && incomingAuth) {
+    const rawToken = String(incomingAuth).replace(/^Bearer\s+/i, '').trim()
+    if (rawToken && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(rawToken)) {
+      const login = await loginOfTokenCached(env, rawToken)
+      if (login) {
+        const ban = await banStateOfGh(env, login)
+        if (banActive(ban)) {
+          const until = ban.until === 0 ? '永久' : new Date(ban.until).toISOString().slice(0, 10)
+          return json(
+            { error: 'banned', message: '账号已被封禁，不能在本站发布内容', until, login },
+            403,
+            request.headers.get('Origin') || '',
+            env,
+          )
+        }
+      }
+    }
+  }
 
   const init = { method: request.method, headers }
   if (request.method !== 'GET' && request.method !== 'HEAD') {

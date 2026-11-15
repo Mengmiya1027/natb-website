@@ -65,6 +65,55 @@ export function onTokenCleared(fn) {
   return () => tokenClearedListeners.delete(fn)
 }
 
+/* 凭据失效要「先提示、再退出」：调用方此刻正在弹错误信息，
+ * 退出登录与弹登录框由订阅方延迟处理（store 里 2 秒后做，见 src/stores/issue.js）。 */
+const credentialExpiredListeners = new Set()
+
+export function onCredentialExpired(fn) {
+  credentialExpiredListeners.add(fn)
+  return () => credentialExpiredListeners.delete(fn)
+}
+
+export function notifyCredentialExpired(who = 'gh') {
+  for (const fn of credentialExpiredListeners) {
+    try {
+      fn(who)
+    } catch {
+      /* 订阅方自己出错不该影响发起请求的那一方 */
+    }
+  }
+}
+
+/* 中转返回的错误码（error 字段）对用户没有意义，这里翻成人话；
+ * 服务端已经给了 message 就直接用它的，那里知道得更具体（比如还剩几秒）。 */
+const ERROR_TEXT = {
+  rate_limited: '操作太频繁，请稍后再试',
+  daily_limit: '今天的次数已用完，明天再试',
+  unauthorized: '登录已失效，请重新登录',
+  token_invalid: '登录已失效，请重新登录',
+  forbidden: '没有权限执行这个操作',
+  banned: '账号已被封禁',
+  invalid_email: '只支持 @qq.com 与 @foxmail.com 邮箱',
+  invalid_code: '验证码不对，请重新输入',
+  cool_down: '请稍等一会儿再获取验证码',
+  not_linked: '这个账号还没有完成绑定',
+}
+
+export function errorText(data, fallback = '请求失败') {
+  if (!data || typeof data !== 'object') return fallback
+  if (data.message) return data.message
+  const base = ERROR_TEXT[data.error]
+  if (!base) return fallback
+  const wait = Number(data.retryAfter)
+  return data.error === 'rate_limited' && wait > 0 ? `${base}（约 ${wait} 秒）` : base
+}
+
+/** 凭据失效的统一判定：GitHub 侧回 401，中转对我们自己签发的令牌回 403 + token_invalid。
+ * 两处都要按「这个会话不算数了」处理，否则界面会留着假的登录态。 */
+export function isCredentialInvalid(status, payload) {
+  return status === 401 || (!!payload && payload.error === 'token_invalid')
+}
+
 export function clearToken() {
   writeStore(STORAGE_KEYS.token, null)
   writeStore(STORAGE_KEYS.user, null)
@@ -75,6 +124,17 @@ export function clearToken() {
       /* 监听方自己出错不该影响清凭据 */
     }
   }
+}
+
+/** 登录成功后向中转报一次「我来过」，管理面板才看得见没发过言的账号 */
+export function reportLoginSeen(token) {
+  const root = (getProxyBase() || '').replace(/\/$/, '')
+  if (!root || !token) return
+  // 失败不打扰用户：这只是一条运营记录，丢了下次登录还会再报
+  fetch(root + '/auth/seen', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token },
+  }).catch(() => {})
 }
 
 export function getProxyBase() {
@@ -164,7 +224,7 @@ async function parseBody(res) {
 
 function humanize(status, payload) {
   const detail = payload && typeof payload === 'object' ? payload.message : ''
-  if (status === 401) return '登录已失效，请重新登录 GitHub'
+  if (status === 401) return 'GitHub 登录已失效，已自动退出，请重新登录'
   if (status === 403 && /rate limit/i.test(detail || '')) return '已触发 GitHub 接口限流，请稍后再试'
   if (status === 403) return detail || '没有权限执行这个操作'
   if (status === 404) return detail || '资源不存在（可能是仓库未公开或编号错误）'
@@ -217,12 +277,19 @@ export async function gh(path, { method = 'GET', body, auth = true, headers = {}
 
   let res = await attempt()
 
-  /* 本地缓存的 token 失效时，读操作自动降级成匿名重试一次：
-   * 公开仓库本来就允许匿名读，没必要因为一条过期凭据把整页卡成「登录已失效」。 */
-  if (res.status === 401 && method === 'GET' && auth && token) {
-    clearToken()
-    token = ''
-    res = await attempt()
+  /* 凭据失效（401）一律按「已退出登录」处理：清掉本地凭据并通知所有监听方。
+   * 不清的话顶栏会一直挂着「已登录」，用户点每个写操作都只换来一句提示，却退不出去。
+   * 读操作接着降级成匿名重试一次 —— 公开仓库本来就允许匿名读，没必要因为一条过期凭据
+   * 把整页卡成「登录已失效」；写操作没有匿名可言，清完凭据直接失败。 */
+  if (res.status === 401 && auth && token) {
+    // 401 就是凭据不再被承认：先通知订阅方（退出登录 + 提示 + 弹登录框），再决定要不要降级重试
+    notifyCredentialExpired('gh')
+    if (method === 'GET') {
+      // 读：公开仓库本来就允许匿名读，清掉凭据再试一次，别把整页卡成「登录已失效」
+      clearToken()
+      token = ''
+      res = await attempt()
+    }
   }
 
   syncRateLimit(res)
@@ -241,6 +308,36 @@ export async function gh(path, { method = 'GET', body, auth = true, headers = {}
     responseCache.set(key, { at: Date.now(), data: payload })
   }
   return payload
+}
+
+/**
+ * 某个状态的 issue 真实条数。
+ *
+ * 不用仓库对象的 open_issues_count：那个字段是 GitHub 侧异步更新的，
+ * 关掉或删掉 issue 之后要等几十秒到几分钟才变，页面上的「未关闭 3」就会
+ * 与下面的列表对不上。这里改问列表端点：per_page=1，从 Link 头的
+ * rel="last" 读总页数（per_page=1 时页数就是条数）；没有 Link 说明只有一页，
+ * 直接数返回的条数。
+ *
+ * 注意：列表端点会把 PR 也算进去。这个仓库没有 PR，所以现在够用；
+ * 将来有 PR 的话这里要按 pull_request 字段再减一次。
+ */
+export async function countIssues(state = 'open') {
+  const url =
+    apiBase() +
+    `/repos/${ISSUE_REPO.owner}/${ISSUE_REPO.name}/issues?state=${state}&per_page=1`
+  const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
+  const token = getEffectiveToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const res = await fetch(url, { headers })
+  const payload = await parseBody(res)
+  if (!res.ok) throw new GitHubError(res.status, humanize(res.status, payload), payload)
+
+  const items = Array.isArray(payload) ? payload : []
+  const link = res.headers.get('link') || ''
+  const last = link.match(/[?&]page=(\d+)>;\s*rel="last"/)
+  return last ? Number(last[1]) : items.length
 }
 
 /** GraphQL 入口，用于 REST 覆盖不到的能力（置顶、删除 issue、转移 issue） */
@@ -271,7 +368,9 @@ export const githubApi = {
     return gh(repo('/issues?' + q.toString()))
   },
 
-  getIssue: (number) => gh(repo(`/issues/${number}`)),
+  // noCache：详情页是「写操作之后最需要看到真相」的地方，别的标签页或另一台设备
+  // 刚关掉这条 issue 时，60 秒缓存会让它仍显示 Open。这里每次都问服务器。
+  getIssue: (number, { noCache = false } = {}) => gh(repo(`/issues/${number}`), { noCache }),
 
   /**
    * 是否已置顶。REST 的 issue 对象里没有 pinned 字段（只有 locked），

@@ -228,22 +228,37 @@ function requestReply() {
                 <IconTrash2 class="size-3.5" />
               </button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>删除这条评论？</AlertDialogTitle>
-                <AlertDialogDescription>
-                  删除后无法恢复，评论的回复也会失去上下文。
+            <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
+              <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+                <div class="flex items-center gap-3">
+                  <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+                    <IconTrash2 class="size-4" />
+                  </div>
+                  <AlertDialogTitle class="text-xl font-bold">删除这条评论？</AlertDialogTitle>
+                </div>
+
+                <AlertDialogDescription class="text-muted-foreground mt-3 text-sm leading-relaxed">
+                  删除后这条评论会永久移除，其他成员不会再看到它的内容，也无法再引用它。
                 </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction
-                  class="bg-destructive hover:bg-destructive/90 font-semibold text-white"
-                  @click="requestDelete"
+
+                <p
+                  class="border-border text-muted-foreground mt-4 w-full rounded-xl border px-4 py-3 text-left text-[12.5px] leading-relaxed"
                 >
-                  删除
-                </AlertDialogAction>
-              </AlertDialogFooter>
+                  只影响这一条评论：issue 本身的状态、标签与时间线都不会因此改变。
+                </p>
+              </div>
+
+              <div class="border-border bg-muted/70 border-t px-5 py-4">
+                <div class="grid w-full grid-cols-2 gap-2">
+                  <AlertDialogCancel class="h-8 rounded-md px-3 text-sm font-medium">取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    class="bg-destructive hover:bg-destructive hover:brightness-95 h-8 rounded-md px-3 text-sm font-semibold text-white transition-[filter] duration-200"
+                    @click="requestDelete"
+                  >
+                    删除
+                  </AlertDialogAction>
+                </div>
+              </div>
             </AlertDialogContent>
           </AlertDialog>
         </template>

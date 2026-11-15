@@ -88,6 +88,8 @@ function absoluteTime(value) {
 const text = (value) => ({ k: 't', v: String(value) })
 const bold = (value) => ({ k: 'b', v: String(value) })
 const code = (value) => ({ k: 'c', v: String(value) })
+/** 标签事件带上颜色，正文里就能画出与标签本身一致的小圆点 */
+const labelPart = (label) => ({ k: 'label', v: label?.name || '未知标签', color: label?.color || '' })
 const issueRef = (number, title) => ({ k: 'i', n: Number(number), v: title ? String(title) : '' })
 
 const ICONS = {
@@ -142,10 +144,10 @@ function describe(event) {
       parts.push(text(' 重新打开了这条 issue'))
       return { icon, tone: 'success', parts }
     case 'labeled':
-      parts.push(text(' 添加了标签 '), code(event?.label?.name || '未知标签'))
+      parts.push(text(' 添加了标签 '), labelPart(event?.label))
       return { icon, tone: 'accent', parts }
     case 'unlabeled':
-      parts.push(text(' 移除了标签 '), code(event?.label?.name || '未知标签'))
+      parts.push(text(' 移除了标签 '), labelPart(event?.label))
       return { icon, tone: 'muted', parts }
     case 'assigned':
       parts.push(text(' 指派给了 '), bold('@' + (event?.assignee?.login || '某人')))
@@ -340,6 +342,14 @@ const items = computed(() => {
                 <span v-if="part.k === 't'">{{ part.v }}</span>
                 <span v-else-if="part.k === 'b'" class="natb-timeline__strong">{{ part.v }}</span>
                 <code v-else-if="part.k === 'c'" class="natb-timeline__code">{{ part.v }}</code>
+                <span v-else-if="part.k === 'label'" class="natb-timeline__label">
+                  <span
+                    v-if="part.color"
+                    class="size-2 shrink-0 rounded-full ring-1 ring-border"
+                    :style="{ backgroundColor: '#' + part.color }"
+                  />
+                  {{ part.v }}
+                </span>
                 <button
                   v-else-if="part.k === 'i'"
                   type="button"
@@ -452,6 +462,18 @@ const items = computed(() => {
 }
 
 .natb-timeline__code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  padding: 0.1em 0.36em;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--natb-muted) 82%, transparent);
+  color: var(--natb-foreground);
+}
+
+.natb-timeline__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.1em 0.36em;

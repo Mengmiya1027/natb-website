@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { toast } from 'vue-sonner'
 
 import {
   githubApi,
@@ -13,14 +14,18 @@ import {
   getRateLimit,
   GitHubError,
   onTokenCleared,
+  onCredentialExpired,
+  reportLoginSeen,
 } from '@/api/github'
 import { startDeviceFlow, pollDeviceToken, isDeviceFlowAvailable } from '@/api/oauth'
+import { fetchGhIdentity } from '@/api/link'
 import {
   getQqToken,
   getQqUser,
   setQqToken,
   setQqUser,
   clearQqSession,
+  onQqSessionCleared,
   fetchMe as fetchQqMe,
 } from '@/api/qqAuth'
 import { OWNER_LOGINS, EXTRA_ADMIN_LOGINS, STORAGE_KEYS } from '@/config/github'
@@ -35,6 +40,8 @@ export const useIssueStore = defineStore('issue', () => {
   const token = ref(getToken())
   const authState = ref('idle') // idle | loading | ok | error
   const authError = ref('')
+  /** 登录面板开关：凭据失效后自动置 true，用户不用自己找入口 */
+  const authOpen = ref(false)
   const permission = ref('')
 
   const isLoggedIn = computed(() => Boolean(user.value && token.value))
@@ -82,11 +89,41 @@ export const useIssueStore = defineStore('issue', () => {
 
   const isQqLoggedIn = computed(() => Boolean(qqToken.value))
 
-  /** 写操作走谁：GitHub 身份优先，其次是 QQ 身份 */
+  /* ---------------- 两种身份的绑定关系 ---------------- */
+
+  /** 当前 QQ 会话绑定的 GitHub 账号：{ login } 或 null */
+  const qqLinkedGh = ref(null)
+  /** 当前 GitHub 账号绑定的 QQ 身份：{ sub, nick, masked } 或 null */
+  const ghLinkedQq = ref(null)
+  /** GitHub 侧的封禁状态（服务端算好的合并结果，前端只负责显示） */
+  const ghBanned = ref(false)
+  const ghBanUntil = ref(0)
+  const ghBanReason = ref('')
+
+  /**
+   * 写操作走哪条通道。
+   * 绑定不会关掉任何一条：两边是同一个身份，用哪把钥匙进门，能力都是全集。
+   * 走 QQ 通道时由中转用 App 凭据代写，署名落在那位绑定的 GitHub 账号上。
+   */
   const writeMode = computed(() => {
-    if (isLoggedIn.value) return 'github'
+    if (isLoggedIn.value) {
+      // 绑了 A 却拿 B 登录：这种状态本不该存在（一对一），出现了就不许写
+      if (qqLinkedGh.value && user.value?.login?.toLowerCase() !== qqLinkedGh.value.login.toLowerCase()) {
+        return 'none'
+      }
+      return 'github'
+    }
     if (isQqLoggedIn.value) return 'qq'
     return 'none'
+  })
+
+  /**
+   * 对外展示成哪个身份。绑定之后一律以 GitHub 为准——
+   * 头像、名字、issue 落款都用它，QQ 昵称退成内部备注。
+   */
+  const displayAsGithub = computed(() => {
+    if (isLoggedIn.value) return user.value?.login || ''
+    return qqLinkedGh.value?.login || ''
   })
 
   function setQqSession(user, token) {
@@ -107,7 +144,18 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanned.value = false
     qqBanUntil.value = 0
     qqBanReason.value = ''
+    qqLinkedGh.value = null
   }
+
+  /* QQ 会话被 401 清掉时，内存里的登录态跟着复位（与 GitHub 侧同一处理） */
+  onQqSessionCleared(() => {
+    qqToken.value = ''
+    qqUser.value = null
+    qqBanned.value = false
+    qqBanUntil.value = 0
+    qqBanReason.value = ''
+    qqLinkedGh.value = null
+  })
 
   /** 登录响应里直接带着封禁状态，省一次 /auth/me 往返 */
   function applyBanState({ banned, until, reason } = {}) {
@@ -119,6 +167,11 @@ export const useIssueStore = defineStore('issue', () => {
   /** 登录响应里带着角色，省一次 /auth/me */
   function applyQqRole(role) {
     qqRole.value = role || ''
+  }
+
+  /** 登录响应里也带着绑定关系，同样省一次往返 */
+  function applyLink(linkedGh) {
+    qqLinkedGh.value = linkedGh || null
   }
 
   /** 校验本地 QQ 令牌是否还有效，顺带同步封禁状态 */
@@ -133,13 +186,29 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanUntil.value = data.until || 0
     qqBanReason.value = data.reason || ''
     qqRole.value = data.role || ''
+    qqLinkedGh.value = data.linkedGh || null
     if (data.user) qqUser.value = data.user
   }
 
-  /** 能发 issue / 评论就算「可写」：GitHub 登录或 QQ 登录都行（被封禁的 QQ 账号不行） */
-  const canWrite = computed(
-    () => isLoggedIn.value || (isQqLoggedIn.value && !qqBanned.value),
-  )
+  /** 拉一次 GitHub 侧的绑定状态：这个人绑了哪个 QQ、有没有被封 */
+  async function refreshGhLink() {
+    if (!isLoggedIn.value) {
+      ghLinkedQq.value = null
+      ghBanned.value = false
+      ghBanUntil.value = 0
+      ghBanReason.value = ''
+      return
+    }
+    const data = await fetchGhIdentity()
+    if (!data) return
+    ghLinkedQq.value = data.linkedQq || null
+    ghBanned.value = Boolean(data.banned)
+    ghBanUntil.value = data.until || 0
+    ghBanReason.value = data.reason || ''
+  }
+
+  /** 能发 issue / 评论就算「可写」。规则集中在 writeMode 一处，这里不重复判断 */
+  const canWrite = computed(() => writeMode.value !== 'none')
 
   async function bootstrap() {
     if (!token.value) {
@@ -149,18 +218,24 @@ export const useIssueStore = defineStore('issue', () => {
     authState.value = 'loading'
     try {
       const me = await githubApi.getMe()
+      // 凭据在请求途中被判失效（gh 里已经通知过）：重试是匿名的，
+      // 兜底回来的身份不能当成「登录成功」，否则界面会显示一个假账号
+      if (!token.value) {
+        applyCredentialExpired('gh')
+        return
+      }
+      // 老会话也补报一次（中转那边一天只落一次盘），免得早先登录的人永远不进名单
+      reportLoginSeen(token.value)
       user.value = me
       setCachedUser(me)
       setToken(token.value)
       authState.value = 'ok'
       await refreshPermission()
+      await refreshGhLink()
     } catch (err) {
       if (err instanceof GitHubError && err.status === 401) {
-        clearToken()
-        token.value = ''
-        user.value = null
-        permission.value = ''
-        authState.value = 'idle'
+        // 进页面就发现凭据失效：与写操作走同一套反应
+        applyCredentialExpired('gh')
         return
       }
       authState.value = 'error'
@@ -192,7 +267,10 @@ export const useIssueStore = defineStore('issue', () => {
       user.value = me
       setCachedUser(me)
       authState.value = 'ok'
+      // 让中转记一笔「这个人来登录过」，管理面板才看得见没发过言的账号
+      reportLoginSeen(value)
       await refreshPermission()
+      await refreshGhLink()
       return me
     } catch (err) {
       setToken(previous)
@@ -255,7 +333,36 @@ export const useIssueStore = defineStore('issue', () => {
     permission.value = ''
     authState.value = 'idle'
     authError.value = ''
+    ghLinkedQq.value = null
+    ghBanned.value = false
+    ghBanUntil.value = 0
+    ghBanReason.value = ''
   }
+
+  /* 凭据失效：当场退出、给出提示、弹出登录框。
+   * 不要把「等你重新登录」丢给用户自己去菜单里找 —— 他那会儿正卡在一片失败里。
+   * 进页面时发现失效也走这里：那条路径没有调用方会弹提示，不在这里说一声就是静默掉线。 */
+  let lastExpiredAt = 0
+  function applyCredentialExpired(who) {
+    const qq = who === 'qq'
+    if (qq) logoutQq()
+    else logout()
+    authOpen.value = true
+    // 一次失效会被多条并发请求各报一遍，1.5 秒内只提示一次
+    const now = Date.now()
+    if (now - lastExpiredAt < 1500) return
+    lastExpiredAt = now
+    // 调用方此刻也在弹它自己的错误提示，两条几乎一样的框会叠在一起。
+    // 等它弹完（下一轮事件循环）清场，再统一说一句。
+    setTimeout(() => {
+      toast.dismiss()
+      toast.error(qq ? 'QQ 登录已失效，请重新登录' : 'GitHub 登录已失效，请重新登录', {
+        id: 'auth-expired',
+      })
+    }, 0)
+  }
+
+  onCredentialExpired(applyCredentialExpired)
 
   /* ---------------- 加速中转 ---------------- */
 
@@ -318,6 +425,7 @@ export const useIssueStore = defineStore('issue', () => {
     token,
     authState,
     authError,
+    authOpen,
     permission,
     isLoggedIn,
     isOwner,
@@ -331,11 +439,19 @@ export const useIssueStore = defineStore('issue', () => {
     qqRole,
     applyQqRole,
     isQqLoggedIn,
+    qqLinkedGh,
+    ghLinkedQq,
+    ghBanned,
+    ghBanUntil,
+    ghBanReason,
+    displayAsGithub,
     writeMode,
     setQqSession,
     applyBanState,
+    applyLink,
     logoutQq,
     refreshQq,
+    refreshGhLink,
     bootstrap,
     refreshPermission,
     loginWithToken,

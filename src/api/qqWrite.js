@@ -3,7 +3,7 @@
  * 与 githubWriteApi 保持同形的入参/出参，调用方只换实现。
  */
 import { DEFAULT_PROXY_BASE } from '@/config/github'
-import { getProxyBase } from '@/api/github'
+import { getProxyBase, clearApiCache, isCredentialInvalid, notifyCredentialExpired, errorText } from '@/api/github'
 import { QqAuthError, getQqToken } from '@/api/qqAuth'
 
 function base() {
@@ -32,8 +32,13 @@ async function request(path, { method = 'POST', body } = {}) {
 
   const data = await res.json().catch(() => null)
   if (!res.ok) {
-    throw new QqAuthError(res.status, (data && (data.message || data.error)) || '请求失败', data)
+    // 会话不算数了：交给 store 延迟退出并弹登录框，否则顶栏挂着假的已登录
+    if (isCredentialInvalid(res.status, data)) notifyCredentialExpired('qq')
+    throw new QqAuthError(res.status, errorText(data, '请求失败'), data)
   }
+  // QQ 的写操作走中转，不经过 gh()，所以那一层 60 秒 GET 缓存不会自己失效。
+  // 不在这里作废的话，写完立刻重新拉取拿到的还是写之前的旧数据。
+  clearApiCache()
   return data
 }
 

@@ -51,9 +51,17 @@ export function getRateLimit()
 状态：`user` `token` `authState` `authError` `permission` `isLoggedIn` `isOwner` `canManage`
 `canWrite` `proxyBase` `rate` `themeMode` `resolvedTheme`
 
+QQ 与绑定：`qqUser` `qqToken` `qqRole` `qqBanned` `isQqLoggedIn` `qqLinkedGh`
+`ghLinkedQq` `ghBanned` `mustUseGithub` `writeMode`
+
+> `writeMode` 是唯一该读的写权限判据：绑定 GitHub 之后 QQ 身份不再直写，它会变成
+> `'none'`。判断「能不能写」一律用 `canWrite` / `writeMode`，别自己拼
+> `isLoggedIn || isQqLoggedIn`——那样会把绑定后的只读状态判成可写。
+
 动作：`bootstrap()` `refreshPermission()` `loginWithToken(t)` `beginDeviceLogin()`
 `completeDeviceLogin(flow,{onTick,signal})` `logout()` `updateProxyBase(base)` `syncRate(v)`
-`applyTheme()` `setThemeMode(m)` `clearTheme()`
+`applyTheme()` `setThemeMode(m)` `clearTheme()` `applyLink(linkedGh)` `refreshQq()`
+`refreshGhLink()`
 
 ### 配置 `@/config/github.js`
 

@@ -38,7 +38,7 @@ const writeApi = computed(() => (store.writeMode === 'qq' ? qqWriteApi : githubW
 
 async function submit() {
   if (!store.canWrite) {
-    toast.error(store.qqBanned ? '该 QQ 账号已被封禁，无法评论' : '请先登录后再发表评论')
+    toast.error(store.qqBanned ? '该账号已被封禁，无法评论' : '请先登录后再发表评论')
     return
   }
   if (!props.issueNumber) {
