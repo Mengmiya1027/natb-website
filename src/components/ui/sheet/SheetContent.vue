@@ -17,6 +17,13 @@ interface SheetContentProps extends DialogContentProps {
   side?: "top" | "right" | "bottom" | "left"
 }
 
+import { isToastTarget } from "@/lib/utils"
+
+/** 点 sonner 提示条不算「点弹窗外」，否则弹一条提示就把正在操作的对话框关掉了 */
+function keepOpenOnToast(event: Event) {
+  if (isToastTarget(event)) event.preventDefault()
+}
+
 defineOptions({
   inheritAttrs: false,
 })
@@ -35,6 +42,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <DialogPortal>
     <SheetOverlay />
     <DialogContent
+      @pointer-down-outside="keepOpenOnToast"
       data-slot="sheet-content"
       :class="cn(
         'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500',

@@ -252,11 +252,16 @@ async function confirmBind() {
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
     <DialogContent class="w-[min(480px,92vw)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
-      <div class="border-border border-b px-5 py-4 pr-14">
-        <DialogTitle class="text-base">绑定账号</DialogTitle>
-        <DialogDescription class="mt-1 text-xs leading-relaxed">
-          绑定后两个账号视为同一个人，以 GitHub 身份为准。
-        </DialogDescription>
+      <div class="border-border flex items-center gap-4 border-b px-5 pt-4 pb-3 pr-14">
+        <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+          <IconLink class="size-4" />
+        </div>
+        <div class="min-w-0 translate-y-px">
+          <DialogTitle class="text-base leading-none">绑定账号</DialogTitle>
+          <DialogDescription class="mt-0.5 text-xs leading-relaxed">
+            绑定后两个账号视为同一个人，以 GitHub 身份为准。
+          </DialogDescription>
+        </div>
       </div>
 
       <!-- 第一步：授权 -->

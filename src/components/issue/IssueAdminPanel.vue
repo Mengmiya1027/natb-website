@@ -45,6 +45,7 @@ import IconCheckCircle from '~icons/lucide/check-circle'
 import IconRotateCcw from '~icons/lucide/rotate-ccw'
 import IconTags from '~icons/lucide/tags'
 import IconUsers from '~icons/lucide/users'
+import IconSettings2 from '~icons/lucide/settings-2'
 
 const emit = defineEmits(['close'])
 
@@ -258,12 +259,17 @@ onMounted(() => {
       class="flex h-[min(60vh,520px)] w-[min(760px,92vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
     >
       <!-- 头部 -->
-      <div class="flex items-start justify-between gap-3 border-b border-border px-6 py-4 pr-14">
-        <div class="min-w-0">
-          <DialogTitle class="text-base">仓库管理</DialogTitle>
-          <DialogDescription class="mt-1 text-xs">
-            {{ ISSUE_REPO_FULL }} · 标签、里程碑与批量操作只对 write 及以上权限开放
-          </DialogDescription>
+      <div class="flex items-center justify-between gap-3 border-b border-border px-6 pt-4 pb-3 pr-16">
+        <div class="flex min-w-0 items-center gap-4">
+          <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+            <IconSettings2 class="size-4" />
+          </div>
+          <div class="min-w-0 translate-y-px">
+            <DialogTitle class="text-base leading-none">仓库管理</DialogTitle>
+            <DialogDescription class="mt-0.5 text-xs">
+              {{ ISSUE_REPO_FULL }} · 标签、里程碑与批量操作只对 write 及以上权限开放
+            </DialogDescription>
+          </div>
         </div>
         <a
           :href="ISSUE_REPO_URL"

@@ -10,6 +10,13 @@ import {
   useForwardPropsEmits,
 } from "reka-ui"
 
+import { isToastTarget } from "@/lib/utils"
+
+/** 点 sonner 提示条不算「点弹窗外」，否则弹一条提示就把正在操作的对话框关掉了 */
+function keepOpenOnToast(event: Event) {
+  if (isToastTarget(event)) event.preventDefault()
+}
+
 defineOptions({
   inheritAttrs: false,
 })
@@ -29,6 +36,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       class="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/80"
     />
     <AlertDialogContent
+      @pointer-down-outside="keepOpenOnToast"
       data-slot="alert-dialog-content"
       v-bind="{ ...$attrs, ...forwarded }"
       :class="

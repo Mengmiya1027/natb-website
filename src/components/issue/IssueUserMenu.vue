@@ -71,6 +71,7 @@ import IconCircleAlert from '~icons/lucide/circle-alert'
 import IconQQ from '~icons/simple-icons/qq'
 import IconBookMarked from '~icons/lucide/book-marked'
 import IconUserRound from '~icons/lucide/user-round'
+import IconLogIn from '~icons/lucide/log-in'
 
 const props = defineProps({
   authOpen: { type: Boolean, default: false },
@@ -162,9 +163,10 @@ let qqTimer = 0
 
 const qqEmailValid = computed(() => /^[^\s@]+@(qq|foxmail)\.com$/i.test(qqEmail.value.trim()))
 const qqCanSend = computed(() => qqEmailValid.value && qqCooldown.value === 0 && !qqSending.value)
-const qqCanVerify = computed(
-  () => qqStep.value === 'code' && /^\d{6}$/.test(qqCode.value.trim()) && !qqVerifying.value,
-)
+// 不绑定 qqStep：第一步的「登录」也要能用——从第二步点「上一步」回来时，
+// 已填的 6 位码还在（backToEmail 有意不清空），按钮却因为换了屏而变灰，
+// 用户只能再点一次「返回输入」。有码就能登，和在哪一屏无关。
+const qqCanVerify = computed(() => /^\d{6}$/.test(qqCode.value.trim()) && !qqVerifying.value)
 
 function startQqCooldown() {
   qqCooldown.value = 60
@@ -426,15 +428,20 @@ onBeforeUnmount(resetFlow)
 
     <!-- 登录面板 -->
     <Dialog v-model:open="authOpenModel">
-      <DialogContent class="sm:max-w-[820px]">
-        <DialogHeader>
-          <DialogTitle class="font-bold">登录</DialogTitle>
-          <DialogDescription>
-            发布 issue 与评论需要身份。GitHub 账号功能最全，QQ 邮箱登录门槛最低。
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent class="gap-0 p-0 sm:max-w-[820px]">
+        <div class="border-border flex items-center gap-4 border-b px-5 pt-4 pb-3 pr-14">
+          <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+            <IconLogIn class="size-4" />
+          </div>
+          <div class="min-w-0 translate-y-px">
+            <DialogTitle class="text-base leading-none">登录</DialogTitle>
+            <DialogDescription class="mt-0.5">
+              发布 issue 与评论需要身份。GitHub 账号功能最全，QQ 邮箱登录门槛最低。
+            </DialogDescription>
+          </div>
+        </div>
 
-        <div class="mt-1 grid gap-5 sm:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+        <div class="grid gap-5 px-5 py-4 sm:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
           <!-- 左栏：权限说明。右侧内容变高时（如切到 Token 表单）垂直居中，
                空白匀到上下两边，不会堆在底部 -->
           <div class="flex min-w-0 flex-col justify-center">
@@ -731,15 +738,20 @@ onBeforeUnmount(resetFlow)
 
     <!-- 连接设置 -->
     <Dialog v-model:open="settingsOpenModel">
-      <DialogContent class="sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>连接设置</DialogTitle>
-          <DialogDescription>
-            没有加速器时，可以让所有 GitHub 请求走你自己部署的中转地址。
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent class="gap-0 p-0 sm:max-w-[520px]">
+        <div class="border-border flex items-center gap-4 border-b px-5 pt-4 pb-3 pr-14">
+          <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+            <IconSettings class="size-4" />
+          </div>
+          <div class="min-w-0 translate-y-px">
+            <DialogTitle class="text-base leading-none">连接设置</DialogTitle>
+            <DialogDescription class="mt-0.5">
+              没有加速器时，可以让 GitHub 请求走自己部署的中转地址。
+            </DialogDescription>
+          </div>
+        </div>
 
-        <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-4 px-5 py-4">
           <div class="grid gap-1.5">
             <Label for="proxy">加速中转地址</Label>
             <Input id="proxy" v-model="proxyInput" placeholder="https://your-worker.workers.dev（留空即直连）" />

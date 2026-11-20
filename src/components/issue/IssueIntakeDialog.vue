@@ -16,6 +16,7 @@ import IconTerminal from '~icons/lucide/terminal'
 import IconAppWindow from '~icons/lucide/app-window'
 import IconWatch from '~icons/lucide/watch'
 import IconBoxes from '~icons/lucide/boxes'
+import IconCirclePlus from '~icons/lucide/circle-plus'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['update:open', 'confirm'])
@@ -100,9 +101,14 @@ function confirm() {
     <DialogContent class="w-[min(460px,92vw)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
       <!-- 第一步：反馈对象 -->
       <template v-if="step === 1">
-        <div class="border-b border-border px-5 py-4 pr-14">
-          <DialogTitle class="text-base">新建 Issue</DialogTitle>
-          <DialogDescription class="mt-1 text-xs">先选这次反馈针对哪个项目。</DialogDescription>
+        <div class="border-b border-border flex items-center gap-4 px-5 pt-4 pb-3 pr-14">
+          <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+            <IconCirclePlus class="size-4" />
+          </div>
+          <div class="min-w-0 translate-y-px">
+            <DialogTitle class="text-base leading-none">新建 Issue</DialogTitle>
+            <DialogDescription class="mt-0.5 text-xs">先选这次反馈针对哪个项目。</DialogDescription>
+          </div>
         </div>
 
         <div class="flex flex-col gap-2 px-4 py-4">
@@ -149,8 +155,8 @@ function confirm() {
             <IconChevronLeft class="size-4" />
           </button>
           <div class="min-w-0">
-            <DialogTitle class="text-base">反馈类型</DialogTitle>
-            <DialogDescription class="mt-1 text-xs">
+            <DialogTitle class="text-base leading-none">反馈类型</DialogTitle>
+            <DialogDescription class="mt-0.5 text-xs">
               {{ target?.title }} · 可以多选
             </DialogDescription>
           </div>

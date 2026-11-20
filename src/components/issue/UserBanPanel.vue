@@ -276,17 +276,22 @@ onMounted(load)
 
     <Dialog v-model:open="banOpen">
       <DialogContent class="w-[min(420px,92vw)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
-        <div class="border-border border-b px-5 py-4 pr-14">
-          <DialogTitle class="text-base">
-            封禁 {{ isGh ? '@' + (banTarget?.login || '') : banTarget?.nick || '这个用户' }}
-          </DialogTitle>
-          <DialogDescription class="mt-1 text-xs leading-relaxed">
-            {{
-              isGh
-                ? '会同时封掉与它绑定的 QQ 身份（若有）。本站所有写操作都会被拒绝。'
-                : '封禁后他仍能浏览，但发帖、评论、关单都会被拒绝。'
-            }}
-          </DialogDescription>
+        <div class="border-border flex items-center gap-4 border-b px-5 pt-4 pb-3 pr-14">
+          <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+            <IconBan class="size-4" />
+          </div>
+          <div class="min-w-0 translate-y-px">
+            <DialogTitle class="text-base leading-none">
+              封禁 {{ isGh ? '@' + (banTarget?.login || '') : banTarget?.nick || '这个用户' }}
+            </DialogTitle>
+            <DialogDescription class="mt-0.5 text-xs leading-relaxed">
+              {{
+                isGh
+                  ? '会同时封掉与它绑定的 QQ 身份（若有）。本站所有写操作都会被拒绝。'
+                  : '封禁后他仍能浏览，但发帖、评论、关单都会被拒绝。'
+              }}
+            </DialogDescription>
+          </div>
         </div>
 
         <div class="flex flex-col gap-3 px-5 py-4">

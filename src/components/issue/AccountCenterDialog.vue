@@ -10,12 +10,9 @@ import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
 import { countUserActivity } from '@/api/github'
-import { updateProfile } from '@/api/qqAuth'
 import { unbindAccounts } from '@/api/link'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
@@ -36,6 +33,7 @@ import {
 } from '@/components/ui/alert-dialog'
 
 import BindAccountDialog from './BindAccountDialog.vue'
+import ProfileEditDialog from './ProfileEditDialog.vue'
 
 import IconLogOut from '~icons/lucide/log-out'
 import IconBan from '~icons/lucide/ban'
@@ -45,14 +43,15 @@ import IconLink from '~icons/lucide/link-2'
 import IconUnlink from '~icons/lucide/unlink'
 import IconGitHub from '~icons/lucide/github'
 import IconMail from '~icons/lucide/mail'
+import IconPencil from '~icons/lucide/pencil'
+import IconUserRound from '~icons/lucide/user-round'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['update:open'])
 
 const store = useIssueStore()
 
-const nick = ref('')
-const saving = ref(false)
+const editOpen = ref(false)
 const binding = ref(false)
 const bindMode = ref('bind-github')
 const unbinding = ref(false)
@@ -63,7 +62,6 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
-    nick.value = store.qqUser?.nick || ''
     // 封禁与绑定状态都可能在别处被改过，打开时刷新一次
     store.refreshQq().catch(() => {})
     store.refreshGhLink().catch(() => {})
@@ -137,27 +135,20 @@ const avatarStyle = computed(() => {
   for (const ch of sub) h = (h * 31 + ch.charCodeAt(0)) % 360
   return { backgroundColor: 'hsl(' + h + ' 55% 45%)' }
 })
-const canSave = computed(
-  () =>
-    nick.value.trim().length >= 2 &&
-    nick.value.trim().length <= 16 &&
-    nick.value.trim() !== displayNick.value &&
-    !saving.value,
-)
+/** 账号信息三行用的角色文案：QQ 侧读 qqRole，GitHub 侧沿用 roleLabel */
+const ROLE_TEXT = { admin: '管理员', maintain: '维护者', write: '写作者' }
+const roleText = computed(() => (isGh.value ? roleLabel.value : ROLE_TEXT[store.qqRole] || '普通用户'))
 
-async function save() {
-  if (!canSave.value) return
-  saving.value = true
-  try {
-    const data = await updateProfile(nick.value.trim())
-    store.setQqSession(data.user, data.token)
-    toast.success('昵称已更新')
-  } catch (err) {
-    toast.error(err?.message || String(err))
-  } finally {
-    saving.value = false
-  }
+function formatDay(ms) {
+  if (!ms) return '—'
+  const d = new Date(ms)
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
+
+/** 注册时间：QQ 是首次登录本站，GitHub 是中转第一次记下的时间 */
+const joinedText = computed(() =>
+  formatDay(isGh.value ? store.ghJoinedAt : store.qqUser?.created),
+)
 
 /* ---------------- 绑定 ---------------- */
 
@@ -196,14 +187,19 @@ function logout() {
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
     <DialogContent class="w-[min(660px,94vw)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
-      <div class="border-border border-b px-5 py-4 pr-14">
-        <DialogTitle class="text-lg font-bold">个人中心</DialogTitle>
-        <DialogDescription class="mt-1 text-xs">
-          {{ isGh ? '当前以 GitHub 身份登录。' : '当前以 QQ 邮箱身份登录。' }}
-        </DialogDescription>
+      <div class="border-border flex items-center gap-4 border-b px-5 pt-4 pb-3 pr-14">
+        <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
+          <IconUserRound class="size-4" />
+        </div>
+        <div class="min-w-0 translate-y-px">
+          <DialogTitle class="text-base leading-none font-bold">个人中心</DialogTitle>
+          <DialogDescription class="mt-0.5 text-xs">
+            {{ isGh ? '当前以 GitHub 身份登录。' : '当前以 QQ 邮箱身份登录。' }}
+          </DialogDescription>
+        </div>
       </div>
 
-      <div class="grid gap-5 px-5 pt-4 pb-2 sm:grid-cols-[minmax(0,1fr)_240px]">
+      <div class="grid gap-5 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_240px]">
         <div class="flex flex-col gap-4">
           <!-- 身份信息 -->
           <div class="flex items-center gap-3">
@@ -235,21 +231,30 @@ function logout() {
                 <p class="truncate text-base font-bold">{{ displayNick }}</p>
                 <p class="text-muted-foreground truncate text-xs">{{ store.qqUser?.masked || 'QQ 邮箱' }}</p>
               </div>
-              <Badge v-if="store.canManage" variant="secondary" class="shrink-0 text-[10px]">管理</Badge>
+              <Badge v-if="store.canManage" variant="secondary" class="ml-auto shrink-0 text-[10px]">管理</Badge
+              >
+              <Button variant="outline" class="h-8 shrink-0 gap-1.5 px-4 text-sm" @click="editOpen = true">
+                <IconPencil class="size-4" />
+                编辑
+              </Button>
             </template>
           </div>
 
-          <!-- 昵称：GitHub 的名字由 GitHub 决定，只有 QQ 身份能改 -->
-          <div v-if="!isGh" class="flex flex-col gap-1.5">
-            <Label for="qq-profile-nick" class="text-muted-foreground text-xs">昵称</Label>
-            <div class="flex gap-2">
-              <Input id="qq-profile-nick" v-model="nick" maxlength="16" placeholder="2-16 个字符" class="flex-1" />
-              <Button class="shrink-0" :disabled="!canSave" @click="save">
-                {{ saving ? '保存中…' : '保存' }}
-              </Button>
+          <!-- 账号信息：只读展示，可改的东西都挪进了「编辑资料」 -->
+          <dl class="border-border flex flex-col gap-1.5 border-t pt-3 text-xs">
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted-foreground">登录方式</dt>
+              <dd class="font-medium">{{ isGh ? 'GitHub 账号' : 'QQ 邮箱' }}</dd>
             </div>
-            <p class="text-muted-foreground text-[11px]">2-16 个字符，不能包含尖括号或换行。</p>
-          </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted-foreground">角色</dt>
+              <dd class="font-medium">{{ roleText }}</dd>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted-foreground">注册于</dt>
+              <dd class="font-mono font-medium tabular-nums">{{ joinedText }}</dd>
+            </div>
+          </dl>
 
           <!-- 三格统计：两种身份都在同一位置显示 -->
           <div class="border-border mt-auto grid grid-cols-3 items-end gap-2 border-t pt-2 text-center">
@@ -477,4 +482,5 @@ function logout() {
   </Dialog>
 
   <BindAccountDialog v-model:open="binding" :mode="bindMode" />
+  <ProfileEditDialog v-model:open="editOpen" />
 </template>

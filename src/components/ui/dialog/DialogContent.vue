@@ -12,12 +12,20 @@ import {
 } from "reka-ui"
 import DialogOverlay from "./DialogOverlay.vue"
 
+import { isToastTarget } from "@/lib/utils"
+
+/** 点 sonner 提示条不算「点弹窗外」，否则弹一条提示就把正在操作的对话框关掉了 */
+function keepOpenOnToast(event: Event) {
+  if (isToastTarget(event)) event.preventDefault()
+}
+
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = withDefaults(defineProps<DialogContentProps & { class?: HTMLAttributes["class"], showCloseButton?: boolean }>(), {
+const props = withDefaults(defineProps<DialogContentProps & { class?: HTMLAttributes["class"], showCloseButton?: boolean, closeVariant?: "plain" | "block" }>(), {
   showCloseButton: true,
+  closeVariant: "block",
 })
 const emits = defineEmits<DialogContentEmits>()
 
@@ -30,6 +38,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <DialogPortal>
     <DialogOverlay />
     <DialogContent
+      @pointer-down-outside="keepOpenOnToast"
       data-slot="dialog-content"
       v-bind="{ ...$attrs, ...forwarded }"
       :class="
@@ -43,7 +52,11 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       <DialogClose
         v-if="showCloseButton"
         data-slot="dialog-close"
-        class="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+        :class="
+          props.closeVariant === 'block'
+            ? 'bg-muted text-foreground/60 hover:bg-foreground/10 hover:text-foreground focus-visible:ring-ring absolute top-[14.5px] right-4 grid size-9 place-items-center rounded-[10px] transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-[18px]!'
+            : 'ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-7 right-7 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4'
+        "
       >
         <X />
         <span class="sr-only">Close</span>
