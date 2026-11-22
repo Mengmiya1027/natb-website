@@ -138,18 +138,21 @@ export async function verifyCodeOnly(email, code) {
 }
 
 /** 改昵称：服务端会重签令牌，返回值里的 token 要覆盖本地的 */
-export async function updateProfile(nick) {
+export async function updateProfile(nick, avatar) {
   const token = getQqToken()
   if (!token) throw new QqAuthError(401, '请先登录')
   const root = base()
   if (!root) throw new QqAuthError(0, '没有配置中转地址')
+
+  const payload = { nick }
+  if (avatar === 'qq' || avatar === 'letter') payload.avatar = avatar
 
   let res
   try {
     res = await fetch(root + '/auth/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ nick }),
+      body: JSON.stringify(payload),
     })
   } catch (err) {
     throw new QqAuthError(0, '连不上中转服务', err)

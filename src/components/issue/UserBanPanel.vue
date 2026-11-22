@@ -10,6 +10,7 @@ import { computed, onMounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { adminApi } from '@/api/admin'
+import { directAvatarUrl } from '@/api/qqProfile'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -52,6 +53,20 @@ const DURATIONS = [
 ]
 
 const isGh = computed(() => scope.value === 'gh')
+
+/* QQ 头像只对管理员开放直连：列表接口已经把号码一起给了，浏览器直接去腾讯取，
+ * 不经过自家中转，省一层流量 */
+const brokenAvatars = ref({})
+
+function avatarOf(user) {
+  if (!user || user.avatar !== 'qq' || !user.qq) return ''
+  return directAvatarUrl(user.qq)
+}
+
+function markBroken(sub) {
+  if (!sub) return
+  brokenAvatars.value = { ...brokenAvatars.value, [sub]: true }
+}
 const rowKey = (user) => (isGh.value ? user.login : user.sub)
 
 function relativeTime(input) {
@@ -203,6 +218,13 @@ onMounted(load)
             :alt="user.login"
             class="size-8 shrink-0 rounded-full object-cover"
           />
+          <img
+            v-else-if="avatarOf(user) && !brokenAvatars[user.sub]"
+            :src="avatarOf(user)"
+            alt=""
+            class="size-8 shrink-0 rounded-full object-cover"
+            @error="markBroken(user.sub)"
+          />
           <div
             v-else
             class="bg-accent text-accent-foreground grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold"
@@ -247,7 +269,7 @@ onMounted(load)
             v-if="user.banned"
             variant="outline"
             size="xs"
-            class="shrink-0 gap-1"
+            class="h-7 shrink-0 gap-1.5 px-2.5 text-xs"
             :disabled="busyKey === rowKey(user)"
             @click="unban(user)"
           >
@@ -256,9 +278,9 @@ onMounted(load)
           </Button>
           <Button
             v-else
-            variant="ghost"
+            variant="outline"
             size="xs"
-            class="text-destructive shrink-0 gap-1"
+            class="border-destructive/35 text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive h-7 shrink-0 gap-1.5 px-2.5 text-xs"
             @click="openBan(user)"
           >
             <IconBan class="size-3.5" />
@@ -281,8 +303,23 @@ onMounted(load)
             <IconBan class="size-4" />
           </div>
           <div class="min-w-0 translate-y-px">
-            <DialogTitle class="text-base leading-none">
-              封禁 {{ isGh ? '@' + (banTarget?.login || '') : banTarget?.nick || '这个用户' }}
+            <DialogTitle class="flex min-w-0 items-center gap-2 text-base leading-none">
+              <span class="min-w-0 truncate">
+                封禁 {{ isGh ? '@' + (banTarget?.login || '') : banTarget?.nick || '这个用户' }}
+              </span>
+              <img
+                v-if="!isGh && avatarOf(banTarget) && !brokenAvatars[banTarget?.sub]"
+                :src="avatarOf(banTarget)"
+                alt=""
+                class="size-5 shrink-0 rounded-full border object-cover"
+                @error="markBroken(banTarget?.sub)"
+              />
+              <span
+                v-else-if="!isGh"
+                class="bg-muted grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold"
+              >
+                {{ (banTarget?.nick || '?').slice(0, 1) }}
+              </span>
             </DialogTitle>
             <DialogDescription class="mt-0.5 text-xs leading-relaxed">
               {{
@@ -296,7 +333,7 @@ onMounted(load)
 
         <div class="flex flex-col gap-3 px-5 py-4">
           <div class="flex flex-col gap-1.5">
-            <Label for="ban-reason" class="text-xs text-muted-foreground">理由（内部记录，不展示给用户）</Label>
+            <Label for="ban-reason" class="text-xs text-muted-foreground">理由（会展示给被封用户）</Label>
             <Input id="ban-reason" v-model="banReason" placeholder="例如：广告刷屏" maxlength="100" />
           </div>
 
@@ -323,12 +360,26 @@ onMounted(load)
           </label>
         </div>
 
-        <DialogFooter class="border-border border-t px-5 py-3">
-          <Button variant="ghost" size="sm" @click="banOpen = false">取消</Button>
-          <Button variant="destructive" size="sm" :disabled="banning" @click="confirmBan">
-            {{ banning ? '处理中…' : '确认封禁' }}
-          </Button>
-        </DialogFooter>
+        <!-- 与二次确认框同一套底部：灰底、等分两列铺满 -->
+        <div class="border-border bg-muted/70 border-t px-5 py-4">
+          <div class="grid w-full grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              class="h-8 rounded-md px-3 text-sm font-medium"
+              @click="banOpen = false"
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              class="h-8 rounded-md px-3 text-sm font-semibold text-white"
+              :disabled="banning"
+              @click="confirmBan"
+            >
+              {{ banning ? '处理中…' : '确认封禁' }}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   </div>

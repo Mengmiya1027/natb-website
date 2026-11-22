@@ -18,7 +18,8 @@ import { ISSUE_REPO_FULL } from '@/config/github'
 
 import MarkdownView from './MarkdownView.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
-import { parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
+import { buildQqSignature, parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
+import QqSignatureEditor from '@/components/issue/QqSignatureEditor.vue'
 import IssueTimeline from './IssueTimeline.vue'
 
 // issue-write 负责的组件，签名按 CONTRACT.md
@@ -129,12 +130,29 @@ function absoluteTime(value) {
 const author = computed(() => issue.value?.user || {})
 /** QQ 用户发的单子，作者显示成「QQ 用户 xxx」，不显示机器人账号 */
 const qqMarker = computed(() => parseQqMarker(issue.value?.body))
+/* QQ 用户的昵称与头像都存在远端：正文里只有 sub，这里现查现用。
+ * 查不到就退回「QQ 用户」+ 首字母，不编造数据。 */
+const qqProfile = computed(() => (qqMarker.value ? store.profileOf(qqMarker.value.sub) : null))
 const authorLogin = computed(() =>
-  qqMarker.value
-    ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4))
-    : author.value.login || 'ghost',
+  qqMarker.value ? qqProfile.value?.nick || 'QQ 用户' : author.value.login || 'ghost',
 )
-const authorAvatar = computed(() => author.value.avatar_url || '')
+const authorAvatar = computed(() => {
+  if (!qqMarker.value) return author.value.avatar_url || ''
+  return qqProfile.value?.avatar === 'qq' ? store.avatarFor(qqMarker.value.sub) : ''
+})
+/** 头像地址换来换去时可能加载失败，标记一下退回首字母，别留破图 */
+const avatarBroken = ref(false)
+watch(authorAvatar, () => {
+  avatarBroken.value = false
+})
+
+watch(
+  () => qqMarker.value?.sub,
+  (sub) => {
+    if (sub) store.loadProfiles([sub])
+  },
+  { immediate: true },
+)
 const authorInitial = computed(() => String(authorLogin.value).slice(0, 1).toUpperCase())
 const cleanBody = computed(() => stripQqMarker(issue.value?.body))
 
@@ -392,6 +410,8 @@ const canEditTags = computed(() => store.canManage || isIssueAuthor.value)
 /* 编辑入口只要「管理或作者」就显示；被封/未登录时点下去由 startEditIssue 拦下弹窗，
  * 与评论上的编辑、删除按钮保持同一套行为。 */
 const editing = ref(false)
+/** 署名行当前选中的身份；只有管理员能改，保存时按它重拼正文尾巴 */
+const sigSub = ref('')
 const editTitle = ref('')
 const editBody = ref('')
 const savingEdit = ref(false)
@@ -403,7 +423,8 @@ function startEditIssue() {
     return
   }
   editTitle.value = issue.value?.title || ''
-  editBody.value = issue.value?.body || ''
+  editBody.value = stripQqMarker(issue.value?.body || '')
+  sigSub.value = qqMarker.value?.sub || ''
   editing.value = true
 }
 
@@ -419,11 +440,15 @@ async function saveEditIssue() {
   }
   savingEdit.value = true
   try {
+    // 署名尾巴统一由前端拼一次：QQ 身份走中转时 Worker 会剥掉再按最终归属重拼，
+    // GitHub 身份直连 GitHub 时没人替他拼，所以两种路径都带上
+    const payloadBody = sigSub.value
+      ? stripQqMarker(editBody.value) + buildQqSignature(sigSub.value)
+      : editBody.value
     if (store.writeMode === 'qq') {
-      // QQ 身份经中转代写；隐藏标记由 Worker 拼回正文尾部
-      await updateIssueMeta(props.number, { title, body: editBody.value })
+      await updateIssueMeta(props.number, { title, body: payloadBody })
     } else {
-      await githubWriteApi.updateIssue(props.number, { title, body: editBody.value })
+      await githubWriteApi.updateIssue(props.number, { title, body: payloadBody })
     }
     editing.value = false
     toast.success('已保存')
@@ -517,11 +542,13 @@ async function onEditComment(id, body) {
     return
   }
   try {
-    // QQ 身份没有 GitHub token，编辑评论必须由中转用 App 凭据代写
-    const updated =
-      store.writeMode === 'qq'
-        ? await qqWriteApi.updateComment(id, body)
-        : await githubWriteApi.updateComment(id, body)
+    // QQ 用户发的评论，作者是 GitHub App 机器人：GitHub 网页端连协作者都改不了它，
+    // 只能用中转的 App 凭据改写。GitHub 评论才走他本人的 token。
+    const target = comments.value.find((c) => c.id === id)
+    const fromQq = Boolean(parseQqMarker(target?.body))
+    const updated = fromQq
+      ? await qqWriteApi.updateComment(id, body)
+      : await githubWriteApi.updateComment(id, body)
     comments.value = comments.value.map((comment) =>
       comment.id === id ? { ...comment, ...(updated || {}), body } : comment,
     )
@@ -675,10 +702,22 @@ async function onSidebarChanged() {
         <!-- 正文卡片 -->
         <article class="natb-detail__card">
           <header class="natb-detail__card-head">
-            <Avatar class="size-8">
-              <AvatarImage v-if="authorAvatar" :src="authorAvatar" :alt="authorLogin" />
-              <AvatarFallback class="text-xs font-semibold">{{ authorInitial }}</AvatarFallback>
-            </Avatar>
+            <!-- 显式互斥，不用 AvatarImage / AvatarFallback：
+                 头像地址从「有」变成「无」的那一刻，reka-ui 的加载状态会停在
+                 loaded，Fallback 不肯出来，只剩一个空白圆 -->
+            <img
+              v-if="authorAvatar && !avatarBroken"
+              :src="authorAvatar"
+              :alt="authorLogin"
+              class="border-border size-8 shrink-0 rounded-full border object-cover"
+              @error="avatarBroken = true"
+            />
+            <span
+              v-else
+              class="bg-muted grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold"
+            >
+              {{ authorInitial }}
+            </span>
             <span class="natb-detail__card-author">{{ authorLogin }}</span>
             <span class="natb-detail__card-time">
               发布于
@@ -702,13 +741,22 @@ async function onSidebarChanged() {
             <MarkdownView v-if="issue.body" :content="cleanBody" />
             <p v-else class="natb-detail__empty">这条 issue 没有正文。</p>
           </div>
-          <div v-else class="flex flex-col gap-2 px-4 pb-3">
+          <div v-else class="flex flex-col gap-2 px-4 pt-3 pb-3">
             <MarkdownEditor v-model="editBody" placeholder="写下正文…支持 Markdown" />
-            <div class="flex items-center justify-end gap-2">
-              <Button variant="ghost" size="sm" :disabled="savingEdit" @click="cancelEditIssue">取消</Button>
-              <Button size="sm" :disabled="savingEdit" @click="saveEditIssue">
-                {{ savingEdit ? '保存中…' : '保存' }}
-              </Button>
+            <!-- 操作栏：署名行在最左，取消/保存在最右，同一排 -->
+            <div class="flex items-center gap-2">
+              <QqSignatureEditor
+                v-if="store.canManage"
+                :sub="sigSub"
+                :from-qq="Boolean(qqMarker)"
+                @update:sub="sigSub = $event"
+              />
+              <div class="ml-auto flex shrink-0 items-center gap-2">
+                <Button variant="ghost" size="sm" :disabled="savingEdit" @click="cancelEditIssue">取消</Button>
+                <Button size="sm" :disabled="savingEdit" @click="saveEditIssue">
+                  {{ savingEdit ? '保存中…' : '保存' }}
+                </Button>
+              </div>
             </div>
           </div>
         </article>

@@ -3,7 +3,14 @@
  * 与 githubWriteApi 保持同形的入参/出参，调用方只换实现。
  */
 import { DEFAULT_PROXY_BASE } from '@/config/github'
-import { getProxyBase, clearApiCache, isCredentialInvalid, notifyCredentialExpired, errorText } from '@/api/github'
+import {
+  getProxyBase,
+  clearApiCache,
+  isCredentialInvalid,
+  notifyCredentialExpired,
+  errorText,
+  getToken,
+} from '@/api/github'
 import { QqAuthError, getQqToken } from '@/api/qqAuth'
 
 function base() {
@@ -11,7 +18,9 @@ function base() {
 }
 
 async function request(path, { method = 'POST', body } = {}) {
-  const token = getQqToken()
+  // QQ 令牌优先；没有就带 GitHub 令牌——编辑 QQ 评论时，GitHub 身份的管理员
+  // 也要能落到中转（那边的评论作者是机器人，他手上的 token 改不了）
+  const token = getQqToken() || getToken()
   if (!token) throw new QqAuthError(401, '请先登录')
   const root = base()
   if (!root) throw new QqAuthError(0, '没有配置中转地址')

@@ -19,6 +19,7 @@ import {
 } from '@/api/github'
 import { startDeviceFlow, pollDeviceToken, isDeviceFlowAvailable } from '@/api/oauth'
 import { fetchGhIdentity } from '@/api/link'
+import { avatarUrlOf, directAvatarUrl, fetchProfiles } from '@/api/qqProfile'
 import {
   getQqToken,
   getQqUser,
@@ -444,6 +445,110 @@ export const useIssueStore = defineStore('issue', () => {
     document.documentElement.classList.remove('dark')
   }
 
+  /* ---------------- QQ 用户的公开资料（昵称、头像） ---------------- */
+
+  /** sub → { nick, avatar }；正文里只存 sub，名字和头像现查现用 */
+  const profiles = ref({})
+
+  function profileOf(sub) {
+    if (!sub) return { nick: '', avatar: 'letter' }
+    return profiles.value[sub] || { nick: '', avatar: 'letter' }
+  }
+
+  /* 列表一次会渲染十几条，每条各自发一次请求太碎：收 40ms 再合并成一批 */
+  let profilePending = new Set()
+  let profileTimer = 0
+
+  function loadProfiles(subs) {
+    for (const sub of subs || []) {
+      if (sub && !profiles.value[sub]) profilePending.add(sub)
+    }
+    if (!profilePending.size) return
+    clearTimeout(profileTimer)
+    profileTimer = setTimeout(async () => {
+      const batch = [...profilePending].slice(0, 100)
+      profilePending = new Set()
+      // 带上凭据：管理员请求时后端会附带 QQ 号，浏览器就能直连腾讯取头像
+      const data = await fetchProfiles(batch, token.value || qqToken.value)
+      if (data && Object.keys(data).length) {
+        profiles.value = { ...profiles.value, ...data }
+      }
+    }, 40)
+  }
+
+  /**
+   * 本地改动（改昵称、换头像）立刻写回缓存。
+   * loadProfiles 只在缓存缺失时才发请求，少了这一步，本次会话里已经渲染过的
+   * 头像会一直停在旧值上，直到刷新页面为止。
+   */
+  function patchProfile(sub, patch) {
+    if (!sub || !patch) return
+    profiles.value = {
+      ...profiles.value,
+      [sub]: { ...(profiles.value[sub] || {}), ...patch },
+    }
+  }
+
+  function clearProfiles() {
+    profiles.value = {}
+  }
+
+  /**
+   * 头像地址的取法，按「谁在看」分三种：
+   *   管理员      → 所有头像直连腾讯（批量接口已经把他的号码一起给了）
+   *   非管理员自己 → 自己的直连腾讯
+   *   非管理员别人 → 走自家代理 /avatar/<sub>，页面源码里不出现别人的号码
+   */
+  function avatarFor(sub) {
+    if (!sub) return ''
+    const cached = profiles.value[sub]
+    if (cached?.qq) return directAvatarUrl(cached.qq)
+    if (qqUser.value && qqUser.value.sub === sub && qqUser.value.qq) {
+      return directAvatarUrl(qqUser.value.qq)
+    }
+    return avatarUrlOf(sub)
+  }
+
+  /* 管理员拉过的用户列表缓存在内存里：关掉下拉再打开不用重新转圈。
+   * 只活在当前会话，刷新页面就没了——这是刻意的，列表可能已经被别人改过。 */
+  const qqUserCache = ref({ list: [], cursor: null, loaded: false })
+
+  /**
+   * 管理员：按昵称或 QQ 号搜人，给署名行下拉框用。
+   * 返回 { users, cursor }，cursor 为空表示到底了。
+   */
+  async function searchQqUsers(keyword, cursor) {
+    const root = String(proxyBase.value || '').replace(/\/$/, '')
+    const auth = token.value || qqToken.value
+    if (!root || !auth) return { users: [], cursor: null }
+    // 无搜索词的首页与续页都吃缓存；带关键字的一律现查
+    if (!keyword && !cursor && qqUserCache.value.loaded) {
+      return { users: qqUserCache.value.list, cursor: qqUserCache.value.cursor }
+    }
+    try {
+      const params = new URLSearchParams()
+      if (keyword) params.set('q', keyword)
+      if (cursor) params.set('cursor', cursor)
+      const res = await fetch(root + '/admin/users?' + params.toString(), {
+        headers: { Authorization: 'Bearer ' + auth },
+      })
+      if (!res.ok) return { users: [], cursor: null }
+      const data = await res.json().catch(() => null)
+      const users = (data && data.users) || []
+      const nextCursor = (data && data.cursor) || null
+      if (!keyword) {
+        qqUserCache.value = {
+          list: cursor ? [...qqUserCache.value.list, ...users] : users,
+          cursor: nextCursor,
+          loaded: true,
+        }
+      }
+      return { users, cursor: nextCursor }
+    } catch {
+      return { users: [], cursor: null }
+    }
+  }
+
   return {
     user,
     token,
@@ -462,6 +567,14 @@ export const useIssueStore = defineStore('issue', () => {
     qqBanReason,
     qqRole,
     applyQqRole,
+    profiles,
+    profileOf,
+    loadProfiles,
+    patchProfile,
+    clearProfiles,
+    avatarFor,
+    qqUserCache,
+    searchQqUsers,
     isQqLoggedIn,
     qqLinkedGh,
     ghLinkedQq,

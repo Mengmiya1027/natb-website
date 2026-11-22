@@ -5,14 +5,14 @@
  * 只负责展示与「进入编辑态」，真正的网络写入通过 edit / delete 交给父级，
  * 这样失败重试、列表刷新都只有一处逻辑。
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
 import MarkdownView from './MarkdownView.vue'
-import { parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
+import { buildQqSignature, parseQqMarker, stripQqMarker } from '@/utils/qqMarker'
+import QqSignatureEditor from '@/components/issue/QqSignatureEditor.vue'
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -50,12 +50,32 @@ const login = computed(() =>
     ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4))
     : author.value.login || 'ghost',
 )
-const avatarUrl = computed(() => (qqMarker.value ? '' : author.value.avatar_url || ''))
+/* QQ 用户没有 GitHub 头像：选了 QQ 头像的走中转代理（页面源码里看不到 QQ 号），
+ * 选字母头像的留空，由 AvatarFallback 显示首字母 */
+const qqProfile = computed(() => (qqMarker.value ? store.profileOf(qqMarker.value.sub) : null))
+const avatarUrl = computed(() => {
+  if (!qqMarker.value) return author.value.avatar_url || ''
+  return qqProfile.value?.avatar === 'qq' ? store.avatarFor(qqMarker.value.sub) : ''
+})
 const initial = computed(() => String(login.value).slice(0, 1).toUpperCase())
+/** 换了头像之后旧地址可能已失效，加载失败就退回首字母 */
+const avatarBroken = ref(false)
+watch(avatarUrl, () => {
+  avatarBroken.value = false
+})
 const profileUrl = computed(() =>
   qqMarker.value ? '' : `https://github.com/${author.value.login || 'ghost'}`,
 )
 const cleanBody = computed(() => stripQqMarker(props.comment?.body))
+
+// 昵称和头像存在远端：拿到 sub 后再问一次，改过昵称老评论也会跟着变
+watch(
+  () => qqMarker.value?.sub,
+  (sub) => {
+    if (sub) store.loadProfiles([sub])
+  },
+  { immediate: true },
+)
 
 const createdAt = computed(() => props.comment?.created_at || '')
 const updatedAt = computed(() => props.comment?.updated_at || createdAt.value)
@@ -72,9 +92,16 @@ const qqOwnComment = computed(
   () => Boolean(qqMarker.value?.sub && store.qqUser?.sub && qqMarker.value.sub === store.qqUser.sub),
 )
 
-/** 编辑只给作者本人；删除额外给管理员（可以删别人的）。
- * 被封禁 / 未登录时按钮仍然显示，点下去由 guardWritable() 直接弹封禁说明。 */
-const canEdit = computed(() => isAuthor.value || qqOwnComment.value)
+/**
+ * 作者本人能改自己的；管理员额外能改别人发上来的 QQ 评论（用途只有一个：订正署名行）。
+ * 中转那边 /qq/comment/:id 的 PATCH 也是这么判的（editorIsAdmin 放行非作者）。
+ * GitHub 的评论不在此列——GitHub 网页端本身就只允许作者编辑，这里不越权。
+ * 被封禁 / 未登录时按钮仍然显示，点下去由 guardWritable() 直接弹封禁说明。
+ */
+const canEdit = computed(() => {
+  if (isAuthor.value || qqOwnComment.value) return true
+  return Boolean(store.canManage && qqMarker.value)
+})
 const canDelete = computed(() => canEdit.value || store.canManage)
 
 /** 时间线里的编辑记录（GitHub 对评论编辑通常只反映在 updated_at 上，两者都认） */
@@ -135,6 +162,8 @@ function absoluteTime(value) {
 
 const editing = ref(false)
 const draft = ref('')
+/** 署名行归属；只有管理员能改 */
+const sigSub = ref('')
 const textareaRef = ref(null)
 const deleteOpen = ref(false)
 
@@ -147,7 +176,8 @@ function guardWritable() {
 
 function startEdit() {
   if (!guardWritable()) return
-  draft.value = props.comment?.body || ''
+  draft.value = stripQqMarker(props.comment?.body || '')
+  sigSub.value = qqMarker.value?.sub || ''
   editing.value = true
   nextTick(() => {
     const el = textareaRef.value?.$el || textareaRef.value
@@ -164,16 +194,18 @@ function cancelEdit() {
 }
 
 function saveEdit() {
-  const body = draft.value.trim()
+  const body = stripQqMarker(draft.value).trim()
   if (!body) {
     toast.error('评论内容不能为空')
     return
   }
-  if (body === (props.comment?.body || '').trim()) {
+  // 署名尾巴由前端统一重拼（管理员可能刚改过归属）
+  const payload = sigSub.value ? body + buildQqSignature(sigSub.value) : body
+  if (payload === (props.comment?.body || '').trim()) {
     cancelEdit()
     return
   }
-  emit('edit', props.comment.id, body)
+  emit('edit', props.comment.id, payload)
   editing.value = false
 }
 
@@ -196,10 +228,21 @@ function requestReply() {
 <template>
   <article :id="'natb-comment-' + comment.id" class="natb-comment">
     <header class="natb-comment__head">
-      <Avatar class="size-9 natb-comment__avatar">
-        <AvatarImage v-if="avatarUrl" :src="avatarUrl" :alt="login" />
-        <AvatarFallback class="text-xs font-semibold">{{ initial }}</AvatarFallback>
-      </Avatar>
+      <!-- 显式互斥：头像地址从「有」变成「无」时 reka-ui 的加载状态会停在
+           loaded，AvatarFallback 不出来，会剩一个空白圆 -->
+      <img
+        v-if="avatarUrl && !avatarBroken"
+        :src="avatarUrl"
+        :alt="login"
+        class="border-border natb-comment__avatar size-9 shrink-0 rounded-full border object-cover"
+        @error="avatarBroken = true"
+      />
+      <span
+        v-else
+        class="bg-muted natb-comment__avatar grid size-9 shrink-0 place-items-center rounded-full text-xs font-semibold"
+      >
+        {{ initial }}
+      </span>
 
       <div class="natb-comment__meta">
         <a
@@ -298,6 +341,13 @@ function requestReply() {
         placeholder="修改这条评论…"
       />
       <div class="natb-comment__editor-actions">
+        <div v-if="store.canManage" class="mr-auto">
+          <QqSignatureEditor
+            :sub="sigSub"
+            :from-qq="Boolean(qqMarker)"
+            @update:sub="sigSub = $event"
+          />
+        </div>
         <Button variant="ghost" size="sm" @click="cancelEdit">取消</Button>
         <Button size="sm" @click="saveEdit">保存修改</Button>
       </div>

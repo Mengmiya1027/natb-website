@@ -10,6 +10,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { useIssueStore } from '@/stores/issue'
+import QqProfileSetupDialog from '@/components/issue/QqProfileSetupDialog.vue'
 import { ISSUE_REPO_URL, PAT_CREATE_URL, DEFAULT_PROXY_BASE } from '@/config/github'
 import { probeConnection } from '@/api/github'
 import { isDeviceFlowAvailable } from '@/api/oauth'
@@ -232,6 +233,12 @@ async function verifyQqCode() {
     store.applyQqRole(data.role)
     store.applyLink(data.linkedGh)
     authOpenModel.value = false
+    // 第一次登录（后端建档时 setupAt 还是 0）且没绑定 GitHub，问一次头像和昵称。
+    // 关掉不选也没事：建档那一步已经写好默认值了。
+    if (data.isNew && !data.linkedGh) {
+      qqSetupProfile.value = data.profile || data.user || null
+      qqSetupOpen.value = true
+    }
     qqCode.value = ''
     qqStep.value = 'email'
     qqSent.value = false
@@ -353,6 +360,10 @@ async function saveProxy() {
 /** 退出登录的二次确认开关：下拉菜单和设置面板都走它 */
 const logoutConfirmOpen = ref(false)
 
+/** 首次登录的引导弹窗：只在没走过引导、且未绑定 GitHub 时弹一次 */
+const qqSetupOpen = ref(false)
+const qqSetupProfile = ref(null)
+
 
 const isQqOnly = computed(() => store.isQqLoggedIn && !store.isLoggedIn)
 const profileOpen = ref(false)
@@ -379,7 +390,11 @@ const displayName = computed(() => {
 })
 const avatarUrl = computed(() => {
   if (store.isLoggedIn) return store.user?.avatar_url || ''
+  // 绑定过就对外的身份是那位 GitHub 账号，头像也跟它走
   if (store.qqLinkedGh?.login) return 'https://github.com/' + store.qqLinkedGh.login + '.png?size=64'
+  // 纯 QQ 身份：档案里选了 QQ 头像才给图，选字母头像就留空交给 AvatarFallback
+  const sub = store.qqUser?.sub || ''
+  if (store.qqUser?.avatar === 'qq' && sub) return store.avatarFor(sub)
   return ''
 })
 const initial = computed(() => (displayName.value || '?').slice(0, 1).toUpperCase())
@@ -845,6 +860,8 @@ onBeforeUnmount(resetFlow)
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <QqProfileSetupDialog v-model:open="qqSetupOpen" :profile="qqSetupProfile" />
 
     <!-- 退出登录二次确认 -->
     <AlertDialog v-model:open="logoutConfirmOpen">

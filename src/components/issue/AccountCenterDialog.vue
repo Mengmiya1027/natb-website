@@ -135,6 +135,15 @@ const avatarStyle = computed(() => {
   for (const ch of sub) h = (h * 31 + ch.charCodeAt(0)) % 360
   return { backgroundColor: 'hsl(' + h + ' 55% 45%)' }
 })
+/** 档案里选了 QQ 头像就用号码头像，否则留在字母头像上 */
+const qqAvatarUrl = computed(() => {
+  const sub = store.qqUser?.sub || ''
+  return store.qqUser?.avatar === 'qq' && sub ? store.avatarFor(sub) : ''
+})
+const qqAvatarOk = ref(true)
+watch(qqAvatarUrl, () => {
+  qqAvatarOk.value = true
+})
 /** 账号信息三行用的角色文案：QQ 侧读 qqRole，GitHub 侧沿用 roleLabel */
 const ROLE_TEXT = { admin: '管理员', maintain: '维护者', write: '写作者' }
 const roleText = computed(() => (isGh.value ? roleLabel.value : ROLE_TEXT[store.qqRole] || '普通用户'))
@@ -221,7 +230,15 @@ function logout() {
             </template>
   
             <template v-else>
+              <img
+                v-if="qqAvatarUrl && qqAvatarOk"
+                :src="qqAvatarUrl"
+                alt=""
+                class="border-border size-12 shrink-0 rounded-full border object-cover"
+                @error="qqAvatarOk = false"
+              />
               <div
+                v-else
                 class="grid size-12 shrink-0 place-items-center rounded-full text-lg font-semibold text-white"
                 :style="avatarStyle"
               >

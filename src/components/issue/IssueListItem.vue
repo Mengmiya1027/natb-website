@@ -1,7 +1,8 @@
 <script setup>
 /** 单条 issue。布局参考资产/流水列表：
  *  左：圆角方块里放状态图标　中：标题 + 副标题　右：标签徽章 + 「更新」与时间。 */
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
+import { useIssueStore } from '@/stores/issue'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { parseQqMarker } from '@/utils/qqMarker'
 import { Badge } from '@/components/ui/badge'
@@ -27,6 +28,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['open'])
 
+const store = useIssueStore()
+
 const state = computed(() => props.issue?.state || 'open')
 const reason = computed(() => props.issue?.state_reason || '')
 const isClosed = computed(() => state.value === 'closed')
@@ -43,8 +46,17 @@ const labels = computed(() => (props.issue?.labels || []).slice(0, 1))
 const moreLabels = computed(() => Math.max(0, (props.issue?.labels || []).length - 1))
 const author = computed(() => props.issue?.user || {})
 const qqMarker = computed(() => parseQqMarker(props.issue?.body))
+const qqProfile = computed(() => (qqMarker.value ? store.profileOf(qqMarker.value.sub) : null))
 const authorName = computed(() =>
-  qqMarker.value ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4)) : author.value.login || 'ghost',
+  qqMarker.value ? qqProfile.value?.nick || 'QQ 用户' : author.value.login || 'ghost',
+)
+
+watch(
+  () => qqMarker.value?.sub,
+  (sub) => {
+    if (sub) store.loadProfiles([sub])
+  },
+  { immediate: true },
 )
 const initial = computed(() => authorName.value.slice(0, 1).toUpperCase())
 

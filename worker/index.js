@@ -444,20 +444,37 @@ async function requireWriter(env, request, cors) {
  * 只能看到一个 bot，看不出是谁发的。因此再加一行给 <sub> 的可见署名，
  * 前端渲染时连同注释一起剥掉（那边已经有作者名了，不需要重复）。
  */
-function qqMarker(session, masked, linkedLogin) {
-  const nick = session.nick || '匿名用户'
-  const meta = JSON.stringify({
-    sub: session.sub,
-    nick,
-    masked: masked || '',
-    ...(linkedLogin ? { login: linkedLogin } : {}),
-  })
-  // 绑定了 GitHub 的，署名以 GitHub 为准：读者该看到的是那个 GitHub 账号，
-  // 而不是一个陌生的 QQ 昵称。QQ 昵称退进注释里留档。
-  const visible = linkedLogin
-    ? '<sub>@' + linkedLogin + '（经 QQ 邮箱验证）通过 NATB 官网提交</sub>'
-    : '<sub>QQ 用户 ' + nick + (masked ? '（' + masked + '）' : '') + ' 通过 NATB 官网提交</sub>'
-  return '\n\n' + visible + '\n<!-- natb:qq ' + meta + ' -->\n'
+/** 正文尾部那行可见署名：新旧两种格式都要能剥掉 */
+const SIGNATURE_RE =
+  /\s*(?:<sub>This message was sent by QQ user · #[0-9a-f]{6,32}<\/sub>|<sub>QQ 用户[\s\S]*?通过 NATB 官网提交<\/sub>)\s*/g
+const MARKER_TAIL_RE = /\s*<!--\s*natb:qq\s+\{[\s\S]*?\}\s*-->\s*$/g
+
+/** 从正文里取 marker 的 sub，取不到返回空串 */
+function markerSubOf(text) {
+  const match = String(text || '').match(/<!--\s*natb:qq\s+(\{[\s\S]*?\})\s*-->/)
+  if (!match) return ''
+  try {
+    return String(JSON.parse(match[1]).sub || '')
+  } catch {
+    return ''
+  }
+}
+
+/** 剥掉可见署名与隐藏注释，剩下纯正文 */
+function stripSignature(text) {
+  return String(text || '')
+    .replace(SIGNATURE_RE, '\n')
+    .replace(MARKER_TAIL_RE, '')
+    .trimEnd()
+}
+
+function qqMarker(session) {
+  const sub = String(session.sub || '')
+  // 可见行只放 sub：昵称和头像存在 KV 里，改一次全都跟着变，写进正文反而会过期。
+  // 这一行不是给人精读的，是给机器认人时顺带好认一点。
+  const visible = '<sub>This message was sent by QQ user · #' + sub + '</sub>'
+  // 真正的凭据是这行注释：前端渲染前剥掉，用户改不了，服务端只认它
+  return '\n\n' + visible + '\n<!-- natb:qq ' + JSON.stringify({ sub }) + ' -->\n'
 }
 
 
@@ -568,10 +585,14 @@ async function handleIssueMeta(env, request, url, match) {
   if (body.body !== undefined) {
     let text = String(body.body || '')
     if (text.length > 60000) return json({ error: 'invalid_body', message: '正文太长了' }, 400, origin, env)
-    // QQ 代发的正文尾部带着隐藏标记，那是作者身份的凭据；前端看到的是剥掉标记后的正文，
-    // 提交回来时不含它，这里必须原样拼回，否则改一次正文这条 issue 就不认作者了。
-    const marker = String(issue.body || '').match(/<!--\s*natb:qq\s+\{[\s\S]*?\}\s*-->/)
-    if (marker && !/<!--\s*natb:qq/.test(text)) text = text.trimEnd() + '\n\n' + marker[0]
+    /* 尾部那行是作者凭据，一律由服务端重拼，不采信前端提交的原文。
+     * 管理员可以改归属（这就是「编辑署名行」的落点），其他人改不动。 */
+    const originalSub = markerSubOf(issue.body)
+    if (originalSub) {
+      const submittedSub = markerSubOf(text)
+      const finalSub = isAdmin && submittedSub ? submittedSub : originalSub
+      text = stripSignature(text) + qqMarker({ sub: finalSub })
+    }
     patch.body = text
   }
 
@@ -1062,6 +1083,9 @@ async function listGhUsers(env, origin) {
 }
 
 async function handleAdmin(env, request, url) {
+  // 老档案补录放在鉴权之前：只写固定几个号码、幂等，匿名触发也没有危害，
+  // 这样部署完成后第一次有人访问管理接口就把库补齐了
+  await ensureQqBackfill(env)
   const origin = request.headers.get('Origin') || ''
   const gate = await requireAdmin(env, request)
   // 用 error 判断成败：失败分支也带 login 用于错误文案，不能拿 login 当通行证
@@ -1085,7 +1109,9 @@ async function handleAdmin(env, request, url) {
   if (url.pathname === '/admin/users' && request.method === 'GET') {
     if (url.searchParams.get('scope') === 'gh') return await listGhUsers(env, origin)
     const cursor = url.searchParams.get('cursor') || undefined
-    const list = await env.NATB_KV.list({ prefix: 'user:', limit: 20, cursor })
+    // 搜索时多拉一些，过滤后再截断；不搜索就维持 20 条的分页
+    const q = String(url.searchParams.get('q') || '').trim().toLowerCase()
+    const list = await env.NATB_KV.list({ prefix: 'user:', limit: q ? 100 : 20, cursor })
     const users = []
     for (const key of list.keys) {
       const sub = key.name.slice('user:'.length)
@@ -1095,6 +1121,8 @@ async function handleAdmin(env, request, url) {
       users.push({
         sub,
         linkedGh: (await bindOfQq(env, sub)) || '',
+        qq: profile.qq || '',
+        avatar: profile.avatar === 'qq' || (!profile.setupAt && profile.qq) ? 'qq' : 'letter',
         nick: profile.nick || '',
         masked: profile.masked || '',
         created: profile.created || 0,
@@ -1106,8 +1134,43 @@ async function handleAdmin(env, request, url) {
         reason: banned ? ban.reason || '' : '',
       })
     }
-    users.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
-    return json({ ok: true, users, cursor: list.list_complete ? null : list.cursor }, 200, origin, env)
+    /* 老档案没有 qq 字段，按号码搜就搜不到自己。
+     * 号码能反算出 sub（和登录同一套哈希），命中就顺手把 qq 补进档案，
+     * 一次搜索完成一条迁移，之后按号码就能正常搜到。 */
+    if (/^\d{5,11}$/.test(q)) {
+      const byQq = await subjectOf(env, q + '@qq.com')
+      if (byQq && !users.some((u) => u.sub === byQq)) {
+        const profile = await kvJson(env, 'user:' + byQq)
+        if (profile) {
+          if (!profile.qq) await kvSet(env, 'user:' + byQq, { ...profile, qq: q }, 90 * 86400)
+          users.push({
+            sub: byQq,
+            linkedGh: (await bindOfQq(env, byQq)) || '',
+            qq: q,
+            nick: profile.nick || '',
+            masked: profile.masked || '',
+            created: profile.created || 0,
+            lastSeen: profile.lastSeen || 0,
+            issues: profile.issues || 0,
+            comments: profile.comments || 0,
+            banned: false,
+            until: 0,
+            reason: '',
+          })
+        }
+      }
+    }
+
+    const filtered = q
+      ? users.filter((u) => (u.nick || '').toLowerCase().includes(q) || (u.qq || '').includes(q))
+      : users
+    filtered.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
+    return json(
+      { ok: true, users: filtered.slice(0, 20), cursor: q || list.list_complete ? null : list.cursor },
+      200,
+      origin,
+      env,
+    )
   }
 
   if (url.pathname === '/admin/ban' && request.method === 'POST') {
@@ -1247,13 +1310,32 @@ async function handleAuth(env, request, url, cors) {
     await env.NATB_KV.delete('code:' + sub)
     const masked = maskEmail(email)
 
-    // 昵称只在个人中心里设；首次登录给个占位，登录表单不再收这个字段
-    const profile = (await kvJson(env, 'user:' + sub)) || { created: Date.now(), issues: 0, comments: 0 }
-    const finalNick = profile.nick || 'QQ用户' + sub.slice(0, 4)
+    /* 资料档案，三条约定：
+     *   1. 建档立刻写默认值（昵称 = QQ用户 + 号码后四位），用户什么都不点也不会留空
+     *   2. 占位档案（管理员在署名行里手填的号）不写 created，注册日期等本人首次登录再算
+     *   3. 老版本拿 sub 前四位当占位名，这里识别出来、按号码后四位重算一次 */
+    const qq = email.slice(0, email.lastIndexOf('@'))
+    const stored = await kvJson(env, 'user:' + sub)
+    const profile = stored || { issues: 0, comments: 0 }
+    const created = profile.created || (profile.placeholder ? 0 : Date.now())
+    const isPlaceholderNick =
+      !profile.nick || profile.placeholder || /^QQ用户 ?[0-9a-f]{4}$/i.test(profile.nick)
+    const finalNick = isPlaceholderNick ? 'QQ用户 ' + qq.slice(-4) : profile.nick
     await kvSet(
       env,
       'user:' + sub,
-      { ...profile, nick: finalNick, masked, lastSeen: Date.now(), ips: [clientIp(request)] },
+      {
+        ...profile,
+        qq,
+        nick: finalNick,
+        masked,
+        created,
+        avatar: profile.avatar || 'letter',
+        setupAt: profile.setupAt || 0,
+        placeholder: false,
+        lastSeen: Date.now(),
+        ips: [clientIp(request)],
+      },
       90 * 86400,
     )
 
@@ -1264,7 +1346,9 @@ async function handleAuth(env, request, url, cors) {
         ok: true,
         token,
         exp,
-        user: { sub, nick: finalNick, masked },
+        user: { sub, nick: finalNick, masked, avatar: profile.avatar || 'letter', qq },
+        isNew: !profile.setupAt,
+        profile: { sub, qq, nick: finalNick, avatar: profile.avatar || 'letter', created },
         role: identity.role,
         banned: identity.banned,
         until: identity.until,
@@ -1290,15 +1374,33 @@ async function handleAuth(env, request, url, cors) {
       return json({ error: 'invalid_nick', message: '昵称不能包含尖括号或换行' }, 400, origin, env)
     }
 
+    const avatar = body && (body.avatar === 'qq' || body.avatar === 'letter') ? body.avatar : ''
     const profile = (await kvJson(env, 'user:' + session.sub)) || {}
-    const updated = { ...profile, nick, lastSeen: Date.now() }
+    // setupAt 一写就代表「走过一次引导」，之后登录不再弹选择框
+    const updated = {
+      ...profile,
+      nick,
+      ...(avatar ? { avatar } : {}),
+      setupAt: Date.now(),
+      lastSeen: Date.now(),
+    }
     await kvSet(env, 'user:' + session.sub, updated, 90 * 86400)
 
     // 昵称在令牌载荷里，改完必须重签，否则后续发帖署的还是旧名字
     const exp = Math.floor(Date.now() / 1000) + SESSION_TTL
     const token = await signSession(env, { sub: session.sub, nick, exp })
     return json(
-      { ok: true, token, user: { sub: session.sub, nick, masked: updated.masked || '' } },
+      {
+        ok: true,
+        token,
+        user: {
+          sub: session.sub,
+          nick,
+          masked: updated.masked || '',
+          avatar: updated.avatar || 'letter',
+          qq: updated.qq || '',
+        },
+      },
       200,
       origin,
       env,
@@ -1344,6 +1446,8 @@ async function handleAuth(env, request, url, cors) {
           sub: session.sub,
           nick: session.nick,
           masked: profile.masked || '',
+          qq: profile.qq || '',
+          avatar: profile.avatar || 'letter',
           created: profile.created || 0,
           issues: profile.issues || 0,
           comments: profile.comments || 0,
@@ -1510,6 +1614,75 @@ async function handleAuth(env, request, url, cors) {
   return json({ error: 'not_found' }, 404, origin, env)
 }
 
+/**
+ * 编辑评论。这条路由只处理「QQ 身份代发」的评论——它们的作者是 GitHub App 机器人，
+ * 协作者就算有 admin 权限也改不了别人的评论，只能由中转用 App 凭据改写。
+ *
+ * 接受两种凭据，因为同一个人可能从任一侧进来：
+ *   QQ 令牌      → sub，角色查 role:/bind:
+ *   GitHub 令牌  → login，角色查仓库协作者
+ * 放行条件：这条评论的主人（含绑定的等价身份），或者管理员（用途只有一个：订正署名行）。
+ * 正文末尾的 marker 一律剥掉重拼，只有管理员能改 marker 里的 sub。
+ */
+async function handleCommentEdit(env, request, url, match) {
+  const origin = request.headers.get('Origin') || ''
+  const commentId = Number(match[1])
+  const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+  if (!raw) return json({ error: 'unauthorized', message: '请先登录' }, 401, origin, env)
+
+  let sub = ''
+  let login = ''
+  let isAdmin = false
+
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) {
+    const session = await verifySession(env, request)
+    if (!session) return json({ error: 'unauthorized', message: 'QQ 登录已失效' }, 401, origin, env)
+    sub = session.sub
+    if (banActive(await banStateOfQq(env, sub))) {
+      return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
+    }
+    isAdmin = await qqCallerIsAdmin(env, sub)
+  } else {
+    const me = await loginOfGhToken(raw)
+    if (!me || !me.login) {
+      return json({ error: 'token_invalid', message: 'GitHub 登录已失效' }, 401, origin, env)
+    }
+    login = me.login
+    if (banActive(await banStateOfGh(env, login))) {
+      return json({ error: 'banned', message: '账号已被封禁' }, 403, origin, env)
+    }
+    isAdmin = await callerIsAdmin(env, login, raw)
+  }
+
+  const body = await readJsonBody(request)
+  const text = String((body && body.body) || '').slice(0, 10000)
+  if (!text.trim()) return json({ error: 'body_required', message: '评论不能为空' }, 400, origin, env)
+
+  let comment
+  try {
+    comment = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, { method: 'GET' })
+  } catch {
+    return json({ error: 'not_found', message: '这条评论不存在或已被删除' }, 404, origin, env)
+  }
+
+  const original = String(comment.body || '')
+  const owner = markerSubOf(original)
+
+  // 绑定了的 GitHub 账号与它的 QQ 身份是同一个人，两边都能改同一条评论
+  const classSub = sub || (login ? await bindOfGh(env, login) : '')
+  if (owner !== classSub && !isAdmin) {
+    return json({ error: 'forbidden', message: '只能编辑自己发的评论' }, 403, origin, env)
+  }
+
+  const submittedSub = markerSubOf(text)
+  const finalSub = isAdmin && submittedSub ? submittedSub : owner || classSub || submittedSub
+  const updated = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
+    method: 'PATCH',
+    body: JSON.stringify({ body: stripSignature(text) + qqMarker({ sub: finalSub }) }),
+  })
+  return json({ ok: true, comment: { id: updated.id, body: updated.body } }, 200, origin, env)
+}
+
 async function handleQq(env, request, url, cors) {
   const origin = request.headers.get('Origin') || ''
   const gate = await requireWriter(env, request, cors)
@@ -1536,7 +1709,7 @@ async function handleQq(env, request, url, cors) {
 
     const profile = (await kvJson(env, 'user:' + session.sub)) || {}
     // 绑定后以 GitHub 身份落款：能力互通，署名也统一
-    const content = text + qqMarker(session, profile.masked || '', await bindOfQq(env, session.sub))
+    const content = text + qqMarker(session)
     const issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues', {
       method: 'POST',
       body: JSON.stringify({
@@ -1573,7 +1746,7 @@ async function handleQq(env, request, url, cors) {
     const comment = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number + '/comments', {
       method: 'POST',
       body: JSON.stringify({
-        body: text + qqMarker(session, profile.masked || '', await bindOfQq(env, session.sub)),
+        body: text + qqMarker(session),
       }),
     })
     await kvSet(env, dayKey, String(Number((await env.NATB_KV.get(dayKey)) || 0) + 1), 86400)
@@ -1629,40 +1802,6 @@ async function handleQq(env, request, url, cors) {
     return json({ ok: true }, 200, origin, env)
   }
 
-  /* 编辑自己发的评论。QQ 身份没有 GitHub token，只能由中转用 App 凭据代写；
-   * 正文尾部那串 marker 是作者身份凭据，必须按原样保留，否则改一次就不认作者了。 */
-  if (commentDeleteMatch && request.method === 'PATCH') {
-    const commentId = Number(commentDeleteMatch[1])
-    const body = await readJsonBody(request)
-    const text = String((body && body.body) || '').slice(0, 10000)
-    if (!text.trim()) return json({ error: 'body_required', message: '评论不能为空' }, 400, origin, env)
-    const comment = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
-      method: 'GET',
-    })
-    const original = String(comment.body || '')
-    const marker = original.match(/<!-- natb:qq (\{.*?\}) -->/)
-    let owner = null
-    if (marker) {
-      try {
-        owner = JSON.parse(marker[1]).sub
-      } catch {
-        owner = null
-      }
-    }
-    if (owner !== session.sub) {
-      return json({ error: 'forbidden', message: '只能编辑自己发的评论' }, 403, origin, env)
-    }
-    // 可见署名 + 隐藏注释一起搬过去（原文里 marker 之前那段 <sub>…</sub>）
-    const markerAt = original.indexOf(marker[0])
-    const subAt = original.lastIndexOf('<sub>', markerAt)
-    const tail = original.slice(subAt >= 0 ? subAt : markerAt)
-    const updated = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
-      method: 'PATCH',
-      body: JSON.stringify({ body: text.trimEnd() + '\n\n' + tail.trimStart() }),
-    })
-    return json({ ok: true, comment: { id: updated.id, body: updated.body } }, 200, origin, env)
-  }
-
   const closeMatch = url.pathname.match(/^\/qq\/issue\/(\d+)$/)
   if (closeMatch && request.method === 'PATCH') {
     const number = Number(closeMatch[1])
@@ -1693,6 +1832,172 @@ async function handleQq(env, request, url, cors) {
   return json({ error: 'not_found' }, 404, origin, env)
 }
 
+
+/* ---------------- 公开资料与头像 ---------------- */
+
+/**
+ * 历史档案补录名单。
+ * 早期版本的 user:<sub> 没存 qq 字段，于是「按号码搜」永远搜不到自己。
+ * 这些号码在下一次触达管理接口时惰性建档 / 补字段（幂等，重复跑没有副作用）。
+ */
+const QQ_BACKFILL = ['3990818268', '1176537786', '2231486624']
+let qqBackfillDone = false
+
+async function ensureQqBackfill(env) {
+  if (qqBackfillDone) return
+  qqBackfillDone = true
+  const trail = []
+  for (const qq of QQ_BACKFILL) {
+    try {
+      const sub = await subjectOf(env, qq + '@qq.com')
+      const profile = await kvJson(env, 'user:' + sub)
+      if (!profile) {
+        await kvSet(
+          env,
+          'user:' + sub,
+          { qq, nick: 'QQ用户 ' + qq.slice(-4), avatar: 'letter', created: 0, placeholder: true, issues: 0, comments: 0 },
+          90 * 86400,
+        )
+        trail.push(sub + ':created')
+      } else if (!profile.qq) {
+        await kvSet(env, 'user:' + sub, { ...profile, qq }, 90 * 86400)
+        trail.push(sub + ':patched')
+      } else {
+        trail.push(sub + ':exists')
+      }
+    } catch (err) {
+      trail.push(qq + ':err ' + String(err).slice(0, 80))
+    }
+  }
+  // 留一条 1 小时过期的脚印，运维时 wrangler 直接读得到补录结果
+  try {
+    await kvSet(env, 'diag:backfill', { at: Date.now(), trail }, 3600)
+  } catch {
+    /* 诊断键写不进去也不影响主流程 */
+  }
+}
+
+/**
+ * 批量把 sub 换成「人看的名字」。
+ * 正文里只存 sub（昵称会过期），列表和评论区渲染前统一来问一次。
+ * 查不到的 sub 不返回，前端自己兜底成「QQ用户」+ 字母头像。
+ */
+async function handleProfileBatch(env, request, origin) {
+  const body = await readJsonBody(request)
+  const subs = Array.isArray(body && body.subs) ? body.subs.slice(0, 100) : []
+  /* 管理员那侧会带上凭据：给他 QQ 号，浏览器就能直接去腾讯取头像，不占中转流量。
+   * 普通访客拿不到号码，头像继续走 /avatar/<sub> 代理，页面源码里也看不到号码。 */
+  const gate = await requireAdmin(env, request)
+  const adminView = !gate.error
+  const profiles = {}
+  for (const sub of subs) {
+    if (typeof sub !== 'string' || !/^[0-9a-f]{6,32}$/.test(sub)) continue
+    const profile = await kvJson(env, 'user:' + sub)
+    if (!profile) continue
+    profiles[sub] = {
+      nick: profile.nick || '',
+      // 走过引导的按用户自己的选择；从没选过的老档案，有号码就用 QQ 头像
+      avatar: profile.avatar === 'qq' || (!profile.setupAt && profile.qq) ? 'qq' : 'letter',
+      ...(adminView && profile.qq ? { qq: profile.qq } : {}),
+    }
+  }
+  return json({ ok: true, profiles }, 200, origin, env)
+}
+
+/** 管理员编辑署名行时，把这条内容当前归属的 QQ 号取出来给他改 */
+async function handleProfileOwner(env, request, url, origin) {
+  const gate = await requireAdmin(env, request)
+  if (gate.error) {
+    return json({ error: gate.error }, gate.error === 'forbidden' ? 403 : 401, origin, env)
+  }
+  const sub = String(url.searchParams.get('sub') || '')
+  if (!/^[0-9a-f]{6,32}$/.test(sub)) return json({ error: 'invalid_sub' }, 400, origin, env)
+  const profile = await kvJson(env, 'user:' + sub)
+  return json(
+    {
+      ok: true,
+      sub,
+      qq: (profile && profile.qq) || '',
+      nick: (profile && profile.nick) || '',
+      inLibrary: Boolean(profile),
+    },
+    200,
+    origin,
+    env,
+  )
+}
+
+/**
+ * 管理员手填一个库里没有的 QQ 号时，即时建一份占位档案。
+ * created 留空：这个人将来真的登录那天，才算他「注册本站」的第一天。
+ */
+async function handleProfilePlaceholder(env, request, origin) {
+  const gate = await requireAdmin(env, request)
+  if (gate.error) {
+    return json({ error: gate.error }, gate.error === 'forbidden' ? 403 : 401, origin, env)
+  }
+  const body = await readJsonBody(request)
+  const qq = String((body && body.qq) || '').trim()
+  if (!/^\d{5,11}$/.test(qq)) {
+    return json({ error: 'invalid_qq', message: 'QQ 号是 5-11 位数字' }, 400, origin, env)
+  }
+  // 与真实登录同一套哈希：将来本人用 <qq>@qq.com 登录时能直接接管这份档案
+  const sub = await subjectOf(env, qq + '@qq.com')
+  const existing = await kvJson(env, 'user:' + sub)
+  if (existing) {
+    return json({ ok: true, sub, nick: existing.nick || '', created: false }, 200, origin, env)
+  }
+  const nick = 'QQ用户 ' + qq.slice(-4)
+  await kvSet(
+    env,
+    'user:' + sub,
+    { qq, nick, avatar: 'letter', created: 0, placeholder: true, issues: 0, comments: 0 },
+    90 * 86400,
+  )
+  return json({ ok: true, sub, nick, created: true }, 200, origin, env)
+}
+
+/**
+ * 头像代理：URL 里只有 sub，QQ 号不出现在页面源码里。
+ * 取不到就 404，前端 AvatarFallback 自动落到首字母块，不需要额外分支。
+ */
+async function handleAvatar(env, request, url, origin) {
+  const match = url.pathname.match(/^\/avatar\/([0-9a-f]{6,32})$/)
+  if (!match) return new Response('not found', { status: 404 })
+  const profile = await kvJson(env, 'user:' + match[1])
+  const qq = profile && profile.qq
+  if (!qq || !/^\d{5,11}$/.test(qq)) return new Response('not found', { status: 404 })
+  let upstream
+  try {
+    upstream = await fetch('https://q1.qlogo.cn/g?b=qq&nk=' + qq + '&s=100')
+  } catch {
+    return new Response('upstream failed', { status: 502 })
+  }
+  if (!upstream.ok) return new Response('not found', { status: 404 })
+  const bytes = await upstream.arrayBuffer()
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      'Content-Type': upstream.headers.get('Content-Type') || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400',
+      'Access-Control-Allow-Origin': origin || '*',
+    },
+  })
+}
+
+async function handleProfile(env, request, url, origin) {
+  if (url.pathname === '/profile/batch' && request.method === 'POST') {
+    return await handleProfileBatch(env, request, origin)
+  }
+  if (url.pathname === '/profile/owner' && request.method === 'GET') {
+    return await handleProfileOwner(env, request, url, origin)
+  }
+  if (url.pathname === '/profile/placeholder' && request.method === 'POST') {
+    return await handleProfilePlaceholder(env, request, origin)
+  }
+  return json({ error: 'not_found' }, 404, origin, env)
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
@@ -1713,11 +2018,22 @@ export default {
       if (url.pathname.startsWith('/auth/')) {
         return await handleAuth(env, request, url, cors)
       }
+      // 评论编辑要认两种凭据，所以单独拎出来，不走 handleQq 的 requireWriter
+      const commentEditMatch = url.pathname.match(/^\/qq\/comment\/(\d+)$/)
+      if (commentEditMatch && request.method === 'PATCH') {
+        return await handleCommentEdit(env, request, url, commentEditMatch)
+      }
       if (url.pathname.startsWith('/qq/')) {
         return await handleQq(env, request, url, cors)
       }
       if (url.pathname.startsWith('/admin/')) {
         return await handleAdmin(env, request, url)
+      }
+      if (url.pathname.startsWith('/profile/')) {
+        return await handleProfile(env, request, url, origin)
+      }
+      if (url.pathname.startsWith('/avatar/')) {
+        return await handleAvatar(env, request, url, origin)
       }
       const deleteMatch = url.pathname.match(/^\/issue\/(\d+)$/)
       if (deleteMatch && request.method === 'DELETE') {
