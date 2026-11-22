@@ -69,8 +69,9 @@ import IconWifiOff from '~icons/lucide/wifi-off'
 import IconKey from '~icons/lucide/key-round'
 import IconCircleAlert from '~icons/lucide/circle-alert'
 import IconQQ from '~icons/simple-icons/qq'
-import IconBookMarked from '~icons/lucide/book-marked'
 import IconUserRound from '~icons/lucide/user-round'
+import IconCircleHelp from '~icons/lucide/circle-help'
+import IconBookMarked from '~icons/lucide/book-marked'
 import IconLogIn from '~icons/lucide/log-in'
 
 const props = defineProps({
@@ -161,8 +162,23 @@ const qqVerifying = ref(false)
 const qqError = ref('')
 let qqTimer = 0
 
-const qqEmailValid = computed(() => /^[^\s@]+@(qq|foxmail)\.com$/i.test(qqEmail.value.trim()))
-const qqCanSend = computed(() => qqEmailValid.value && qqCooldown.value === 0 && !qqSending.value)
+/** QQ 号是纯数字、5–11 位。输入框不拦字符，只在点「获取验证码」时校验 */
+const QQ_PREFIX_RE = /^\d{5,11}$/
+
+/** 逐条给出原因，而不是一个「格式错误」——点按钮时才校验，用户得知道错在哪 */
+const qqEmailIssue = computed(() => {
+  const v = qqEmail.value.trim()
+  if (!v) return '请先填写 QQ 邮箱'
+  const at = v.indexOf('@')
+  if (at < 0) return '邮箱要写全，例如 12345678@qq.com'
+  if (!QQ_PREFIX_RE.test(v.slice(0, at))) return '为获取对应头像、昵称，仅支持纯数字 QQ 邮箱'
+  if (!/^(qq|foxmail)\.com$/.test(v.slice(at + 1))) return '只支持 @qq.com 与 @foxmail.com'
+  return ''
+})
+
+const qqEmailValid = computed(() => !qqEmailIssue.value)
+// 格式不再参与禁用判定：格式错时按钮照样能点，点了才有地方说明错在哪
+const qqCanSend = computed(() => qqCooldown.value === 0 && !qqSending.value)
 // 不绑定 qqStep：第一步的「登录」也要能用——从第二步点「上一步」回来时，
 // 已填的 6 位码还在（backToEmail 有意不清空），按钮却因为换了屏而变灰，
 // 用户只能再点一次「返回输入」。有码就能登，和在哪一屏无关。
@@ -179,6 +195,12 @@ function startQqCooldown() {
 
 async function sendQqCode() {
   if (!qqCanSend.value) return
+  // 点击这一刻先校验：非数字前缀、域名不对都在这里拦下，不发请求
+  const issue = qqEmailIssue.value
+  if (issue) {
+    qqError.value = issue
+    return
+  }
   qqSending.value = true
   qqError.value = ''
   try {
@@ -452,20 +474,29 @@ onBeforeUnmount(resetFlow)
               <div
                 class="bg-background border-foreground/10 flex size-10 shrink-0 items-center justify-center rounded-lg border"
               >
-                <IconBookMarked class="size-5" />
+                <IconCircleHelp v-if="authTab === 'qq'" class="size-5" />
+                <IconBookMarked v-else class="size-5" />
               </div>
               <div class="min-w-0 flex-1">
-                <p class="text-sm font-medium">仓库权限</p>
+                <p class="text-sm font-medium">
+                  {{ authTab === 'qq' ? '为什么仅支持纯数字邮箱？' : '仓库权限' }}
+                </p>
                 <p class="text-muted-foreground text-xs leading-relaxed">
-                  读取公开仓库的 issue、标签与里程碑；代表你发布、编辑、关闭 issue 与评论。
-                  仓库拥有者与协作者（含 triage / maintain）凭此进入管理面板。
+                  <template v-if="authTab === 'qq'">
+                    QQ 号是一串唯一的数字，只有它才能匹配到对应的头像与昵称。登录后也可以进入个人中心切换头像，或自定义一个昵称。
+                  </template>
+                  <template v-else>
+                    读取公开仓库的 issue、标签与里程碑；代表你发布、编辑、关闭 issue 与评论。
+                    仓库拥有者与协作者（含 triage / maintain）凭此进入管理面板。
+                  </template>
                 </p>
               </div>
+              <!-- 两张卡各挂一个徽章：QQ 那张讲的是规则而不是权限，用「要求」区分 -->
               <Badge
                 variant="outline"
                 class="bg-background border-foreground/15 shrink-0 rounded-full px-2 py-0 text-[10px] font-normal"
               >
-                必需
+                {{ authTab === 'qq' ? '要求' : '必需' }}
               </Badge>
             </div>
 
@@ -491,9 +522,15 @@ onBeforeUnmount(resetFlow)
           </div>
 
           <p class="bg-background text-muted-foreground border-foreground/10 border-t px-3 py-2.5 text-[11px] leading-relaxed">
-            GitHub 没有「只能操作 issue」的独立权限位，存储库权限同时也包含公开仓库代码的写权限。
-            本站不调用任何代码写入接口；凭据只保存在这台设备的浏览器里，可随时在
-            GitHub 的 Settings → Applications 中撤销。
+            <template v-if="authTab === 'qq'">
+              验证码只用于证明这个邮箱确实属于你，站点不会读取你的邮箱密码，也不会向你索取 QQ
+              账号或密码。登录状态仅保存在这台设备的浏览器里，换一台设备需要重新验证。
+            </template>
+            <template v-else>
+              GitHub 没有「只能操作 issue」的独立权限位，存储库权限同时也包含公开仓库代码的写权限。
+              本站不调用任何代码写入接口；凭据只保存在这台设备的浏览器里，可随时在
+              GitHub 的 Settings → Applications 中撤销。
+            </template>
           </p>
         </div>
           </div>
@@ -650,6 +687,9 @@ onBeforeUnmount(resetFlow)
                       v-model="qqEmail"
                       placeholder="12345678@qq.com"
                       class="flex-1"
+                      inputmode="email"
+                      autocomplete="email"
+                      @input="qqError = ''"
                       @keyup.enter="sendQqCode"
                     />
                     <Button
@@ -809,7 +849,7 @@ onBeforeUnmount(resetFlow)
     <!-- 退出登录二次确认 -->
     <AlertDialog v-model:open="logoutConfirmOpen">
       <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
-        <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+        <div class="flex flex-col items-center px-7 pt-5 pb-4 text-center">
           <div class="flex items-center gap-3">
             <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
               <IconLogOut class="size-4" />

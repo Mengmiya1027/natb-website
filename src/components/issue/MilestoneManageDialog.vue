@@ -7,6 +7,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
+import { parseDate } from '@internationalized/date'
 
 import { githubApi, githubWriteApi } from '@/api/github'
 
@@ -15,6 +16,8 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,6 +73,21 @@ watch(formOpen, (open) => {
 onBeforeUnmount(() => window.clearTimeout(unmountTimer))
 const originalNumber = ref(null)
 const form = ref({ title: '', description: '', due: '' })
+
+/**
+ * 原生的 <input type="date"> 由浏览器渲染，Edge 下是系统控件（浅灰底 + 自绘日历图标），
+ * 在深色主题里反差刺眼、与周边的 shadcn 输入框不是一个语言。
+ * 换成官方 Popover + Calendar：触发器用 Button，面板用 shadcn 的日历。
+ */
+const dueDate = computed({
+  get: () => (form.value.due ? parseDate(form.value.due) : undefined),
+  set: (v) => {
+    form.value.due = v ? v.toString() : ''
+  },
+})
+
+/** 选完一天就收起面板，不然它会一直挂在那儿挡住下面的描述 */
+const duePickerOpen = ref(false)
 
 const deleteTarget = ref(null)
 const deleteOpen = computed({
@@ -327,7 +345,40 @@ async function confirmDelete() {
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="milestone-due">截止日期</Label>
-            <Input id="milestone-due" v-model="form.due" type="date" />
+            <!-- 清除按钮放在触发器右侧而不是面板里：面板矮 44px 才装得进这个对话框 -->
+            <div class="flex gap-1.5">
+              <Popover v-model:open="duePickerOpen">
+                <PopoverTrigger as-child>
+                  <Button
+                    id="milestone-due"
+                    variant="outline"
+                    class="w-full min-w-0 flex-1 justify-start gap-2 font-normal"
+                    :class="!form.due && 'text-muted-foreground'"
+                  >
+                    <IconCalendar class="size-3.5 shrink-0" />
+                    <span class="truncate">{{ form.due || '选择日期' }}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent class="w-auto p-0" align="end">
+                  <Calendar
+                    v-model="dueDate"
+                    locale="zh-CN"
+                    :week-starts-on="1"
+                    class="p-2 [&_[data-slot=calendar-grid-row]]:table-row"
+                    @update:model-value="duePickerOpen = false"
+                  />
+                </PopoverContent>
+              </Popover>
+              <Button
+                v-if="form.due"
+                variant="outline"
+                class="size-9 shrink-0"
+                title="清除日期"
+                @click="form.due = ''"
+              >
+                <IconX class="size-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -361,7 +412,7 @@ async function confirmDelete() {
     <!-- 删除二次确认 -->
     <AlertDialog v-model:open="deleteOpen">
       <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
-        <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+        <div class="flex flex-col items-center px-7 pt-5 pb-4 text-center">
           <div class="flex items-center gap-3">
             <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
               <IconTrash2 class="size-4" />

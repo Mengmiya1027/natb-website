@@ -249,7 +249,7 @@ function requestReply() {
               <IconTrash2 class="size-3.5" />
             </button>
             <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
-              <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+              <div class="flex flex-col items-center px-7 pt-5 pb-4 text-center">
                 <div class="flex items-center gap-3">
                   <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
                     <IconTrash2 class="size-4" />

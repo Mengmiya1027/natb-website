@@ -102,6 +102,16 @@ function mailDomainAllowed(email) {
   return QQ_MAIL_DOMAINS.includes(email.slice(at + 1))
 }
 
+/**
+ * @ 前面必须是纯数字 QQ 号（5–11 位）。
+ * 发码前挡住 abc@qq.com 这类本地段：QQ 信箱只有号码，非数字前缀根本收不到信。
+ */
+function mailPrefixAllowed(email) {
+  const at = email.lastIndexOf('@')
+  if (at < 1) return false
+  return /^\d{5,11}$/.test(email.slice(0, at))
+}
+
 /** 身份标识：邮箱哈希前 16 位，服务端也不保存邮箱原文以外的关联 */
 async function subjectOf(env, email) {
   return (await sha256Hex(email + '|' + (env.SESSION_SECRET || ''))).slice(0, 16)
@@ -1169,6 +1179,14 @@ async function handleAuth(env, request, url, cors) {
     const email = normalizeEmail(body && body.email)
     if (!email || !mailDomainAllowed(email)) {
       return json({ error: 'invalid_email', message: '只支持 QQ 邮箱（@qq.com / @foxmail.com）' }, 400, origin, env)
+    }
+    if (!mailPrefixAllowed(email)) {
+      return json(
+        { error: 'invalid_prefix', message: 'QQ 邮箱的 @ 前面只能填数字 QQ 号，例如 12345678@qq.com' },
+        400,
+        origin,
+        env
+      )
     }
     if (!env.NATB_KV) return json({ error: 'kv_not_bound', message: 'Worker 还没绑定 NATB_KV' }, 500, origin, env)
 

@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import ColorPicker from '@/components/issue/ColorPicker.vue'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -131,10 +133,8 @@ function cancelForm() {
   originalName.value = ''
 }
 
-function onColorInput(event) {
-  const hex = normalizeColor(event.target.value)
-  if (hex) form.value.color = hex
-}
+/** 取色面板的开合；选中色块后自动收起，与日期选择器同一套交互 */
+const colorOpen = ref(false)
 
 async function submit() {
   if (saving.value) return
@@ -296,16 +296,25 @@ async function confirmDelete() {
 
           <div class="flex flex-col gap-1.5">
             <Label for="label-color">颜色</Label>
-            <div class="flex items-center gap-2">
-              <input
-                id="label-color"
-                type="color"
-                class="size-9 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
-                :value="'#' + form.color"
-                @input="onColorInput"
-              />
-              <Input v-model="form.color" class="font-mono" maxlength="7" placeholder="d73a4a" />
-            </div>
+            <!-- 原生 input[type=color] 由浏览器自绘，Edge 下是系统取色器，与周边控件不同语言 -->
+            <Popover v-model:open="colorOpen">
+              <PopoverTrigger as-child>
+                <Button
+                  id="label-color"
+                  variant="outline"
+                  class="w-full justify-start gap-2 pl-[7px] font-normal"
+                >
+                  <span
+                    class="border-border size-6 shrink-0 rounded-[11.5px] border [corner-shape:squircle]"
+                    :style="{ backgroundColor: '#' + form.color }"
+                  />
+                  <span class="font-mono text-sm">#{{ form.color }}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent class="w-auto p-3" align="start">
+                <ColorPicker v-model="form.color" />
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 
@@ -315,7 +324,7 @@ async function confirmDelete() {
             v-for="color in PRESET_COLORS"
             :key="color"
             type="button"
-            class="size-6 rounded-md border transition hover:scale-110"
+            class="size-6 rounded-[11.5px] border transition [corner-shape:squircle] hover:scale-110"
             :class="form.color === color ? 'border-ring ring-2 ring-ring/40' : 'border-border'"
             :style="{ backgroundColor: '#' + color }"
             :title="'#' + color"
@@ -354,7 +363,7 @@ async function confirmDelete() {
     <!-- 删除二次确认 -->
     <AlertDialog v-model:open="deleteOpen">
       <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
-        <div class="flex flex-col items-center px-7 pt-7 pb-4 text-center">
+        <div class="flex flex-col items-center px-7 pt-5 pb-4 text-center">
           <div class="flex items-center gap-3">
             <div class="bg-muted grid size-9 shrink-0 place-items-center rounded-[10px]">
               <IconTrash2 class="size-4" />

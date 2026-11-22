@@ -63,8 +63,21 @@ const qqCooldown = ref(0)
 const qqAccount = ref(null)
 let qqTimer = 0
 
-const qqEmailValid = computed(() => /^[^\s@]+@(qq|foxmail)\.com$/i.test(qqEmail.value.trim()))
-const qqCanSend = computed(() => qqEmailValid.value && qqCooldown.value === 0 && !qqSending.value)
+/** 与登录面板同一套规则：@ 前面只认 5–11 位纯数字 QQ 号，同样只在发码时校验 */
+const QQ_PREFIX_RE = /^\d{5,11}$/
+
+const qqEmailIssue = computed(() => {
+  const v = qqEmail.value.trim()
+  if (!v) return '请先填写 QQ 邮箱'
+  const at = v.indexOf('@')
+  if (at < 0) return '邮箱要写全，例如 12345678@qq.com'
+  if (!QQ_PREFIX_RE.test(v.slice(0, at))) return '为获取对应头像、昵称，仅支持纯数字 QQ 邮箱'
+  if (!/^(qq|foxmail)\.com$/.test(v.slice(at + 1))) return '只支持 @qq.com 与 @foxmail.com'
+  return ''
+})
+
+const qqEmailValid = computed(() => !qqEmailIssue.value)
+const qqCanSend = computed(() => qqCooldown.value === 0 && !qqSending.value)
 const qqCanVerify = computed(
   () => qqEmailValid.value && /^\d{6}$/.test(qqCode.value.trim()) && !busy.value,
 )
@@ -192,6 +205,12 @@ function startQqCooldown() {
 
 async function sendQqMail() {
   if (!qqCanSend.value) return
+  // 点击时先校验，非数字前缀不发请求
+  const issue = qqEmailIssue.value
+  if (issue) {
+    error.value = issue
+    return
+  }
   qqSending.value = true
   error.value = ''
   try {
@@ -300,12 +319,22 @@ async function confirmBind() {
           <div class="flex flex-col gap-1.5">
             <Label for="bind-email" class="text-xs text-muted-foreground">QQ 邮箱</Label>
             <div class="flex gap-2">
-              <Input id="bind-email" v-model="qqEmail" placeholder="12345678@qq.com" class="flex-1" />
+              <Input
+                id="bind-email"
+                v-model="qqEmail"
+                placeholder="12345678@qq.com"
+                class="flex-1"
+                inputmode="email"
+                autocomplete="email"
+                @input="error = ''"
+              />
               <Button class="shrink-0" :disabled="!qqCanSend" @click="sendQqMail">
                 {{ qqSending ? '发送中…' : qqCooldown > 0 ? qqCooldown + 's' : '发验证码' }}
               </Button>
             </div>
-            <p class="text-muted-foreground text-[11px]">只支持 @qq.com 与 @foxmail.com。</p>
+            <p class="text-muted-foreground text-[11px]">
+              只支持 @qq.com 与 @foxmail.com。
+            </p>
           </div>
 
           <div class="flex flex-col gap-1.5">
