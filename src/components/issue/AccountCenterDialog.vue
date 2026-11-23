@@ -234,7 +234,7 @@ function logout() {
                 v-if="qqAvatarUrl && qqAvatarOk"
                 :src="qqAvatarUrl"
                 alt=""
-                class="border-border size-12 shrink-0 rounded-full border object-cover"
+                class="border-border bg-muted size-12 shrink-0 rounded-full border object-cover"
                 @error="qqAvatarOk = false"
               />
               <div

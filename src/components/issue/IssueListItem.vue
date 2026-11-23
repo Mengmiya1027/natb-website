@@ -59,6 +59,10 @@ watch(
   { immediate: true },
 )
 const initial = computed(() => authorName.value.slice(0, 1).toUpperCase())
+/** 档案还在路上：别先显示「QQ 用户」再跳成真名 */
+const authorLoading = computed(
+  () => Boolean(qqMarker.value) && !store.hasProfile(qqMarker.value.sub),
+)
 
 function relativeTime(input) {
   if (!input) return ''
@@ -110,7 +114,12 @@ async function copyLink() {
       <ItemDescription class="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span class="font-medium tabular-nums">#{{ issue.number }}</span>
         <span class="inline-flex items-center gap-1.5">
-          <Avatar class="size-4">
+          <span
+            v-if="authorLoading"
+            class="bg-muted size-4 shrink-0 animate-pulse rounded-full"
+            aria-hidden="true"
+          />
+          <Avatar v-else class="size-4">
             <AvatarImage
               v-if="author.avatar_url && !qqMarker"
               :src="author.avatar_url"
@@ -118,7 +127,12 @@ async function copyLink() {
             />
             <AvatarFallback class="text-[8px]">{{ initial }}</AvatarFallback>
           </Avatar>
-          {{ authorName }}
+          <span
+            v-if="authorLoading"
+            class="bg-muted inline-block h-2.5 w-14 animate-pulse rounded"
+            aria-label="正在加载作者"
+          />
+          <template v-else>{{ authorName }}</template>
         </span>
         <span class="inline-flex items-center gap-1">
           <IconMessageSquare class="size-3.5" />

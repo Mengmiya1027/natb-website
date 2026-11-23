@@ -97,6 +97,7 @@ const ERROR_TEXT = {
   invalid_code: '验证码不对，请重新输入',
   cool_down: '请稍等一会儿再获取验证码',
   not_linked: '这个账号还没有完成绑定',
+  locked: '这个对话已被锁定，无法继续评论',
 }
 
 export function errorText(data, fallback = '请求失败') {

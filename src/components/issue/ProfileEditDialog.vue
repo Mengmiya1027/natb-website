@@ -115,7 +115,7 @@ async function save() {
                 v-if="qqAvatar && qqAvatarOk"
                 :src="qqAvatar"
                 alt=""
-                class="size-9 shrink-0 rounded-full border object-cover"
+                class="bg-muted size-9 shrink-0 rounded-full border object-cover"
                 @error="qqAvatarOk = false"
               />
               <span v-else class="bg-muted grid size-9 shrink-0 place-items-center rounded-full">

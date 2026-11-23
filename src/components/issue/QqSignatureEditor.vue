@@ -161,7 +161,8 @@ async function applyManual() {
 
 <template>
   <!-- 非 QQ 用户发的内容：这一栏只留一句说明，不能改 -->
-  <div v-if="!fromQq" class="text-muted-foreground text-xs">
+  <!-- 这一行没有按钮那么高，用 flex 居中才不会贴着操作栏顶端 -->
+  <div v-if="!fromQq" class="text-muted-foreground flex items-center text-xs leading-none">
     本评论非由 QQ 用户发送，不支持修改署名
   </div>
 
@@ -173,7 +174,7 @@ async function applyManual() {
           v-if="currentAvatar && !broken[sub]"
           :src="currentAvatar"
           alt=""
-          class="size-5 shrink-0 rounded-full border object-cover"
+          class="bg-muted size-5 shrink-0 rounded-full border object-cover"
           @error="markBroken(sub)"
         />
         <span

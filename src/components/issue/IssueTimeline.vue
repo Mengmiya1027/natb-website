@@ -38,6 +38,8 @@ import IconUserPlus from '~icons/lucide/user-plus'
 const props = defineProps({
   events: { type: Array, default: () => [] },
   comments: { type: Array, default: () => [] },
+  /** 对话是否已锁定：锁定后非管理连自己的评论也不能改、不能删 */
+  locked: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['open', 'edit', 'delete', 'reply', 'blocked'])
@@ -289,6 +291,9 @@ const items = computed(() => {
       at: timestamp(comment.created_at),
       order: 0,
       comment,
+      // 评论也要有自己的标记图标：之前这项没给 icon，marker 就是个空圆圈
+      icon: IconMessageSquare,
+      tone: 'comment',
     })
   }
 
@@ -331,6 +336,7 @@ const items = computed(() => {
             v-if="item.kind === 'comment'"
             :comment="item.comment"
             :events="events"
+            :locked="locked"
             @edit="forwardEdit"
             @delete="forwardDelete"
             @reply="forwardReply"
@@ -433,6 +439,11 @@ const items = computed(() => {
 .natb-timeline__marker.is-success {
   color: var(--natb-primary);
   border-color: color-mix(in oklch, var(--natb-primary) 35%, var(--natb-border));
+}
+
+.natb-timeline__marker.is-comment {
+  color: var(--natb-muted-foreground);
+  background: var(--natb-card);
 }
 
 .natb-timeline__marker.is-accent {

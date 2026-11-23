@@ -32,6 +32,7 @@ import IconCircleCheck from '~icons/lucide/circle-check'
 import IconCircleSlash from '~icons/lucide/circle-slash'
 import IconRotateCcw from '~icons/lucide/rotate-ccw'
 import IconLock from '~icons/lucide/lock'
+import IconRefresh from '~icons/lucide/refresh-cw'
 import IconUnlock from '~icons/lucide/unlock'
 import IconBell from '~icons/lucide/bell'
 import IconBellOff from '~icons/lucide/bell-off'
@@ -45,9 +46,10 @@ import IconLoader2 from '~icons/lucide/loader-2'
 
 const props = defineProps({
   issue: { type: Object, default: () => ({}) },
+  /** 宿主的刷新进行中：按钮跟着转，避免连点 */
+  refreshing: { type: Boolean, default: false },
 })
-
-const emit = defineEmits(['changed', 'blocked'])
+const emit = defineEmits(['changed', 'blocked', 'refresh'])
 
 const store = useIssueStore()
 
@@ -91,8 +93,14 @@ function requireWritable() {
   return false
 }
 
-/** 统一的操作包装：串行、成功 toast + changed、失败原样提示 */
-async function run(key, action, successMessage) {
+/**
+ * 统一的操作包装：串行、成功 toast + changed、失败原样提示。
+ *
+ * patch 是这次操作预期改掉的那几个字段，随 changed 一起交出去：GitHub 写完
+ * 立刻回读并不保证拿到新值（锁定尤其明显），宿主那边先按 patch 落到本地，
+ * 再拿接口结果校准，才不会有「点完什么都没变，刷新一下才对」。
+ */
+async function run(key, action, successMessage, patch) {
   if (!requireWritable()) return
   if (busy.value) return
   if (!number.value) {
@@ -103,7 +111,7 @@ async function run(key, action, successMessage) {
   try {
     await action()
     toast.success(successMessage)
-    emit('changed')
+    emit('changed', patch)
   } catch (err) {
     toast.error(err?.message || String(err))
   } finally {
@@ -116,11 +124,15 @@ function closeIssue(reason) {
     'close',
     () => githubWriteApi.closeIssue(number.value, reason),
     reason === 'completed' ? 'Issue 已关闭' : 'Issue 已关闭（未计划）',
+    { state: 'closed', state_reason: reason },
   )
 }
 
 function reopenIssue() {
-  run('reopen', () => githubWriteApi.reopenIssue(number.value), 'Issue 已重开')
+  run('reopen', () => githubWriteApi.reopenIssue(number.value), 'Issue 已重开', {
+    state: 'open',
+    state_reason: null,
+  })
 }
 
 function toggleLock() {
@@ -129,6 +141,7 @@ function toggleLock() {
     'lock',
     () => (locked ? githubWriteApi.unlockIssue(number.value) : githubWriteApi.lockIssue(number.value)),
     locked ? '会话已解锁' : '会话已锁定',
+    { locked: !locked },
   )
 }
 
@@ -138,6 +151,7 @@ function togglePin() {
     'pin',
     () => (pinned ? githubWriteApi.unpinIssue(number.value) : githubWriteApi.pinIssue(number.value)),
     pinned ? '已取消置顶' : 'Issue 已置顶',
+    { pinned: !pinned },
   )
 }
 
@@ -254,6 +268,21 @@ watch(
   <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
     <p class="text-xs font-medium text-muted-foreground">操作</p>
 
+    <!-- 刷新：别人在别处改过这条单时，一键把正文、评论、时间线与列表重拉一遍 -->
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      class="w-full justify-start gap-2"
+      :disabled="refreshing"
+      @click="emit('refresh')"
+    >
+      <!-- 与「关闭 Issue」同款：转圈用 loader-2，文案不动 -->
+      <IconLoader2 v-if="refreshing" class="size-4 animate-spin" />
+      <IconRefresh v-else class="size-4 text-muted-foreground" />
+      <span>刷新页面</span>
+    </Button>
+
     <DropdownMenu v-if="!isClosed && canOperate">
       <DropdownMenuTrigger as-child>
         <Button type="button" variant="outline" size="sm" class="w-full justify-start gap-2" :disabled="Boolean(busy)">
@@ -263,11 +292,13 @@ watch(
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" class="w-56">
-        <DropdownMenuItem @select="closeIssue('completed')">
+        <!-- Button 的基类带 font-medium，DropdownMenuItem 只有 text-sm；
+             两个菜单项补上同样的字重，展开时看起来才是同一套字 -->
+        <DropdownMenuItem class="font-medium" @select="closeIssue('completed')">
           <IconCircleCheck class="size-4" />
           <span>关闭为已完成</span>
         </DropdownMenuItem>
-        <DropdownMenuItem @select="closeIssue('not_planned')">
+        <DropdownMenuItem class="font-medium" @select="closeIssue('not_planned')">
           <IconCircleSlash class="size-4" />
           <span>关闭为未计划</span>
         </DropdownMenuItem>

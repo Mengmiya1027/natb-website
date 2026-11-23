@@ -14,7 +14,8 @@ import { buildQqSignature, parseQqMarker, stripQqMarker } from '@/utils/qqMarker
 import QqSignatureEditor from '@/components/issue/QqSignatureEditor.vue'
 
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import MarkdownEditor from '@/components/issue/MarkdownEditor.vue'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +25,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 
 import IconPencil from '~icons/lucide/pencil'
@@ -34,6 +34,8 @@ import IconReply from '~icons/lucide/reply'
 const props = defineProps({
   comment: { type: Object, default: () => ({}) },
   events: { type: Array, default: () => [] },
+  /** 对话已锁定：非管理连自己的评论也不能改、不能删（GitHub 同款） */
+  locked: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['edit', 'delete', 'reply', 'blocked'])
@@ -45,19 +47,31 @@ const store = useIssueStore()
 const author = computed(() => props.comment?.user || {})
 /** QQ 用户代发的评论，作者显示成「QQ 用户 xxx」，且不再链接到机器人主页 */
 const qqMarker = computed(() => parseQqMarker(props.comment?.body))
+const qqProfile = computed(() => (qqMarker.value ? store.profileOf(qqMarker.value.sub) : null))
+/* 名字必须查档案，不能读 marker 里的 nick：marker 现在只存 sub，
+ * 任何一条被编辑过的评论，重拼之后里面的 nick 就没了 */
 const login = computed(() =>
   qqMarker.value
-    ? 'QQ 用户 ' + (qqMarker.value.nick || qqMarker.value.sub.slice(0, 4))
+    ? qqProfile.value?.nick || 'QQ 用户 ' + qqMarker.value.sub.slice(0, 4)
     : author.value.login || 'ghost',
 )
-/* QQ 用户没有 GitHub 头像：选了 QQ 头像的走中转代理（页面源码里看不到 QQ 号），
- * 选字母头像的留空，由 AvatarFallback 显示首字母 */
-const qqProfile = computed(() => (qqMarker.value ? store.profileOf(qqMarker.value.sub) : null))
 const avatarUrl = computed(() => {
   if (!qqMarker.value) return author.value.avatar_url || ''
   return qqProfile.value?.avatar === 'qq' ? store.avatarFor(qqMarker.value.sub) : ''
 })
 const initial = computed(() => String(login.value).slice(0, 1).toUpperCase())
+/** 档案还在路上：名字与头像先占位，别先闪一个「QQ 用户 ____」再跳成真名 */
+const profileLoading = computed(
+  () => Boolean(qqMarker.value) && !store.hasProfile(qqMarker.value.sub),
+)
+/** 图片自身还在下载 */
+const avatarReady = ref(false)
+watch(
+  () => avatarUrl.value,
+  () => {
+    avatarReady.value = false
+  },
+)
 /** 换了头像之后旧地址可能已失效，加载失败就退回首字母 */
 const avatarBroken = ref(false)
 watch(avatarUrl, () => {
@@ -93,11 +107,19 @@ const qqOwnComment = computed(
 )
 
 /**
- * 作者本人能改自己的；管理员额外能改别人发上来的 QQ 评论（用途只有一个：订正署名行）。
- * 中转那边 /qq/comment/:id 的 PATCH 也是这么判的（editorIsAdmin 放行非作者）。
+ * 谁能进编辑态：作者本人（改自己的正文），或管理员（改任何 QQ 评论的正文与署名）。
+ *
+ * 两条线要分清楚：
+ *   正文   → 作者自己能改，管理员也能改
+ *   署名   → 只有管理员能改；作者保存时前端不会带新 sub，后端也强制沿用原 owner
+ * 中转那边 /qq/comment/:id 的 PATCH 与这里同口径（isAdmin 放行非作者，非管理员一律用原 sub）。
  * GitHub 的评论不在此列——GitHub 网页端本身就只允许作者编辑，这里不越权。
  * 被封禁 / 未登录时按钮仍然显示，点下去由 guardWritable() 直接弹封禁说明。
  */
+/* 锁定之后，GitHub 只允许「有写权限的人」增删改评论 —— 作者本人也不行。
+ * 但按钮还是照常显示：让它出现在原位、只是点不动，比整排按钮凭空消失更容易理解。
+ * lockedForMe 只负责把按钮置灰并在悬浮时说明原因，不参与可见性判断。 */
+const lockedForMe = computed(() => props.locked && !store.canManage)
 const canEdit = computed(() => {
   if (isAuthor.value || qqOwnComment.value) return true
   return Boolean(store.canManage && qqMarker.value)
@@ -164,7 +186,7 @@ const editing = ref(false)
 const draft = ref('')
 /** 署名行归属；只有管理员能改 */
 const sigSub = ref('')
-const textareaRef = ref(null)
+const editorWrap = ref(null)
 const deleteOpen = ref(false)
 
 /* 不可写（未登录 / 被封禁）时直接上报，不要先让用户走一遍编辑或确认流程 */
@@ -175,12 +197,14 @@ function guardWritable() {
 }
 
 function startEdit() {
+  if (lockedForMe.value) return
   if (!guardWritable()) return
   draft.value = stripQqMarker(props.comment?.body || '')
   sigSub.value = qqMarker.value?.sub || ''
   editing.value = true
   nextTick(() => {
-    const el = textareaRef.value?.$el || textareaRef.value
+    // 光标放到末尾：编辑器内部有自己的 textarea，从外面只能这样找
+    const el = editorWrap.value?.querySelector('textarea')
     if (el && typeof el.focus === 'function') {
       el.focus()
       el.setSelectionRange?.(el.value.length, el.value.length)
@@ -211,6 +235,7 @@ function saveEdit() {
 
 /** 点垃圾桶先过一遍可写检查：被封的人不该看到「删除这条评论？」再被拒绝 */
 function askDelete() {
+  if (lockedForMe.value) return
   if (!guardWritable()) return
   deleteOpen.value = true
 }
@@ -230,11 +255,18 @@ function requestReply() {
     <header class="natb-comment__head">
       <!-- 显式互斥：头像地址从「有」变成「无」时 reka-ui 的加载状态会停在
            loaded，AvatarFallback 不出来，会剩一个空白圆 -->
+      <span
+        v-if="profileLoading"
+        class="natb-comment__avatar bg-muted size-9 shrink-0 animate-pulse rounded-full"
+        aria-hidden="true"
+      />
       <img
-        v-if="avatarUrl && !avatarBroken"
+        v-else-if="avatarUrl && !avatarBroken"
         :src="avatarUrl"
         :alt="login"
-        class="border-border natb-comment__avatar size-9 shrink-0 rounded-full border object-cover"
+        class="border-border natb-comment__avatar size-9 shrink-0 rounded-full border object-cover transition-opacity duration-200"
+        :class="avatarReady ? 'opacity-100' : 'bg-muted opacity-0'"
+        @load="avatarReady = true"
         @error="avatarBroken = true"
       />
       <span
@@ -245,7 +277,13 @@ function requestReply() {
       </span>
 
       <div class="natb-comment__meta">
+        <span
+          v-if="profileLoading"
+          class="bg-muted inline-block h-3 w-16 animate-pulse rounded"
+          aria-label="正在加载作者"
+        />
         <a
+          v-else
           class="natb-comment__author"
           :href="profileUrl"
           target="_blank"
@@ -261,36 +299,62 @@ function requestReply() {
       </div>
 
       <div v-if="!editing" class="natb-comment__actions">
-        <button
-          v-if="store.isLoggedIn"
-          type="button"
-          class="natb-comment__action"
-          title="引用回复"
-          @click="requestReply"
-        >
-          <IconReply class="size-3.5" />
-        </button>
+        <!-- 原生 title 要等一秒才冒出来，样式也没法统一，统一换成 Tooltip -->
+        <TooltipProvider :delay-duration="300">
+          <Tooltip v-if="store.isLoggedIn">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="natb-comment__action"
+                aria-label="引用回复"
+                @click="requestReply"
+              >
+                <IconReply class="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>引用回复</TooltipContent>
+          </Tooltip>
 
-        <button
-          v-if="canEdit"
-          type="button"
-          class="natb-comment__action"
-          title="编辑评论"
-          @click="startEdit"
-        >
-          <IconPencil class="size-3.5" />
-        </button>
+          <Tooltip v-if="canEdit">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="natb-comment__action"
+                :class="{ 'is-locked': lockedForMe }"
+                :aria-disabled="lockedForMe"
+                :aria-label="lockedForMe ? '对话已锁定' : '编辑评论'"
+                @click="startEdit"
+              >
+                <IconPencil class="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ lockedForMe ? '这个对话已被锁定，无法编辑评论' : '编辑评论' }}
+            </TooltipContent>
+          </Tooltip>
 
-        <template v-if="canDelete">
-          <AlertDialog v-model:open="deleteOpen">
-            <button
-              type="button"
-              class="natb-comment__action natb-comment__action--danger"
-              title="删除评论"
-              @click="askDelete"
-            >
-              <IconTrash2 class="size-3.5" />
-            </button>
+          <Tooltip v-if="canDelete">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="natb-comment__action natb-comment__action--danger"
+                :class="{ 'is-locked': lockedForMe }"
+                :aria-disabled="lockedForMe"
+                :aria-label="lockedForMe ? '对话已锁定' : '删除评论'"
+                @click="askDelete"
+              >
+                <IconTrash2 class="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ lockedForMe ? '这个对话已被锁定，无法删除评论' : '删除评论' }}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      <template v-if="canDelete">
+        <AlertDialog v-model:open="deleteOpen">
             <AlertDialogContent class="w-[min(400px,92vw)] gap-0 overflow-hidden p-0 sm:max-w-none sm:rounded-xl">
               <div class="flex flex-col items-center px-7 pt-5 pb-4 text-center">
                 <div class="flex items-center gap-3">
@@ -324,8 +388,7 @@ function requestReply() {
               </div>
             </AlertDialogContent>
           </AlertDialog>
-        </template>
-      </div>
+      </template>
     </header>
 
     <div v-if="!editing" class="natb-comment__body">
@@ -333,13 +396,9 @@ function requestReply() {
       <p v-else class="natb-comment__empty">（这条评论没有正文）</p>
     </div>
 
-    <div v-else class="natb-comment__editor">
-      <Textarea
-        ref="textareaRef"
-        v-model="draft"
-        class="min-h-28 text-sm"
-        placeholder="修改这条评论…"
-      />
+    <div v-else ref="editorWrap" class="natb-comment__editor">
+      <!-- 与正文、新建评论用同一个编辑器：工具栏 + 编辑/预览双 Tab -->
+      <MarkdownEditor v-model="draft" min-height="120px" placeholder="修改这条评论…" />
       <div class="natb-comment__editor-actions">
         <div v-if="store.canManage" class="mr-auto">
           <QqSignatureEditor
@@ -366,7 +425,7 @@ function requestReply() {
 
 .natb-comment__head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--natb-border);
@@ -385,7 +444,6 @@ function requestReply() {
   min-width: 0;
   font-size: 12.5px;
   line-height: 1.5;
-  padding-top: 1px;
 }
 
 .natb-comment__author {
@@ -436,6 +494,18 @@ function requestReply() {
   transition: background 160ms cubic-bezier(0.32, 0.72, 0, 1), color 160ms;
 }
 
+/* 锁定后按钮留在原位但点不动：用 aria-disabled 而不是 disabled，
+   否则原生 disabled 不派发鼠标事件，悬浮提示就出不来了。 */
+.natb-comment__action.is-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.natb-comment__action.is-locked:hover {
+  background: transparent;
+  color: var(--natb-muted-foreground);
+}
+
 .natb-comment__action:hover {
   background: color-mix(in oklch, var(--natb-accent) 80%, transparent);
   color: var(--natb-accent-foreground);
@@ -465,6 +535,7 @@ function requestReply() {
 
 .natb-comment__editor-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }

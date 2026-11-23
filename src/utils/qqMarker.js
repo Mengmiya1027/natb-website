@@ -35,8 +35,8 @@ export function buildQqSignature(sub) {
 }
 
 /** 作者显示名：QQ 用户优先，否则退回 GitHub login */
-export function authorLabel(user, body) {
+export function authorLabel(user, body, nick) {
   const marker = parseQqMarker(body)
-  if (marker) return 'QQ 用户 ' + (marker.nick || marker.sub.slice(0, 4))
+  if (marker) return 'QQ 用户 ' + (nick || marker.sub.slice(0, 4))
   return (user && user.login) || 'ghost'
 }

@@ -449,6 +449,24 @@ const SIGNATURE_RE =
   /\s*(?:<sub>This message was sent by QQ user · #[0-9a-f]{6,32}<\/sub>|<sub>QQ 用户[\s\S]*?通过 NATB 官网提交<\/sub>)\s*/g
 const MARKER_TAIL_RE = /\s*<!--\s*natb:qq\s+\{[\s\S]*?\}\s*-->\s*$/g
 
+/** 评论所属的 issue 编号：api 给的 issue_url 形如 .../issues/12 */
+function issueNumberOfComment(comment) {
+  const match = String((comment && comment.issue_url) || '').match(/\/issues\/(\d+)$/)
+  return match ? Number(match[1]) : 0
+}
+
+/** 这条评论所在的对话是否被锁定（锁定语义与 GitHub 一致：非协作者不能增、删、改） */
+async function commentConversationLocked(env, comment) {
+  const number = issueNumberOfComment(comment)
+  if (!number) return false
+  try {
+    const issue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
+    return Boolean(issue && issue.locked)
+  } catch {
+    return false
+  }
+}
+
 /** 从正文里取 marker 的 sub，取不到返回空串 */
 function markerSubOf(text) {
   const match = String(text || '').match(/<!--\s*natb:qq\s+(\{[\s\S]*?\})\s*-->/)
@@ -1674,6 +1692,11 @@ async function handleCommentEdit(env, request, url, match) {
     return json({ error: 'forbidden', message: '只能编辑自己发的评论' }, 403, origin, env)
   }
 
+  // 锁定之后非管理员连自己的评论也不许改（GitHub 同款）
+  if ((await commentConversationLocked(env, comment)) && !isAdmin) {
+    return json({ error: 'locked', message: '这个对话已被锁定，无法编辑评论' }, 403, origin, env)
+  }
+
   const submittedSub = markerSubOf(text)
   const finalSub = isAdmin && submittedSub ? submittedSub : owner || classSub || submittedSub
   const updated = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, {
@@ -1737,6 +1760,17 @@ async function handleQq(env, request, url, cors) {
     const text = String((body && body.body) || '').slice(0, 10000)
     if (!text.trim()) return json({ error: 'body_required' }, 400, origin, env)
 
+    /*
+     * 锁定的对话要真的锁住。
+     * GitHub 自己只拦「没有写权限的人」，本站代发用的是 App 的 installation token，
+     * 它在仓库里是协作者 —— 也就是说只靠 GitHub 那道闸，QQ 用户永远能绕过。
+     * 所以这里自己判一次：锁定之后只有管理员还能说话（与 GitHub 网页端一致）。
+     */
+    const lockedIssue = await githubWrite(env, '/repos/' + QQ_REPO + '/issues/' + number, { method: 'GET' })
+    if (lockedIssue && lockedIssue.locked && !(await qqCallerIsAdmin(env, session.sub))) {
+      return json({ error: 'locked', message: '这个对话已被锁定，无法继续评论' }, 403, origin, env)
+    }
+
     const dayKey = 'day:comment:' + session.sub + ':' + today()
     if (Number((await env.NATB_KV.get(dayKey)) || 0) >= 30) {
       return json({ error: 'daily_limit', message: '今天评论次数已用完' }, 429, origin, env)
@@ -1797,6 +1831,10 @@ async function handleQq(env, request, url, cors) {
     }
     if (owner !== session.sub) {
       return json({ error: 'forbidden', message: '只能删除自己发的评论' }, 403, origin, env)
+    }
+    // 锁定对话后，非管理连自己的评论也不能动——这是 GitHub 自己的语义
+    if ((await commentConversationLocked(env, comment)) && !(await qqCallerIsAdmin(env, session.sub))) {
+      return json({ error: 'locked', message: '这个对话已被锁定，无法删除评论' }, 403, origin, env)
     }
     await githubWrite(env, '/repos/' + QQ_REPO + '/issues/comments/' + commentId, { method: 'DELETE' })
     return json({ ok: true }, 200, origin, env)

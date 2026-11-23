@@ -222,7 +222,7 @@ onMounted(load)
             v-else-if="avatarOf(user) && !brokenAvatars[user.sub]"
             :src="avatarOf(user)"
             alt=""
-            class="size-8 shrink-0 rounded-full object-cover"
+            class="bg-muted size-8 shrink-0 rounded-full object-cover"
             @error="markBroken(user.sub)"
           />
           <div

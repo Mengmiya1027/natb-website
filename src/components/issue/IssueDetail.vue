@@ -59,6 +59,8 @@ import IconLoader from '~icons/lucide/loader-circle'
 import IconLock from '~icons/lucide/lock'
 import IconUnlock from '~icons/lucide/lock-open'
 import IconInfo from '~icons/lucide/info'
+import IconRefresh from '~icons/lucide/refresh-cw'
+import IconLoader2 from '~icons/lucide/loader-2'
 import IconMessageSquare from '~icons/lucide/message-square'
 import IconMilestone from '~icons/lucide/milestone'
 import IconTag from '~icons/lucide/tag'
@@ -79,6 +81,8 @@ const issue = ref(null)
 const comments = ref([])
 const events = ref([])
 const loading = ref(true)
+/** 手动刷新的转圈状态：只作用于侧栏那个按钮，不跟首屏骨架共用 */
+const manualRefreshing = ref(false)
 const error = ref('')
 const replyTo = ref('')
 const savingField = ref('')
@@ -139,6 +143,14 @@ const authorLogin = computed(() =>
 const authorAvatar = computed(() => {
   if (!qqMarker.value) return author.value.avatar_url || ''
   return qqProfile.value?.avatar === 'qq' ? store.avatarFor(qqMarker.value.sub) : ''
+})
+/** 档案还在路上：作者名与头像先占位，免得先闪一个「QQ 用户 ____」再跳成真名 */
+const authorLoading = computed(
+  () => Boolean(qqMarker.value) && !store.hasProfile(qqMarker.value.sub),
+)
+const avatarReady = ref(false)
+watch(authorAvatar, () => {
+  avatarReady.value = false
 })
 /** 头像地址换来换去时可能加载失败，标记一下退回首字母，别留破图 */
 const avatarBroken = ref(false)
@@ -258,11 +270,16 @@ async function toggleOwnLock() {
   }
   if (ownLocking.value) return
   ownLocking.value = true
+  const wasLocked = Boolean(issue.value?.locked)
   try {
-    if (issue.value?.locked) await githubWriteApi.unlockIssue(issue.value.number)
+    if (wasLocked) await githubWriteApi.unlockIssue(issue.value.number)
     else await githubWriteApi.lockIssue(issue.value.number)
-    toast.success(issue.value?.locked ? '已解锁会话' : '已锁定会话')
+    // 先按结果落本地，回读拿到旧值时界面也不会退回原样
+    if (issue.value) issue.value = { ...issue.value, locked: !wasLocked }
+    toast.success(wasLocked ? '已解锁会话' : '已锁定会话')
     await load()
+    // 回读可能比写入滞后，load 覆盖完再把结果落一次，按钮才不会弹回原来的字
+    if (issue.value) issue.value = { ...issue.value, locked: !wasLocked }
     emit('changed')
   } catch (err) {
     toast.error(err?.message || '操作失败')
@@ -277,8 +294,10 @@ async function closeOwnIssue() {
   try {
     if (store.writeMode === 'qq') await qqWriteApi.closeIssue(issue.value.number)
     else await githubWriteApi.closeIssue(issue.value.number, 'completed')
+    if (issue.value) issue.value = { ...issue.value, state: 'closed' }
     toast.success('已关闭这个 issue')
     await load()
+    if (issue.value) issue.value = { ...issue.value, state: 'closed' }
     emit('changed')
   } catch (err) {
     toast.error(err?.message || String(err))
@@ -335,6 +354,22 @@ function syncSidebar(source) {
 }
 
 /* ---------------- 加载 ---------------- */
+
+/**
+ * 手动刷新：把这条 issue 的正文、评论、时间线，连同列表与统计一起重拉一遍。
+ * 自动刷新只在写操作后发生，别人在别处改了这条单时，页面自己是不会知道的。
+ */
+async function refreshIssue() {
+  if (manualRefreshing.value) return
+  manualRefreshing.value = true
+  try {
+    await load()
+    emit('changed')
+    toast.success('已刷新')
+  } finally {
+    setTimeout(() => (manualRefreshing.value = false), 300)
+  }
+}
 
 async function load() {
   loading.value = true
@@ -599,19 +634,26 @@ async function onCommentSubmitted() {
   await reloadThread()
 }
 
-async function onSidebarChanged() {
+async function onSidebarChanged(patch) {
+  /* 先把这次操作的预期结果落到本地：GitHub 写完之后立刻回读并不保证是新值
+   * （锁定尤其明显，回读还是旧的），只靠接口会让界面「点完没反应」。 */
+  if (patch && issue.value) issue.value = { ...issue.value, ...patch }
+  // 列表那边不依赖这次回读，先让它去刷新
+  emit('changed')
   try {
-    const [fresh, pinned] = await Promise.all([
-      githubApi.getIssue(props.number),
+    const [fresh, pinned, timelineData] = await Promise.all([
+      githubApi.getIssue(props.number, { noCache: true }),
       githubApi.getIssuePinned(props.number).catch(() => null),
+      // 关闭 / 重开 / 锁定都会往时间线写一条事件，只拉 issue 的话底部永远不会多出那一行
+      githubApi.listTimeline(props.number, { per_page: 100 }).catch(() => null),
     ])
     if (fresh && pinned !== null) fresh.pinned = pinned
-    issue.value = fresh
+    if (fresh) issue.value = fresh
+    if (Array.isArray(timelineData)) events.value = timelineData
     syncSidebar()
-  } catch (err) {
-    toast.error(err?.message || '刷新 issue 失败')
+  } catch {
+    // 回读失败就保留乐观值，不要把已经显对的界面又打回原样
   }
-  emit('changed')
 }
 </script>
 
@@ -705,11 +747,18 @@ async function onSidebarChanged() {
             <!-- 显式互斥，不用 AvatarImage / AvatarFallback：
                  头像地址从「有」变成「无」的那一刻，reka-ui 的加载状态会停在
                  loaded，Fallback 不肯出来，只剩一个空白圆 -->
+            <span
+              v-if="authorLoading"
+              class="bg-muted size-8 shrink-0 animate-pulse rounded-full"
+              aria-hidden="true"
+            />
             <img
-              v-if="authorAvatar && !avatarBroken"
+              v-else-if="authorAvatar && !avatarBroken"
               :src="authorAvatar"
               :alt="authorLogin"
-              class="border-border size-8 shrink-0 rounded-full border object-cover"
+              class="border-border size-8 shrink-0 rounded-full border object-cover transition-opacity duration-200"
+              :class="avatarReady ? 'opacity-100' : 'bg-muted opacity-0'"
+              @load="avatarReady = true"
               @error="avatarBroken = true"
             />
             <span
@@ -718,7 +767,12 @@ async function onSidebarChanged() {
             >
               {{ authorInitial }}
             </span>
-            <span class="natb-detail__card-author">{{ authorLogin }}</span>
+            <span
+              v-if="authorLoading"
+              class="bg-muted inline-block h-3.5 w-24 animate-pulse rounded"
+              aria-label="正在加载作者"
+            />
+            <span v-else class="natb-detail__card-author">{{ authorLogin }}</span>
             <span class="natb-detail__card-time">
               发布于
               <time :datetime="issue.created_at" :title="absoluteTime(issue.created_at)">
@@ -766,6 +820,7 @@ async function onSidebarChanged() {
           <IssueTimeline
             :events="events"
             :comments="comments"
+            :locked="Boolean(issue.locked)"
             @open="emit('open', $event)"
             @edit="onEditComment"
             @delete="onDeleteComment"
@@ -776,10 +831,16 @@ async function onSidebarChanged() {
 
         <!-- 评论框 -->
         <section ref="composerRef" class="natb-detail__composer">
+          <!-- 锁定之后只有协作者（也就是管理）还能说话，其他人给一条说明 -->
+          <div v-if="issue.locked && !store.canManage" class="natb-detail__hint">
+            <IconLock class="size-4" />
+            <span>这个对话已被锁定，只有管理员可以继续评论</span>
+          </div>
           <CommentComposer
-            v-if="store.canWrite"
+            v-else-if="store.canWrite"
             :issue-number="number"
             :reply-to="replyTo"
+            :locked="Boolean(issue.locked)"
             @submitted="onCommentSubmitted"
             @cancel="replyTo = ''"
             @banned="banOpen = true"
@@ -800,6 +861,7 @@ async function onSidebarChanged() {
 
       <!-- ---------- 侧栏 ---------- -->
       <aside class="natb-detail__side">
+
         <section class="natb-side">
           <h2 class="natb-side__title">
             <IconTag class="size-3.5" />
@@ -874,6 +936,18 @@ async function onSidebarChanged() {
         <section class="natb-detail__actions">
           <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
             <p class="text-xs font-medium text-muted-foreground">操作</p>
+            <Button
+              variant="outline"
+              size="sm"
+              class="w-full justify-start gap-2"
+              :disabled="manualRefreshing"
+              @click="refreshIssue"
+            >
+              <!-- 与「关闭 Issue」同款：转圈用 loader-2，文案不动 -->
+              <IconLoader2 v-if="manualRefreshing" class="size-4 animate-spin" />
+              <IconRefresh v-else class="size-4 text-muted-foreground" />
+              刷新页面
+            </Button>
             <Button variant="outline" size="sm" class="w-full justify-start gap-2" @click="copyIssueLink">
               <IconLink class="size-4 text-muted-foreground" />
               复制链接
@@ -996,7 +1070,13 @@ async function onSidebarChanged() {
 
         <!-- 其余情况（非管理、非本单作者的任何人）：只给分享类操作，具体能点到哪些由组件内部判断 -->
         <section v-else class="natb-detail__actions">
-          <IssueSidebarActions :issue="issue" @changed="onSidebarChanged" @blocked="onBlocked" />
+          <IssueSidebarActions
+            :issue="issue"
+            :refreshing="manualRefreshing"
+            @changed="onSidebarChanged"
+            @refresh="refreshIssue"
+            @blocked="onBlocked"
+          />
         </section>
       </aside>
     </div>

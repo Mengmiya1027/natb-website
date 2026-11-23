@@ -455,6 +455,12 @@ export const useIssueStore = defineStore('issue', () => {
     return profiles.value[sub] || { nick: '', avatar: 'letter' }
   }
 
+  /** 这个 sub 的档案到底到了没有：profileOf 查不到时也会给一份默认值，
+   *  界面靠这个区分「真的叫 QQ 用户」和「还没加载出来」 */
+  function hasProfile(sub) {
+    return Boolean(sub && profiles.value[sub] && profiles.value[sub].nick !== undefined)
+  }
+
   /* 列表一次会渲染十几条，每条各自发一次请求太碎：收 40ms 再合并成一批 */
   let profilePending = new Set()
   let profileTimer = 0
@@ -569,6 +575,7 @@ export const useIssueStore = defineStore('issue', () => {
     applyQqRole,
     profiles,
     profileOf,
+    hasProfile,
     loadProfiles,
     patchProfile,
     clearProfiles,
