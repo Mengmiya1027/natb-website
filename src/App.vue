@@ -15,6 +15,11 @@ const route = useRoute()
  * 所以在这个路由下不渲染胶囊（页头里保留了回首页的入口）。 */
 const isIssueRoute = computed(() => route.path.startsWith('/issue'))
 
+/* 海报页也是满屏作品：它不接站内导航、只认直连路径，
+ * 顶上再压一条胶囊只会把版面挤下去，所以这个路由下同样不渲染导航。 */
+const isPosterRoute = computed(() => route.path.startsWith('/poster'))
+const hideNav = computed(() => isIssueRoute.value || isPosterRoute.value)
+
 const params = new URLSearchParams(window.location.search)
 
 /* ?frame=390x844：把页面装进一个精确尺寸的 iframe 里再截屏。
@@ -32,7 +37,7 @@ const frame = (() => {
   </div>
 
   <template v-else>
-    <div class="nav-layer">
+    <div v-if="!hideNav" class="nav-layer">
       <NavBar />
     </div>
 
@@ -49,7 +54,7 @@ const frame = (() => {
 
 body {
   margin: 0;
-  font-family: 'HarmonyOS Sans SC', 'Arial', system-ui;
+  font-family: 'HarmonyOS Sans SC', system-ui, sans-serif;
 }
 
 /* 顶栏槽位：给它一个高于各页面浮层的层叠上下文（查看器 200 等）。

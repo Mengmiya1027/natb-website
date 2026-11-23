@@ -2,6 +2,19 @@
   "$comment": "NATB 官网唯一的版本数据源。「更新日志」页逐版渲染这份清单，「项目信息」页的最新版本号取的也是它——releases 的第一条即最新版本（前端还会按 date 倒序再归一一次，顺序写反也不会串版）。换版本只改这一个文件，页面代码一行都不用动。kind 只认 new / opt / fix / soon 四种。",
   "releases": [
     {
+      "version": "v1.1.1",
+      "date": "2026-11-22",
+      "items": [
+        { "kind": "fix", "tag": "修复", "text": "修复了 RTOS 安装软件后桌面不显示软件的问题" },
+        { "kind": "opt", "tag": "优化", "text": "更换了下载器，下载更稳定" },
+        { "kind": "opt", "tag": "优化", "text": "美化了一点 UI" },
+        { "kind": "new", "tag": "新增", "text": "新增自动超级恢复，直接拉取云端资源" },
+        { "kind": "opt", "tag": "优化", "text": "更换了 ROOT 时刷入 userdata.img 的逻辑" },
+        { "kind": "fix", "tag": "修复", "text": "修复了一些用户反馈的问题" },
+        { "kind": "opt", "tag": "优化", "text": "还有一些细节改动没写进日志" }
+      ]
+    },
+    {
       "version": "v1.1.0",
       "date": "2026-10-17",
       "items": [

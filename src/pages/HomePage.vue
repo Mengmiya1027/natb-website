@@ -1,16 +1,24 @@
 <script setup>
 /**
- * 首页：一屏到底。
+ * 首页：首屏一屏到底，往下是完整的落地页论证。
  *
- * 背景是 Vue Bits 的 WebThreads，前景只留品牌、版本、一句话和两个入口；
- * 没有第二屏、没有滚动，所有信息在 100dvh 内收口。
+ * 首页就是一屏，不做滚动：hero（WebGPU 玻璃碎片 + 星云视频 + 玻璃按钮）负责
+ * "这是什么、下一步去哪"，所有需要展开的信息都留在 dock 页里，
+ * 首页不复制它们的正文，也不在首屏下面挂第二屏。
+ * 视觉值走 src/styles/landing.css 里的 token，这里不各自写字号与间距。
  */
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import GlassSurface from '@/components/vue-bits/GlassSurface.vue'
 import WebThreads from '@/components/vue-bits/WebThreads.vue'
+import IconRoot from '~icons/solar/shield-keyhole-bold'
+import IconOta from '~icons/solar/refresh-circle-bold'
+import IconApps from '~icons/solar/box-bold'
+import IconCast from '~icons/solar/screen-share-bold'
+import IconVerified from '~icons/solar/verified-check-bold'
 import { useAnimationStore } from '@/stores/animation'
 import { useUpdateLog } from '@/utils/updateLog'
+import '@/styles/landing.css'
 
 const QQ_URL = 'https://qm.qq.com/q/Cb2vLZtsZ4'
 const QQ_GROUP = '496522811'
@@ -19,10 +27,18 @@ const anim = useAnimationStore()
 const { latest } = useUpdateLog()
 
 // 版本号跟着 public/json/UpdateLog.json 走；读不到时退回当前已知版本
-const version = computed(() => latest.value?.version ?? 'v1.0.3')
+const version = computed(() => latest.value?.version ?? 'v1.1.1')
 const versionLabel = computed(() => `${version.value} 已发布`)
 
-const TAGS = ['一键 ROOT', '离线 OTA', '应用管理', '投屏控制']
+/* 四个能力标签：图标 + 文字。
+ * 图标统一 Solar bold，与导航坞、按钮里用的是同一套笔画；
+ * 颜色取低饱和的那支紫，只做点缀——标签本身仍是中性白灰。 */
+const TAGS = [
+  { label: '一键 ROOT', icon: IconRoot },
+  { label: '离线 OTA', icon: IconOta },
+  { label: '应用管理', icon: IconApps },
+  { label: '投屏控制', icon: IconCast },
+]
 
 /**
  * 背景预览开关：?bg=aero-shards 才换成 WebGPU 版 AeroShards，其余情况（含无参数）完全走 WebThreads。
@@ -78,16 +94,35 @@ function goTab(id) {
 }
 
 const videoRef = ref(null)
+const heroRef = ref(null)
 
 /* 玻璃被拖动时把首页的动态背景停帧：拖拽期间玻璃每帧都要重采样 backdrop，
- * 视频解码 + WebGPU 重绘叠在一起会把它拖到 40fps 以下；松手立即恢复。
- * 可拖动的液态玻璃（components/DraggableGlass.vue）目前未挂载，
- * 这段监听先留着：把那枚玻璃恢复挂载后无需改动这里。 */
+ * 视频解码 + WebGPU 重绘叠在一起会把它拖到 40fps 以下；松手立即恢复。 */
 const glassDragging = ref(false)
 
 function onGlassDrag(event) {
   glassDragging.value = event?.detail === true
 }
+
+/* 首屏滚出视口后停掉背景与视频：页面变长了，用户在下面读 FAQ 时
+ * 没必要继续为一个看不见的 hero 每帧跑一次 WebGPU 与视频解码。 */
+const heroOffscreen = ref(false)
+
+const backgroundPaused = computed(
+  () => reduceMotion || glassDragging.value || heroOffscreen.value,
+)
+
+let heroObserver = null
+
+watch(
+  [backgroundPaused, videoRef],
+  ([paused, video]) => {
+    if (!video) return
+    if (paused) video.pause()
+    else video.play?.().catch(() => {})
+  },
+  { flush: 'post' },
+)
 
 onMounted(() => {
   window.addEventListener('natb:glass-drag', onGlassDrag)
@@ -101,130 +136,158 @@ onMounted(() => {
     video.muted = true
     if (reduceMotion) video.pause()
   }
+
+  if ('IntersectionObserver' in window && heroRef.value) {
+    heroObserver = new IntersectionObserver(
+      (entries) => {
+        heroOffscreen.value = !entries[0].isIntersecting
+      },
+      { threshold: 0.05 },
+    )
+    heroObserver.observe(heroRef.value)
+  }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('natb:glass-drag', onGlassDrag)
   document.documentElement.classList.remove('home-is-dark')
+  heroObserver?.disconnect()
 })
 </script>
 
 <template>
-  <div class="home">
-    <header class="hero">
-      <div class="hero__bg" aria-hidden="true">
-        <div class="hero__fallback"></div>
-        <div class="hero__video" aria-hidden="true">
-          <video
-            ref="videoRef"
-            class="hero__video-el"
-            src="/videos/bg-video.mp4"
-            autoplay
-            loop
-            playsinline
-            preload="auto"
-          ></video>
-        </div>
-        <div class="hero__threads">
-          <AeroShards
-            v-if="useAeroShards"
-            :quality="aeroQuality"
-            :fps="aeroFps"
-            shard-color="#6d5cff"
-            accent-color="#a98bff"
-            :paused="reduceMotion || glassDragging"
-          />
-          <WebThreads
-            v-else
-            color1="#6d5cff"
-            color2="#36d7ff"
-            color3="#ffffff"
-            :speed="reduceMotion ? 0 : 0.16"
-            :thread-count="7"
-            :frequency="4.6"
-            :spread="0.2"
-            :taper="0.85"
-            :position="0.5"
-            fan-mode="center"
-            :glow="0.018"
-            :falloff="0.62"
-            :thickness="1.05"
-            :brightness="0.62"
-            :opacity="0.92"
-            :mouse-interaction="!reduceMotion"
-            :mouse-strength="0.22"
-            :dpr="1.5"
-            :paused="reduceMotion || glassDragging"
-          />
-        </div>
-        <div class="hero__veil"></div>
-        <div class="hero__grid"></div>
-        <div class="hero__scrim"></div>
-      </div>
+  <div class="home lp">
+    <a class="lp-skip" href="#content">跳到正文</a>
 
-      <div class="hero__inner">
-        <p class="hero__badge">
-          <span class="hero__badge-version">
-            {{ versionLabel }}
-          </span>
-          <span class="hero__badge-line" aria-hidden="true"></span>
-          <span class="hero__badge-text">小天才手表 ADB 工具箱</span>
-        </p>
-
-        <h1 class="hero__title">
-          <span class="hero__title-line">New Android</span>
-          <span class="hero__title-line hero__title-line--accent">Tool Box</span>
-        </h1>
-
-        <p class="hero__tagline">小天才手表，一个窗口全部搞定。</p>
-        <p class="hero__lead">把 ROOT、刷机、装应用、投屏收进一套顺手的工作流。</p>
-
-        <GlassSurface
-          class="hero__actions-glass"
-          width="auto"
-          height="auto"
-          :border-radius="999"
-          :border-width="0.22"
-          :displace="0.5"
-          :distortion-scale="-180"
-          :background-opacity="0.28"
-          :saturation="1"
-          :blur="6"
-          :brightness="90"
-        >
-          <div class="hero__actions">
-            <a class="btn btn--primary" :href="QQ_URL" target="_blank" rel="noopener">
-            <i-lucide-download width="17" height="17" aria-hidden="true" />
-            <span>立即下载</span>
-          </a>
-            <a class="btn btn--ghost" href="#" @click.prevent="goTab('features')">
-              <i-lucide-layout-grid width="17" height="17" aria-hidden="true" />
-              <span>了解功能</span>
-            </a>
+    <main id="content">
+      <header ref="heroRef" class="hero">
+        <div class="hero__bg" aria-hidden="true">
+          <div class="hero__fallback"></div>
+          <div class="hero__video" aria-hidden="true">
+            <video
+              ref="videoRef"
+              class="hero__video-el"
+              src="/videos/bg-video.mp4"
+              autoplay
+              loop
+              playsinline
+              preload="auto"
+            ></video>
           </div>
-        </GlassSurface>
-        <ul class="hero__tags" aria-label="核心能力">
-          <li v-for="tag in TAGS" :key="tag" class="tag">{{ tag }}</li>
-        </ul>
-      </div>
+          <div class="hero__threads">
+            <AeroShards
+              v-if="useAeroShards"
+              :quality="aeroQuality"
+              :fps="aeroFps"
+              shard-color="#6d5cff"
+              accent-color="#a98bff"
+              :paused="backgroundPaused"
+            />
+            <WebThreads
+              v-else
+              color1="#6d5cff"
+              color2="#36d7ff"
+              color3="#ffffff"
+              :speed="reduceMotion ? 0 : 0.16"
+              :thread-count="7"
+              :frequency="4.6"
+              :spread="0.2"
+              :taper="0.85"
+              :position="0.5"
+              fan-mode="center"
+              :glow="0.018"
+              :falloff="0.62"
+              :thickness="1.05"
+              :brightness="0.62"
+              :opacity="0.92"
+              :mouse-interaction="!reduceMotion"
+              :mouse-strength="0.22"
+              :dpr="1.5"
+              :paused="backgroundPaused"
+            />
+          </div>
+          <div class="hero__veil"></div>
+          <div class="hero__grid"></div>
+          <div class="hero__scrim"></div>
+        </div>
 
-      <div class="hero__foot" aria-hidden="true">
-        <span>NATB DEVELOPER GROUP</span>
-        <span>仅供学习交流 · ROOT 有风险</span>
-      </div>
-    </header>
+        <div class="hero__inner">
+          <div class="hero__copy">
+          <p class="hero__badge">
+            <span class="hero__badge-version">
+              <IconVerified width="14" height="14" aria-hidden="true" />
+              {{ versionLabel }}
+            </span>
+            <span class="hero__badge-line" aria-hidden="true"></span>
+            <span class="hero__badge-text">小天才手表 ADB 工具箱</span>
+          </p>
+
+          <h1 class="hero__title">
+            <span class="hero__title-line">New Android</span>
+            <span class="hero__title-line hero__title-line--accent">Tool Box</span>
+          </h1>
+
+          <p class="hero__tagline">小天才手表，一个窗口全部搞定。</p>
+          <p class="hero__lead">
+            ROOT、离线 OTA、装应用、投屏四件事在同一个 Windows<br class="hero__lead-br" />
+            窗口里做完，不敲命令。
+          </p>
+          </div>
+
+          <GlassSurface
+            class="hero__actions-glass"
+            width="auto"
+            height="auto"
+            :border-radius="999"
+            :border-width="0.18"
+            :displace="0.5"
+            :distortion-scale="-180"
+            :background-opacity="0.2"
+            :saturation="1"
+            :blur="14"
+            :brightness="62"
+          >
+            <div class="hero__actions">
+              <a class="btn btn--primary" :href="QQ_URL" target="_blank" rel="noopener">
+                <i-solar-download-minimalistic-bold width="18" height="18" aria-hidden="true" />
+                <span>获取安装包</span>
+              </a>
+              <button class="btn btn--ghost" type="button" @click="goTab('features')">
+                <i-solar-widget-4-bold width="18" height="18" aria-hidden="true" />
+                <span>查看功能介绍</span>
+              </button>
+            </div>
+          </GlassSurface>
+
+          <ul class="hero__tags" aria-label="核心能力">
+            <li v-for="tag in TAGS" :key="tag.label" class="tag">
+              <component :is="tag.icon" width="14" height="14" aria-hidden="true" />
+              <span>{{ tag.label }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="hero__foot" aria-hidden="true">
+          <span>NATB DEVELOPER GROUP</span>
+          <span>仅供学习交流 · ROOT 有风险</span>
+        </div>
+      </header>
+
+    </main>
   </div>
 </template>
 
 <style scoped>
 .home {
+  /* 首页只有一屏：整屏固定，不产生任何滚动。
+   * 需要展开的内容放到 dock 页（功能 / 更新 / 关于）里，首页不承担。 */
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  background: #05060a;
-  color: #f4f6ff;
-  font-family: 'HarmonyOS Sans SC', 'Arial', system-ui, sans-serif;
+  background: var(--lp-bg);
+  color: var(--lp-text-1);
+  font-family: var(--lp-font);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -239,10 +302,32 @@ onBeforeUnmount(() => {
 /* ============================================================
  * 背景
  * ========================================================== */
+/* 背景只占右侧：左边留给文字，中间靠羽化过渡，不留一条硬边。
+ * 羽化用 mask 而不是背景渐变——图像层保持完整，背景仍然不许用渐变铺。 */
 .hero__bg {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
   z-index: 0;
+  width: min(70%, 1180px);
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.45) 12%,
+    rgba(0, 0, 0, 0.9) 30%,
+    #000 46%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.45) 12%,
+    rgba(0, 0, 0, 0.9) 30%,
+    #000 46%,
+    #000 100%
+  );
 }
 
 .hero__fallback {
@@ -260,7 +345,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  opacity: 0.82;
+  opacity: 1;
 }
 
 .hero__video-el {
@@ -268,6 +353,9 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* 视频裁到右侧竖块后只剩中间那段，星云的暗部正好落在这里。
+   * 把取景往右推，让亮的那片云进画面，右侧才看得出是一块背景。 */
+  object-position: 78% center;
   pointer-events: none;
 }
 
@@ -280,9 +368,10 @@ onBeforeUnmount(() => {
 .hero__veil {
   position: absolute;
   inset: 0;
+  /* 背景块已经缩到右侧，这一层只做收边与上下淡出，不能再整体压黑 */
   background:
-    radial-gradient(ellipse 62% 56% at 50% 48%, rgba(5, 6, 10, 0.08) 0%, rgba(5, 6, 10, 0.34) 54%, rgba(5, 6, 10, 0.86) 100%),
-    linear-gradient(180deg, rgba(5, 6, 10, 0.7) 0%, rgba(5, 6, 10, 0) 22%, rgba(5, 6, 10, 0) 64%, #05060a 100%);
+    radial-gradient(ellipse 74% 64% at 54% 46%, rgba(5, 6, 10, 0) 0%, rgba(5, 6, 10, 0.1) 60%, rgba(5, 6, 10, 0.46) 100%),
+    linear-gradient(180deg, rgba(5, 6, 10, 0.34) 0%, rgba(5, 6, 10, 0) 20%, rgba(5, 6, 10, 0) 70%, #05060a 100%);
 }
 
 .hero__grid {
@@ -299,20 +388,14 @@ onBeforeUnmount(() => {
 
 .hero__scrim {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: min(1120px, 96vw);
-  height: min(640px, 72vh);
-  transform: translate(-50%, -48%);
-  /* 原本是 radial-gradient + blur(18px)：1120×640 的一整片高斯模糊，
-   * 在 GPU 上是每帧一次的重型 pass。渐变本身已经是柔和衰减，
-   * 这里把衰减区间和收边点各放宽一档，抵掉去模糊后边缘变硬的那一点点。 */
+  inset: 0;
+  /* 压暗背景主体，让右侧的视觉往回收，不与左边的文字抢注意力 */
   background: radial-gradient(
-    closest-side,
-    rgba(5, 6, 10, 0.58),
-    rgba(5, 6, 10, 0.4) 42%,
-    rgba(5, 6, 10, 0.18) 62%,
-    transparent 82%
+    closest-side at 58% 50%,
+    rgba(5, 6, 10, 0.16),
+    rgba(5, 6, 10, 0.08) 46%,
+    rgba(5, 6, 10, 0.02) 68%,
+    transparent 88%
   );
   pointer-events: none;
 }
@@ -320,141 +403,197 @@ onBeforeUnmount(() => {
 /* ============================================================
  * 内容
  * ========================================================== */
+/* 左文右图：内容列靠左，左内边距让开固定的导航坞（24 + 胶囊 64） */
 .hero__inner {
   position: relative;
   z-index: 2;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  width: min(1160px, 100%);
+  width: 100%;
   height: 100%;
-  margin: 0 auto;
+  margin: 0;
   /* 本文件没有全局 border-box：不写这行，100% 宽 + 左右内边距会把盒子撑宽、整段内容右移 */
   box-sizing: border-box;
-  padding: 59px 28px 96px;
-  text-align: center;
+  padding: var(--sp-900) var(--sp-400) var(--sp-900)
+    calc(var(--sp-300) + var(--dock-gutter, 0px) + var(--sp-700));
+  text-align: left;
 }
 
+/* 文字块自身的宽度上限：标题与副标题都不超过 680，行长才不会失控 */
+.hero__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 680px;
+}
+
+/* ── 版本徽章：整条 32 高，与下面的能力标签同一档
+ * 材质与 tag 同源（平底 + 四边 1px + 顶部内高光），
+ * 去掉 backdrop-filter 和那块 34px 的外阴影——元信息不该"浮"在页面上。 */
 .hero__badge {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-100);
   margin: 0;
-  padding: 4px 15px 4px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 999px;
-  background: rgba(10, 12, 20, 0.52);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    0 12px 34px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  /* 上下 4 + 版本号 24 = 32，和 tag 对齐 */
+  padding: var(--sp-50) var(--sp-200) var(--sp-50) var(--sp-50);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   font-size: 12px;
-  letter-spacing: 0.02em;
-  color: rgba(235, 240, 255, 0.72);
+  line-height: 16px;
+  letter-spacing: 0.01em;
+  color: rgba(232, 238, 255, 0.8);
   white-space: nowrap;
-  animation: hero-rise 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
+  animation: hero-rise 0.85s var(--ease) 0.05s both;
 }
 
-.hero__dot {
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #b6a7ff, #4fe0ff);
-  box-shadow: 0 0 0 3px rgba(124, 108, 255, 0.16), 0 0 14px 2px rgba(90, 200, 255, 0.55);
-  animation: badge-pulse 2.6s ease-in-out infinite;
-}
-
+/* 版本号是这一条里唯一的实色块：Surface/Inverted 纯白 + 近黑字，
+ * 圆角走 radius/full —— 原来那个 16px 圆角在这个高度上既不是圆也不是方，看着很业余。 */
 .hero__badge-version {
-  color: #000;
+  display: inline-flex;
+  align-items: center;
+  /* 图标 12 小于行高 16，加上它不会把 pill 撑高 */
+  gap: var(--sp-50);
+  color: #0a0b0e;
   background: #ffffff;
+  font-size: 12px;
+  line-height: 16px;
+  /* Bold（700）是允许的上限——再往上就是技能明令禁止的 800/900 超粗了 */
   font-weight: 700;
-  border-radius: 16px;
-  padding: 4px;
+  border-radius: var(--r-full);
+  padding: var(--sp-50) var(--sp-75);
   font-variant-numeric: tabular-nums;
+  /* 实心白块在深底上容易"飘"，给一层内高光 + 极近的硬影把它按回平面。
+   * 与主按钮同一套做法：边缘干净，影子只交代贴近关系。 */
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
+/* 图标跟字同色（currentColor），不额外染色。
+ * 尺寸在 CSS 里写死 14，和下面四个能力标签的图标同一档。 */
+.hero__badge-version svg {
+  flex: none;
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* 分隔线只到 10 高，比文字矮一截才不会把它切成两半 */
 .hero__badge-line {
   width: 1px;
-  height: 12px;
-  background: rgba(255, 255, 255, 0.16);
+  height: 10px;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .hero__badge-text {
-  color: rgba(226, 233, 255, 0.55);
+  color: rgba(226, 233, 255, 0.58);
 }
 
 .hero__title {
-  margin: 26px 0 0;
-  font-family: var(--font-display);
-  font-size: clamp(3.3rem, 8.8vw, 7.6rem);
-  font-weight: 900;
-  line-height: 0.88;
-  letter-spacing: -0.055em;
+  /* 字号落在 type scale 的两个端点上：移动 48（text-5xl），桌面 96（text-8xl）。
+   * 左列宽 680，96px 时 "NEW ANDROID" 量出来约 510，仍在列宽内。 */
+  margin: var(--sp-300) 0 0;
+  /* 光学对齐：Archive 的首字母 N 自带 5px 左侧留白（80px 字号下实测），
+   * 而下方正文是中文，几乎没有这层留白。盒子对齐了，墨迹却差 4 到 5px，
+   * 所以整块左移 0.0625em（= 5px @ 80px），让墨迹与下面的文字真正齐左。 */
+  margin-left: -0.0625em;
+  font-family: var(--lp-display);
+  font-size: clamp(3.5rem, 7.6vw, 6rem);
+  font-weight: 400;
+  line-height: 1;
+  /* 大字必须紧排：默认字距在 96px 上会松成海报体，收 0.03em 才是标题的手感 */
+  letter-spacing: -0.03em;
   text-wrap: balance;
-  /* 辉光：近处一层冷白勾出字形边缘，中景紫蓝撑起体量。
-   * 原先是 4 层 drop-shadow（含 52px 巨半径那层），GPU 每帧一片大 pass，是首页掉帧主因。
-   * 这里只保留观感上真正起作用的这两层：半径越大越贵，去掉 52px 那层几乎看不出差别。
-   * 注：不能换成 text-shadow —— 标题是 background-clip: text 的渐变字，
-   * 阴影会透过透明字形显示，整行字会被光晕填满。 */
+  /* 紫色留给"落点"，不留给"发光"：
+   *   一层无彩色投影把字托起来，
+   *   一层大半径的低透明度紫影只做气息，半径大、alpha 低就不会糊成一圈霓虹。
+   * 之前廉价正是因为在字边缘叠了两层高强度彩色光晕。 */
   filter:
-    drop-shadow(0 0 15px rgba(176, 192, 255, 0.34))
-    drop-shadow(0 0 42px rgba(122, 138, 255, 0.3));
+    /* 上缘 1px 的亮边：金属的"棱"来自边缘光，不是来自发光 */
+    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.2))
+    drop-shadow(0 18px 40px rgba(0, 0, 0, 0.55));
 }
 
 .hero__title-line {
   display: block;
-  animation: hero-rise 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: hero-rise 0.95s var(--ease) both;
+  /* 宽度贴合各自文字：撑满父宽时，短的那行只用掉渐变的八成，
+   * 末端收不到紫，看着像漏了半截。贴合之后两行的收色点各自落在自己的句末。 */
+  width: fit-content;
+  /* 金属面：纵向的明暗节奏，不是从亮到暗一根筋。
+   *   0 至 34%：顶部受光，最亮
+   *   34 至 52%：中段压暗，这是"地平线"，金属感全部来自这条暗带
+   *   52 至 76%：回亮，反射面的第二道高光
+   *   76 至 100%：下缘收灰，末端带一点紫——像金属把周围环境的紫光反了上来
+   * 只有明暗交替才有材质，单一方向的渐变永远是塑料。 */
+  /* 两层背景叠出来的同一块材质：
+   *   下层是纵向的黑白灰阶，负责明暗（顶部受光 → 中段暗带 → 回亮 → 下缘收灰）；
+   *   上层是横向的半透明紫，只在行末最后约两成渐入，浓度压到 0.2。
+   * 分层而不是把紫塞进灰阶的停靠点里：灰阶的明暗节奏一点没动，
+   * 紫色是"罩"在金属上的一层环境光，右端才有一点，左边仍然纯白。 */
+  background-image:
+    linear-gradient(90deg, rgba(160, 140, 225, 0) 72%, rgba(160, 140, 225, 0.26) 100%),
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #f8f8f9 16%,
+      #e2e2e6 34%,
+      #b6b6bd 50%,
+      #ececee 62%,
+      #ffffff 71%,
+      #e2e2e6 86%,
+      #bfbfc5 100%
+    );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero__title-line:first-child {
   animation-delay: 0.14s;
-  /* 立体感：上端接近纯白、下端压到淡紫灰，再各带一点 alpha —— 字像是从背景里浮出来，
-   * 而不是一张贴纸。alpha 写在颜色里而不是给元素 opacity，辉光强度不受影响。 */
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96) 0%,
-    rgba(234, 239, 255, 0.87) 58%,
-    rgba(198, 208, 242, 0.79) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 
+/* 第二行首字 T 的左侧留白只有 1px，比 N 少 4px：
+ * 不补的话它看起来会从整块里往左探出去一点。补 0.05em（= 4px @ 80px）拉回来。
+ * 右端的 padding 也是同一回事——紧排之后末字形右边会被裁一丁点。 */
 .hero__title-line--accent {
-  padding-right: 0.04em;
-  color: transparent;
-  background: linear-gradient(
-    100deg,
-    rgba(243, 245, 255, 0.95) 0%,
-    rgba(200, 210, 255, 0.91) 26%,
-    rgba(165, 141, 255, 0.89) 56%,
-    rgba(101, 224, 255, 0.92) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
+  margin-left: 0.05em;
+  padding-right: 0.02em;
   animation-delay: 0.24s;
 }
 
 .hero__tagline {
-  margin: 18px 0 0;
-  font-size: clamp(1.02rem, 1.5vw, 1.3rem);
+  margin: var(--sp-200) 0 0;
+  max-width: 680px;
+  font-size: 20px;
+  line-height: 28px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  color: #e8ecff;
-  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.34s both;
+  letter-spacing: 0.01em;
+  color: rgba(232, 236, 246, 0.74);
+  text-wrap: balance;
+  animation: hero-rise 0.9s var(--ease) 0.34s both;
 }
 
 .hero__lead {
-  margin: 11px 0 0;
-  max-width: 620px;
-  font-size: 14.5px;
-  line-height: 1.8;
-  color: rgba(226, 232, 255, 0.56);
-  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.42s both;
+  margin: var(--sp-75) 0 0;
+  max-width: 560px;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+  color: rgba(226, 232, 255, 0.6);
+  text-wrap: pretty;
+  animation: hero-rise 0.9s var(--ease) 0.42s both;
+}
+
+/* 断行落在 "Windows / 窗口" 之间：四件事归一句，Windows 是那句的落点。
+ * 也顺手避开把"命令。"单独甩到第三行。窄屏交给自然换行。 */
+.hero__lead-br {
+  display: block;
 }
 
 /* ============================================================
@@ -462,84 +601,113 @@ onBeforeUnmount(() => {
  * ========================================================== */
 .hero__actions-glass {
   width: auto;
-  margin-top: 30px;
-  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both;
+  margin-top: var(--sp-400);
+  animation: hero-rise 0.9s var(--ease) 0.5s both;
 }
 
 .hero__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: var(--sp-100);
 }
 
+/* ── Button 组件（Primary / Secondary）
+ * 尺寸与间距全部走 token：垂直 8（spacing/75）、水平 12（spacing/100）、
+ * 图标与文字之间 8、两枚按钮之间 12、圆角 radius/full、最小高度 44（触控）。
+ * 表面一律是平的：按钮不许用渐变底，材质感只能来自描边与阴影。 */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  height: 36px;
-  padding: 0 12px;
+  gap: var(--sp-75);
+  min-height: 44px;
+  padding: var(--sp-75) var(--sp-100);
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  /* Button-md：16 / 24 / Semibold */
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: 0;
   text-decoration: none;
   white-space: nowrap;
-  corner-shape:superellipse(1.25);
   cursor: pointer;
   transition:
-    background 0.25s ease,
-    border-color 0.25s ease,
-    box-shadow 0.25s ease,
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    background-color 300ms var(--ease),
+    border-color 300ms var(--ease),
+    box-shadow 300ms var(--ease);
 }
 
 .btn svg {
   display: block;
+  /* 图标比文字浅一档：让字是主体，图标只是注解 */
+  opacity: 0.92;
 }
 
+/* ── State：Hover / Pressed / Focus 三态都在，缺一个就算没做完 ──
+ * 三态一律不动位置、不缩放：反馈只靠底色、描边与阴影的深浅。
+ * 按钮在玻璃胶囊里，一动就会带着胶囊里的折射一起晃，观感反而廉价。 */
 
 .btn:active {
-  transform: translateY(0) scale(0.9);
+  /* 按下只把时间压短，让手感变"实"，不做位移 */
+  transition-duration: 120ms;
 }
 
+.btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 3px;
+}
+
+/* ── Primary：Surface/Inverted 纯白，文字 Text/Inverted 近黑 ──
+ * 高级感来自"边缘干净 + 两层阴影"：
+ *   一圈 1px 内描边把白底从深背景上割出来（否则白块边缘会发虚），
+ *   近处 2px 硬影交代它离背景有多近，远处 28px 柔影只交代体量。
+ * 之前那两团紫光是错的：彩色投影会让按钮看起来像贴在页面上的贴纸。 */
 .btn--primary {
-  color: #070912;
-  background: linear-gradient(135deg, #f0f3ff 0%, #b9c6ff 48%, #7ee6ff 100%);
+  color: #0a0b0e;
+  background: #ffffff;
   box-shadow:
-    0 10px 30px rgba(124, 108, 255, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
 .btn--primary:hover {
   box-shadow:
-    0 16px 44px rgba(124, 108, 255, 0.48),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+    inset 0 1px 0 #ffffff,
+    0 2px 4px rgba(0, 0, 0, 0.55),
+    0 16px 38px rgba(0, 0, 0, 0.42);
 }
 
+.btn--primary:active {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Secondary：透明底 + 四边 1px 描边（Border/Primary 的量级）
+ * 它坐在玻璃胶囊里，自己再加一层深色底就是三层材质打架，所以只留边。 */
 .btn--ghost {
-  color: #eef1ff;
-  background: rgb(0 0 0 / 0.5);
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  color: rgba(242, 245, 255, 0.96);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .btn--ghost:hover {
-  background: rgb(0 0 0 / 0.7);
-  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.26);
 }
 
-.hero__note {
-  margin: 16px 0 0;
-  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  color: rgba(220, 228, 255, 0.34);
-  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.58s both;
+.btn--ghost:active {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* ============================================================
@@ -549,24 +717,40 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 26px 0 0;
+  justify-content: flex-start;
+  gap: var(--sp-75);
+  margin: var(--sp-300) 0 0;
   padding: 0;
   list-style: none;
-  animation: hero-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.66s both;
+  animation: hero-rise 0.9s var(--ease) 0.66s both;
 }
 
+/* ── Tag（Caption 4：12 / 16 / Medium）
+ * 高度 32 = 垂直 8 + 行高 16，跟按钮同一档垂直间距，四枚并排不会参差。
+ * 材质只有三样：平底、四边 1px 描边、顶部 1px 内高光——没有模糊、没有渐变。
+ * 图标比文字低一档明度会更闷，所以图标反而用低饱和紫做唯一的彩色点缀。 */
 .tag {
-  padding: 7px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.035);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: rgba(230, 236, 255, 0.56);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-75);
+  padding: var(--sp-75) var(--sp-100);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(232, 238, 255, 0.8);
+  white-space: nowrap;
+}
+
+.tag svg {
+  flex: none;
+  display: block;
+  /* 唯一的彩色点：低饱和紫，与标题行末那点紫同源 */
+  color: rgba(180, 166, 232, 0.95);
 }
 
 /* ============================================================
@@ -574,18 +758,19 @@ onBeforeUnmount(() => {
  * ========================================================== */
 .hero__foot {
   position: absolute;
-  right: 34px;
-  bottom: 26px;
-  left: 34px;
+  right: var(--sp-400);
+  bottom: var(--sp-300);
+  left: var(--sp-400);
   z-index: 3;
   display: flex;
   justify-content: space-between;
-  gap: 20px;
+  gap: var(--sp-200);
   pointer-events: none;
-  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
-  font-size: 9.5px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
   letter-spacing: 0.14em;
-  color: rgba(220, 228, 255, 0.28);
+  color: rgba(220, 228, 255, 0.34);
   white-space: nowrap;
 }
 
@@ -603,26 +788,56 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes badge-pulse {
-  0%,
-  100% {
-    opacity: 0.7;
-    scale: 0.9;
-  }
-  50% {
-    opacity: 1;
-    scale: 1.05;
-  }
-}
-
 /* ============================================================
  * 响应式：只缩尺寸，不再换版式
  * ========================================================== */
+/* 960 以下没有左右两栏可分：背景回到整屏，文字回到居中。
+ * 这一档之前的内容列只占半边，硬撑左对齐会让标题和背景叠在一起。 */
+@media (max-width: 960px) {
+  .hero__bg {
+    width: 100%;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .hero__inner {
+    align-items: center;
+    padding: var(--sp-800) var(--sp-300) var(--sp-800);
+    text-align: center;
+  }
+
+  .hero__copy {
+    align-items: center;
+    max-width: 100%;
+  }
+
+  /* 窄屏不认那处手改断行：宽度不够，硬断会切出 "个 Windows" 这种残句 */
+  .hero__lead-br {
+    display: none;
+  }
+
+  .hero__actions {
+    justify-content: center;
+  }
+
+  .hero__tags {
+    justify-content: center;
+  }
+}
+
 @media (max-width: 720px) {
+  /* 小字号上九段金属渐变会挤成一道脏灰带，只留"受光 → 收紫"两段。
+   * 必须用 background-image：background 是简写，它会把上面的 background-clip: text
+   * 一起重置回 border-box，字就成了一块实心色板。 */
+  .hero__title-line {
+    background-image:
+      linear-gradient(90deg, rgba(160, 140, 225, 0) 78%, rgba(160, 140, 225, 0.18) 100%),
+      linear-gradient(180deg, #ffffff 0%, #f8f8f9 38%, #e2e2e6 78%, #bfbfc5 100%);
+  }
 
   .hero__title {
     width: 100%;
-    font-size: clamp(3rem, 12.8vw, 4.2rem);
+    font-size: clamp(2.25rem, 12.8vw, 3rem);
   }
 
   /* 负字距会在末字后留一截空隙，居中时整行墨迹看着偏右：给每行补回右侧留白抵消 */
@@ -631,37 +846,36 @@ onBeforeUnmount(() => {
   }
 
   .hero__tagline {
-    margin-top: 14px;
-    letter-spacing: 0.05em;
+    margin-top: var(--sp-100);
+    font-size: 18px;
+    line-height: 28px;
   }
 
   .hero__lead {
-    max-width: 330px;
-    font-size: 13.5px;
-    line-height: 1.75;
+    max-width: 340px;
+    font-size: 16px;
+    line-height: 24px;
   }
 
+  /* 窄屏不再改成竖排：竖排会让两枚按钮叠在同一枚玻璃胶囊里，看起来像粘成一团。
+   * 保持横排、字号落到 Button-sm，玻璃就是一枚正常的两键胶囊。 */
   .hero__actions {
-    flex-direction: column;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: var(--sp-75);
   }
 
   .hero__actions-glass {
-    margin-top: 26px;
+    margin-top: var(--sp-300);
   }
 
   .hero__actions .btn {
-    width: auto;
-    padding: 0 22px;
-  }
-
-  .hero__note {
-    max-width: 300px;
-    line-height: 1.7;
+    padding: var(--sp-75) var(--sp-100);
+    font-size: 14px;
+    line-height: 20px;
   }
 
   .hero__tags {
-    margin-top: 22px;
+    margin-top: var(--sp-200);
   }
 
   .hero__foot {
@@ -671,34 +885,34 @@ onBeforeUnmount(() => {
 
 @media (max-width: 420px) {
   .hero__badge {
-    gap: 8px;
-    font-size: 11px;
-    padding-right: 12px;
+    gap: var(--sp-75);
+    font-size: 12px;
+    padding-right: var(--sp-75);
   }
 
-  .hero__badge-text {
-    max-width: 128px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  /* 这一档只留版本号：整条徽章挤在一行里被省略号截断，比不显示更难读 */
+  .hero__badge-text,
+  .hero__badge-line {
+    display: none;
+  }
+
+  /* 只剩版本号时，外层那圈就没意义了——胶囊套胶囊看着像双边框，直接退成单枚 pill */
+  .hero__badge {
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
   }
 }
 
 @media (max-height: 760px) and (min-width: 721px) {
   .hero__inner {
-    padding-top: 48px;
-    padding-bottom: 72px;
+    padding-top: var(--sp-600);
+    padding-bottom: var(--sp-700);
   }
 
   .hero__title {
-    font-size: clamp(3.3rem, 7.6vw, 6rem);
-  }
-
-  .hero__tagline {
-    margin-top: 12px;
-  }
-
-  .hero__tags {
-    margin-top: 20px;
+    font-size: clamp(3rem, 6.4vw, 5rem);
   }
 }
 
@@ -710,16 +924,15 @@ onBeforeUnmount(() => {
   .hero__title-line,
   .hero__tagline,
   .hero__lead,
-  .hero__actions,
-  .hero__note,
+  .hero__actions-glass,
   .hero__tags {
     animation: none !important;
     opacity: 1 !important;
     translate: none !important;
   }
 
-  .hero__dot {
-    animation: none !important;
+  .btn {
+    transition: background-color 300ms var(--ease);
   }
 }
 </style>

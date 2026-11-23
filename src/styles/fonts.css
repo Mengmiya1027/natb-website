@@ -11,6 +11,8 @@
 }
 
 :root {
-  /* 只给大标题用；Archive 缺席时退回原来的 HarmonyOS Sans SC / Arial 栈 */
-  --font-display: 'Archive', 'HarmonyOS Sans SC', 'Arial', system-ui, sans-serif;
+  /* 只给大标题用；Archive 缺席时退回 HarmonyOS Sans SC。
+   * 回退栈里不再列 Arial：它是被禁用的通用字体之一，system-ui 在
+   * Windows 上会落到 Segoe UI，与正文的观感更一致。 */
+  --font-display: 'Archive', 'HarmonyOS Sans SC', system-ui, sans-serif;
 }
