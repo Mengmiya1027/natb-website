@@ -55,37 +55,13 @@ const DISCLAIMER =
   '本工具仅供学习交流使用，ROOT有风险，操作需谨慎。使用本工具导致的任何后果由使用者自行承担，严禁用于非法用途。'
 const TRADEMARK = 'imoo/小天才产品商标归广东小天才科技有限公司所有'
 
-/* ===== 背景视频 =====
- * 雨打窗玻璃的实拍片段（Pexels 免费授权），已重压成 15.6s 无缝循环：
- * 1080p 给桌面、720p 给窄屏、一张海报兜住未就绪与少动效两种情况。
- * 走 base，子路径部署也取得到 public 下的片子。
+/* ===== 背景 =====
+ * 一张横板 16:9 的紫色声波底图（2048×1152 → webp 159KB），走 base，
+ * 子路径部署也取得到 public 下的图。
+ * 静态图没有解码时序、没有自动播放策略、也没有省流量分支：
+ * 压暗层、栏格与颗粒都压在它上面，文字可读性从不依赖它。
  */
-const POSTER = import.meta.env.BASE_URL + 'videos/rain-glass-poster.webp'
-const VIDEO_LG = import.meta.env.BASE_URL + 'videos/rain-glass-1920.mp4'
-const VIDEO_SM = import.meta.env.BASE_URL + 'videos/rain-glass-1280.mp4'
-
-/* 视频只是锦上添花：少动效或开了省流量就只留海报，文字可读性从不依赖它 */
-const allowVideo = ref(false)
-const videoReady = ref(false)
-const videoRef = ref(null)
-let readyTimer = 0
-
-/** 视频露面：事件与兜底定时器都走这里，撤掉定时器免得重复 */
-function markVideoReady() {
-  if (readyTimer) {
-    clearTimeout(readyTimer)
-    readyTimer = 0
-  }
-  videoReady.value = true
-}
-
-/** 标签页藏起来就暂停：背景视频没必要在后台烧电 */
-function onVisibility() {
-  const el = videoRef.value
-  if (!el) return
-  if (document.hidden) el.pause()
-  else el.play?.().catch(() => {})
-}
+const BACKGROUND = import.meta.env.BASE_URL + 'images/project-info-bg.webp'
 
 /* ===== 滚动锁 =====
  * 本页要"整页不可滚动"：锁挂在 html 上，但只在挂载期间存在，
@@ -131,20 +107,7 @@ onMounted(() => {
   window.addEventListener('resize', scheduleFit)
   // 字体晚一步到齐会改写高度，落定后再量一次
   document.fonts?.ready?.then(scheduleFit, () => {})
-  // 提示与视频无关（少动效、省流量也照常）：放在下面那两处提前返回之前
   startHint()
-
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
-  const saveData = navigator.connection?.saveData === true
-  if (reduce || saveData) return
-  allowVideo.value = true
-  document.addEventListener('visibilitychange', onVisibility)
-  nextTick(() => {
-    // 自动播放被拦（muted 一般放行，拦了就退回海报，页面不留空）
-    videoRef.value?.play?.().catch(() => (allowVideo.value = false))
-  })
-  // 缓存命中或事件丢失时的兜底：不能一直停在 0 透明度
-  readyTimer = window.setTimeout(markVideoReady, 2600)
 })
 
 /* ===== 复制 =====
@@ -152,8 +115,10 @@ onMounted(() => {
  * 按钮就地变成"已复制"，同时往 aria-live 里播报一句，键盘用户也听得到。
  */
 const copied = ref('') // 存刚复制成功的那条原文，按钮靠它切状态
+const wrote = ref('') // 存刚点过的那个 mailto：邮件图标就此短暂变成白色对勾
 const notice = ref('') // 给读屏的播报，与视觉提示同源
 let copyTimer = 0
+let wroteTimer = 0
 
 /** 无剪贴板权限时退回 execCommand：老浏览器与 http 环境下也能复制 */
 function legacyCopy(text) {
@@ -183,6 +148,16 @@ async function copy(row) {
   copyTimer = window.setTimeout(() => {
     copied.value = ''
   }, 1800)
+}
+
+/** 写信走的是 mailto：邮件客户端在页面之外打开，页面本身不会变。
+ *  所以只让图标交代这一下——邮件图标换成对勾，1.6s 后自己回来。 */
+function flashWrite(row) {
+  wrote.value = row.href
+  clearTimeout(wroteTimer)
+  wroteTimer = window.setTimeout(() => {
+    wrote.value = ''
+  }, 1600)
 }
 
 /* ===== 鼠标提示 =====
@@ -250,8 +225,8 @@ function startHint() {
  * 与 Features / UpdateLog 同一套做法：时间表只写这一份，注入成 --enter-*，
  * 样式只管姿态与曲线。少动效时压根不加这个类，元素直接停在终态。
  *
- * 这一页排的是一条"镜头推开雨窗"的连续动线，而不是把元素一个个淡进来：
- *   0ms    实拍层浮起并收一档放大（像镜头落定）＋ 一道光自左向右扫过雨窗＋ 左上辉光起势
+ * 这一页排的是一条"镜头推近底图"的连续动线，而不是把元素一个个淡进来：
+ *   0ms    底图层浮起并收一档放大（像镜头落定）＋ 一道光自左向右扫过底图＋ 左上辉光起势
  *   100ms  眉标一边拉开字距一边落位
  *   200ms  标题按字显影：每字 68ms 阶梯，字面从下被光"推"出来，笔画带一瞬冷光，字距同步收拢
  *   520ms  副题那道线画开，项目全名跟上
@@ -262,8 +237,8 @@ function startHint() {
 const TITLE_CHARS = '项目信息'.split('') // 标题按字显影：逐字一个 span，错开登场
 
 const ENTER = {
-  media: 0, // 实拍层：浮起 + 收放大
-  sweep: 60, // 横扫过雨窗的那道白光
+  media: 0, // 底图层：浮起 + 收放大
+  sweep: 60, // 横扫过底图的那道白光
   bloom: 0, // 左上角冷调辉光起势
   grid: 140, // 杂志栏格自中间铺开
   kicker: 100,
@@ -336,15 +311,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onHintMove)
   if (fitRaf) cancelAnimationFrame(fitRaf)
   clearTimeout(copyTimer)
+  clearTimeout(wroteTimer)
   if (enterTimer) clearTimeout(enterTimer)
-  if (readyTimer) clearTimeout(readyTimer)
-  document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
 
 <template>
   <main ref="rootRef" class="info" :class="{ 'is-entering': entering }" :style="enterVars">
-    <!-- 背景：雨打窗玻璃的实拍视频 → 冷调辉光 → 压暗层 → 杂志栏格 → 胶片颗粒。
+    <!-- 背景：紫色声波底图 → 冷调辉光 → 压暗层 → 杂志栏格 → 胶片颗粒。
          整块交给 TiltCard：指针在页面上移动时背景轻轻转一点，像隔一层厚玻璃看窗外；
          倾斜只发生在这个壳里，文字、清单、声明卡一动不动。
          壳会写 transform，所以"钉在视口上"由外层 .info-bg-tilt 负责，壳内一律用 absolute。 -->
@@ -360,27 +334,9 @@ onBeforeUnmount(() => {
       >
         <div class="info-bg">
           <div class="info-bg__media">
-            <!-- 海报垫在视频底下：未就绪、少动效、省流量三种情况下都是它在撑画面 -->
-            <img class="info-bg__poster" :src="POSTER" alt="" />
-            <video
-              v-if="allowVideo"
-              ref="videoRef"
-              class="info-bg__video"
-              :class="{ 'is-ready': videoReady }"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="auto"
-              disablepictureinpicture
-              tabindex="-1"
-              @loadeddata="markVideoReady"
-            >
-              <source :src="VIDEO_SM" media="(max-width: 820px)" type="video/mp4" />
-              <source :src="VIDEO_LG" type="video/mp4" />
-            </video>
+            <img class="info-bg__photo" :src="BACKGROUND" alt="" />
           </div>
-          <!-- 光斑压在实拍层之上、却压在压暗层之下：雨要看得见，最小的那行字也要站得住 -->
+          <!-- 光斑压在底图之上、却压在压暗层之下：底图要看得见，最小的那行字也要站得住 -->
           <GlowCard
             class="info-bg__glow"
             track="window"
@@ -393,7 +349,7 @@ onBeforeUnmount(() => {
           <span class="info-bg__scrim"></span>
           <span class="info-bg__grid"></span>
           <span class="info-bg__grain"></span>
-          <!-- 开场那道光：自左向右横扫过雨窗，只在入场那一下出现（静态就停在透明） -->
+          <!-- 开场那道光：自左向右横扫过底图，只在入场那一下出现（静态就停在透明） -->
           <span class="info-bg__sweep"></span>
         </div>
       </TiltCard>
@@ -456,13 +412,19 @@ onBeforeUnmount(() => {
                 v-if="row.copy"
                 type="button"
                 class="info-btn"
-                :class="{ 'is-done': copied === row.copy }"
                 :aria-label="`复制${row.label} ${row.value}`"
                 @click="copy(row)"
               >
-                <i-lucide-check v-if="copied === row.copy" width="14" height="14" aria-hidden="true" />
+                <!-- 对勾带 info-btn__pop：换图标的同时弹一下，与 issue 板块的 copy-pop 同一条曲线 -->
+                <i-lucide-check
+                  v-if="copied === row.copy"
+                  class="info-btn__pop"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                />
                 <i-lucide-copy v-else width="14" height="14" aria-hidden="true" />
-                <span class="info-btn__text">{{ copied === row.copy ? '已复制' : '复制' }}</span>
+                <span class="info-btn__text">复制</span>
               </button>
 
               <a
@@ -471,10 +433,20 @@ onBeforeUnmount(() => {
                 :href="row.href"
                 :target="row.out ? '_blank' : undefined"
                 :rel="row.out ? 'noopener noreferrer' : undefined"
+                @click="!row.out && flashWrite(row)"
               >
                 <span class="info-btn__text">{{ row.out ? '前往' : '写信' }}</span>
                 <i-lucide-arrow-up-right v-if="row.out" width="14" height="14" aria-hidden="true" />
-                <i-lucide-mail v-else width="14" height="14" class="info-btn__mail" aria-hidden="true" />
+                <template v-else>
+                  <i-lucide-check
+                    v-if="wrote === row.href"
+                    class="info-btn__pop"
+                    width="14"
+                    height="14"
+                    aria-hidden="true"
+                  />
+                  <i-lucide-mail v-else width="14" height="14" class="info-btn__mail" aria-hidden="true" />
+                </template>
               </a>
             </div>
           </div>
@@ -521,7 +493,7 @@ onBeforeUnmount(() => {
   --paper-2: #14181f;
   --ink: #f5f7fa;
   --ink-2: rgba(245, 247, 250, 0.76); /* 正文：对墨面 ≈ 9:1 */
-  /* 小字眉标：视频背景最亮的一帧也得过 AA，所以留足余量（静态墨底 ≈ 7:1） */
+  /* 小字眉标：底图最亮的那片紫也得过 AA，所以留足余量（静态墨底 ≈ 7:1） */
   --ink-3: rgba(245, 247, 250, 0.64);
   --line: rgba(255, 255, 255, 0.13);
   --line-soft: rgba(255, 255, 255, 0.07);
@@ -543,6 +515,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 100vh;
   min-height: 100svh;
+  /* 入场时每行清单那道自左向右跑的光（.info-row::after / info-run）会 translate 到行的右边界之外，
+   * 那一下会把文档的 scrollWidth 顶宽 500 多像素——右侧竖向、下侧横向两条滚动条就这么闪出来，
+   * 等动画跑完再自己消失。overflow-x: clip 就地裁掉它：不像 hidden 那样新建滚动容器，
+   * 横向裁剪、纵向照旧 visible，页眉的 sticky 参照系一点不动。 */
+  overflow-x: clip;
   padding: calc(clamp(72px, 12vh, 148px) * var(--fit)) clamp(20px, 5vw, 72px)
     calc(clamp(24px, 3.4vh, 40px) * var(--fit));
   background: var(--paper);
@@ -586,7 +563,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 跟随指针的光斑：压在实拍层之上、压暗层之下，所以它只"点亮雨窗"，不会洗白文字。
+/* 跟随指针的光斑：压在底图层之上、压暗层之下，所以它只"点亮底图"，不会洗白文字。
  * 双类是为了压过组件自己的 .glow{position:relative}——这里要的是绝对定位那一层。 */
 .info-bg .info-bg__glow {
   position: absolute;
@@ -594,64 +571,60 @@ onBeforeUnmount(() => {
   z-index: 0;
 }
 
-/* 实拍层：海报垫底，视频就绪后再淡淡浮上来 */
+/* 底图层：一张静态图铺满，压暗层与栏格都压在它上面 */
 .info-bg__media {
   position: absolute;
   inset: 0;
   background: var(--paper);
 }
 
-.info-bg__poster,
-.info-bg__video {
+.info-bg__photo {
   position: absolute;
   inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* 原图是 16:9 横板，窄屏只能裁：视线焦点钉在画面中间那道声波上 */
   object-position: 50% 50%;
-  /* 背景提亮：实拍画面自己抬一档，压暗层再退一档，雨丝看得更清楚 */
+  /* 底图自己抬一档亮度，压暗层再退一档，紫蓝层次才不被压平 */
   filter: brightness(1.06) saturate(1.03);
 }
 
-/* 露面时顺带收一档缩放：像玻璃上那层雾慢慢退掉，不是硬切上来 */
-.info-bg__video {
-  opacity: 0;
-  scale: 1.035;
-  transition:
-    opacity 1.1s ease,
-    scale 2.6s var(--ease);
-}
-
-.info-bg__video.is-ready {
-  opacity: 1;
-  scale: 1;
-}
-
-/* 压暗层：实底只留薄薄一层（片子本身在压制时已经压暗过），
+/* 压暗层：底图中间那片粉紫是整页最亮的地方，实底因此比原来抬深一档，
  * 暗角最亮的一点放在内容区，左栏小字与页脚声明处再各自加深——
- * 雨要看得见，最小的那行字也得站得住。 */
+ * 底图要看得见，最小的那行字也得站得住。 */
 .info-bg__scrim {
   position: absolute;
   inset: 0;
-  background: rgba(10, 12, 18, 0.26);
+  background: rgba(10, 12, 18, 0.34);
 }
 
 .info-bg__scrim::after {
   content: '';
   position: absolute;
   inset: 0;
+  /* 三层叠加：横向把左栏（标题与小字）压深、纵向收住页眉页脚、再补一圈暗角。
+   * 这张底图中间那片粉紫比原来的雨窗亮得多，均匀加深会把整张图压死，
+   * 所以只压"有字的地方"：左栏合成后白字仍过 AA，右侧留原亮度。 */
   background:
+    linear-gradient(
+      90deg,
+      rgba(10, 12, 18, 0.46),
+      rgba(10, 12, 18, 0.1) 46%,
+      rgba(10, 12, 18, 0.06) 72%,
+      rgba(10, 12, 18, 0.22) 100%
+    ),
+    linear-gradient(180deg, rgba(10, 12, 18, 0.3), rgba(10, 12, 18, 0.02) 45%, rgba(10, 12, 18, 0.4)),
     radial-gradient(
       120% 90% at 68% 36%,
       rgba(10, 12, 18, 0),
       rgba(10, 12, 18, 0.18) 60%,
       rgba(10, 12, 18, 0.38) 100%
-    ),
-    linear-gradient(180deg, rgba(10, 12, 18, 0.4), rgba(10, 12, 18, 0.03) 42%, rgba(10, 12, 18, 0.38));
+    );
 }
 
-/* 杂志栏格：三列等分竖线，压在视频之上才不会被压暗层吃掉 */
+/* 杂志栏格：三列等分竖线，压在底图之上才不会被压暗层吃掉 */
 .info-bg__grid {
   position: absolute;
   inset: 0;
@@ -673,7 +646,7 @@ onBeforeUnmount(() => {
   background: radial-gradient(circle, rgba(122, 167, 255, 0.12), transparent 62%);
 }
 
-/* 极淡的胶片颗粒：把实拍画面与界面糊成同一张纸，也压掉视频的块效应 */
+/* 极淡的胶片颗粒：把底图与界面糊成同一张纸，也压掉大面积渐变的色带 */
 .info-bg__grain {
   position: absolute;
   inset: 0;
@@ -682,7 +655,7 @@ onBeforeUnmount(() => {
   background-size: 180px 180px;
 }
 
-/* 开场那道光：一条斜向的柔光带，横扫过雨窗。
+/* 开场那道光：一条斜向的柔光带，横扫过底图。
  * 尺寸就是背景框本身，靠 translate 从画面外扫到画面外；静态停在看不见。 */
 .info-bg__sweep {
   position: absolute;
@@ -996,8 +969,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  /* 触控目标：高度按 44px 的推荐下限留足 */
-  padding: 5px 7px;
+  /* 触控目标：高度按 44px 的推荐下限留足；左右自己撑开一点，字与圆角之间才有余量 */
+  padding: 5px 11px;
   border: 1px solid rgba(255, 255, 255, 0.95);
   border-radius: 999px;
   background: #fff;
@@ -1026,11 +999,20 @@ onBeforeUnmount(() => {
   scale: 0.96;
 }
 
-/* 复制成功：仍是白底黑字，改由一道强调色边框 + 对勾图标交代"已经复制了" */
-.info-btn.is-done {
-  border-color: var(--accent);
-  background: #fff;
-  color: #101319;
+/* 复制 / 写信成功：图标换成对勾并弹一下，曲线与 issue 板块的 copy-pop 逐字一致 */
+.info-btn__pop {
+  animation: info-btn-pop 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes info-btn-pop {
+  from {
+    transform: scale(0.45);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .info-btn svg {
@@ -1089,7 +1071,7 @@ onBeforeUnmount(() => {
   margin: auto auto 0;
 }
 
-/* 卡壳：免责声明压在实拍画面上，做成一块磨砂玻璃：既贴住视频，又把声明这一段托干净。
+/* 卡壳：免责声明压在底图上，做成一块磨砂玻璃：既贴住底图，又把声明这一段托干净。
  * 内部两栏——左栏的宽度由内容（图标 + 标题）自己撑开，右栏吃掉余下的宽度。 */
 .info-note {
   display: grid;
@@ -1102,8 +1084,8 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 14px;
   background: rgba(9, 11, 15, 0.58);
-  /* 模糊半径减半：卡面观感几乎不变，但它压在逐帧变化的视频上，
-   * 每帧都要重算一次全卡模糊——半径直接决定这笔开销（实测帧率 +60% 上下） */
+  /* 模糊半径减半：卡面观感几乎不变，但它压在底图上（图不逐帧变化），
+   * 半径仍按这套尺寸留着——真要调大，最先付出代价的是窄屏的合成开销 */
   backdrop-filter: blur(6px) saturate(140%);
   -webkit-backdrop-filter: blur(6px) saturate(140%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -1238,7 +1220,7 @@ onBeforeUnmount(() => {
  */
 
 /* ── 第一拍：镜头落定 ─────────────────────────────
- * 实拍层浮起并收一档放大：像镜头推近后落定，画面从"还没对上焦"变清晰。 */
+ * 底图层浮起并收一档放大：像镜头推近后落定，画面从"还没对上焦"变清晰。 */
 .info.is-entering .info-bg__media {
   animation: info-shot var(--enter-dur-media) var(--ease) both;
   animation-delay: var(--enter-media);
@@ -1524,6 +1506,11 @@ onBeforeUnmount(() => {
   }
 
   .info-badge__dot {
+    animation: none;
+  }
+
+  /* 少动效时对勾照样出现，只是不再弹 */
+  .info-btn__pop {
     animation: none;
   }
 

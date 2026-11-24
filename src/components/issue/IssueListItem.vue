@@ -142,7 +142,8 @@ async function copyLink() {
     </ItemContent>
 
     <!-- 右：标签徽章 + 更新时间 -->
-    <ItemActions class="shrink-0 items-end gap-1 self-center">
+    <!-- items-center：徽章胶囊与「更新 + 时间 + 更多」两块高度不同，底对齐会让矮的那块看起来偏下 -->
+    <ItemActions class="shrink-0 items-center gap-1 self-center">
       <div class="flex items-center gap-1.5">
         <Badge
           v-for="label in labels"

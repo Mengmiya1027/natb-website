@@ -802,26 +802,46 @@ async function banStateOfGh(env, login) {
  * 这是「他真的持有这个 GitHub 账号」的唯一证明——App 的 installation token
  * 只能证明账号存在，证明不了是谁在操作，绝不能拿来替代。
  */
-async function loginOfGhToken(token) {
+async function ghTokenLookup(token) {
+  let res
   try {
-    const res = await fetch('https://api.github.com/user', {
+    res = await fetch('https://api.github.com/user', {
       headers: {
         Authorization: 'Bearer ' + token,
         Accept: 'application/vnd.github+json',
         'User-Agent': 'natb-issue-proxy',
       },
     })
-    if (!res.ok) return null
-    const me = await res.json()
-    if (!me || !me.login) return null
-    return {
+  } catch {
+    // 网络层失败：GitHub 那边现在够不着，跟 token 本身无关
+    return { error: 'github_unreachable', status: 0 }
+  }
+  // 401 / 404 才是「这枚 token 不再被承认」，其余（限流 403、502、503…）都是「这会儿问不到」
+  if (res.status === 401 || res.status === 404) return { error: 'token_invalid' }
+  if (!res.ok) return { error: 'github_unreachable', status: res.status }
+  let me = null
+  try {
+    me = await res.json()
+  } catch {
+    return { error: 'github_unreachable', status: res.status }
+  }
+  if (!me || !me.login) return { error: 'token_invalid' }
+  return {
+    me: {
       login: String(me.login).toLowerCase(),
       name: me.name || '',
       avatar: me.avatar_url || '',
-    }
-  } catch {
-    return null
+    },
   }
+}
+
+/* 只要身份、不区分原因的旧签名：签发凭据、判定写权限那些路径用不着区分，
+ * 分不清就一律当「这个人认不出来」，由上层回 403 拦下即可。
+ * 会用来做「退出登录」判断的地方（/auth/identity、/auth/seen）必须用 ghTokenLookup，
+ * 否则 GitHub 一次限流就会把全站已登录用户踢下线。 */
+async function loginOfGhToken(token) {
+  const found = await ghTokenLookup(token)
+  return found.me || null
 }
 
 /** 封禁记录统一写法：until=0 是永久（无 TTL），其余按到期时间设 TTL */
@@ -1433,8 +1453,14 @@ async function handleAuth(env, request, url, cors) {
     if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
     // 两段 base64url 是本站 QQ 令牌，不是 GitHub 账号，不进这个名单
     if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(raw)) return json({ ok: true }, 200, origin, env)
-    const me = await loginOfGhToken(raw)
-    if (!me) return json({ error: 'token_invalid' }, 401, origin, env)
+    const found = await ghTokenLookup(raw)
+    if (!found.me) {
+      // 问不到 ≠ 失效：限流/5xx 只回 502，前端据此只当「这次没记上」，不动登录态
+      return found.error === 'token_invalid'
+        ? json({ error: 'token_invalid' }, 401, origin, env)
+        : json({ error: 'github_unreachable' }, 502, origin, env)
+    }
+    const me = found.me
     const login = String(me.login).toLowerCase()
     const now = Date.now()
     // 一天内不重复写：每次开页面都报一次，不节流会把 KV 写额度耗光
@@ -1489,8 +1515,16 @@ async function handleAuth(env, request, url, cors) {
   if (url.pathname === '/auth/identity' && request.method === 'GET') {
     const raw = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
     if (!raw) return json({ error: 'unauthorized' }, 401, origin, env)
-    const me = await loginOfGhToken(raw)
-    if (!me) return json({ error: 'token_invalid' }, 401, origin, env)
+    const found = await ghTokenLookup(raw)
+    if (!found.me) {
+      /* 这条接口是前端「进页面时报一次身份」的路径，返回值直接被当成「是不是还登录着」。
+       * 把 GitHub 侧的一次限流或 5xx 报成 token_invalid，等价于把全站登录用户踢下线，
+       * 所以只有明确的 401 才算失效，其余按「暂时问不到」回 502。 */
+      return found.error === 'token_invalid'
+        ? json({ error: 'token_invalid' }, 401, origin, env)
+        : json({ error: 'github_unreachable' }, 502, origin, env)
+    }
+    const me = found.me
 
     const sub = await bindOfGh(env, me.login)
     let linkedQq = null

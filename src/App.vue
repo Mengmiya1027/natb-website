@@ -11,14 +11,14 @@ import NavBar from '@/components/NavBar.vue'
 
 const route = useRoute()
 
-/* Issue 是独立整页：它有自己的页头，整站胶囊再叠上去只会逼出一块让位空隙，
- * 所以在这个路由下不渲染胶囊（页头里保留了回首页的入口）。 */
-const isIssueRoute = computed(() => route.path.startsWith('/issue'))
-
-/* 海报页也是满屏作品：它不接站内导航、只认直连路径，
- * 顶上再压一条胶囊只会把版面挤下去，所以这个路由下同样不渲染导航。 */
+/* 只有海报页不渲染站点胶囊：它是满屏作品，不接站内导航、只认直连路径，
+ * 顶上再压一条胶囊只会把版面挤下去。
+ *
+ * Issue 页照常渲染——它的页头（SiteHeader）本来就是按"与胶囊左右环绕"排的：
+ * 桌面端 logo 在左、胶囊在中间偏右，窄屏页头落在胶囊下方。
+ * 10d5282 把 issue 一起并进 hideNav，把这条胶囊从 /issue 上摘掉了，这里改回来。 */
 const isPosterRoute = computed(() => route.path.startsWith('/poster'))
-const hideNav = computed(() => isIssueRoute.value || isPosterRoute.value)
+const hideNav = computed(() => isPosterRoute.value)
 
 const params = new URLSearchParams(window.location.search)
 

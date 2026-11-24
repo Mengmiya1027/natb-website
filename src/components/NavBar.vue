@@ -61,8 +61,7 @@ const onIssueRoute = computed(() => route.path.startsWith('/issue'))
 const items = [
   { label: '介绍', href: '#home', tab: 'home' },
   { label: '下载' },
-  // latin：这一项是拉丁文字，字体要和中文项分开指定（见下面的说明）
-  { label: 'Issue', href: '/issue', route: true, latin: true },
+  { label: '问题反馈', href: '/issue', route: true },
   { label: '关于' }
 ]
 

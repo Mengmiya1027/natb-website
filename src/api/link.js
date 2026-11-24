@@ -23,7 +23,11 @@ function base() {
   return (configured || DEFAULT_PROXY_BASE || '').replace(/\/$/, '')
 }
 
-async function call(path, { method = 'GET', body, token } = {}) {
+/**
+ * quiet: 只读查询用。这类请求的失败只代表「这次没问出来」，不代表凭据不可用——
+ * 之前查一次绑定关系（/auth/identity）被 GitHub 限流，就会把整站登录态清掉。
+ */
+async function call(path, { method = 'GET', body, token, quiet = false } = {}) {
   const root = base()
   if (!root) throw new LinkError(0, '没有配置中转地址，无法使用账号绑定')
   let res
@@ -42,7 +46,7 @@ async function call(path, { method = 'GET', body, token } = {}) {
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     // 凭据不再被承认：交给 store 延迟退出并弹登录框，而不是留着假的登录态
-    if (token && isCredentialInvalid(res.status, data))
+    if (!quiet && token && isCredentialInvalid(res.status, data))
       notifyCredentialExpired(token === getQqToken() ? 'qq' : 'gh')
     const message = errorText(data, '请求失败（HTTP ' + res.status + '）')
     throw new LinkError(res.status, message, data)
@@ -54,7 +58,9 @@ async function call(path, { method = 'GET', body, token } = {}) {
 export function fetchGhIdentity() {
   const token = getToken()
   if (!token) return Promise.resolve(null)
-  return call('/auth/identity', { token }).catch(() => null)
+  /* quiet：这只是一次「我和哪个 QQ 绑了」的查询，查不到就当没有。
+   * 真正的失效判定留给 bootstrap 里的 /user —— 那里 401 才是凭据真的没了。 */
+  return call('/auth/identity', { token, quiet: true }).catch(() => null)
 }
 
 /**
