@@ -10,6 +10,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import GlassSurface from '@/components/vue-bits/GlassSurface.vue'
+import TechText from '@/components/vue-bits/TechText.vue'
 import WebThreads from '@/components/vue-bits/WebThreads.vue'
 import IconRoot from '~icons/solar/shield-keyhole-bold'
 import IconOta from '~icons/solar/refresh-circle-bold'
@@ -93,6 +94,49 @@ function goTab(id) {
   window.dispatchEvent(new CustomEvent('natb:tab', { detail: id }))
 }
 
+/* 标题由 TechText 的 canvas 画：字号跟着 CSS 的 clamp 走（组件的 autoFontSize 读容器字号），
+ * 脚本只补两件 CSS 办不到的事——落字对齐，以及画布里的金属色标。 */
+
+/* 960 以下整块内容居中，标题的 canvas 也要按居中落字，否则它会贴住左缘 */
+const narrowLayout =
+  typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(max-width: 960px)')
+    : null
+const isNarrow = ref(narrowLayout?.matches === true)
+const titleAlign = computed(() => (isNarrow.value ? 'center' : 'left'))
+
+function onNarrowLayout(event) {
+  isNarrow.value = event.matches
+}
+
+/* 九段纵向灰阶：标题原来的金属材质（CSS background-clip: text），
+ * 顶部受光 → 中段暗带 → 回亮 → 下缘收灰。canvas 里换同一组 stop，材质才不丢。
+ * 窄屏字号小，九段会挤成一道脏灰带，只留受光到收灰四段。 */
+const TITLE_INK = ['#ffffff', '#f8f8f9', '#e2e2e6', '#b6b6bd', '#ececee', '#ffffff', '#e2e2e6', '#bfbfc5']
+const TITLE_INK_NARROW = ['#ffffff', '#f8f8f9', '#e2e2e6', '#bfbfc5']
+const titleInk = computed(() => (isNarrow.value ? TITLE_INK_NARROW : TITLE_INK))
+
+/* 两行标题共用的 TechText 参数：只差一句 text，其余逐项相同就抽在一处，
+ * 免得哪天调一次描边要在两个地方各改一遍。 */
+const titleTech = computed(() => ({
+  fontSize: 96,
+  autoFontSize: true,
+  fontWeight: 400,
+  letterSpacing: -0.03,
+  align: titleAlign.value,
+  gradient: titleInk.value,
+  accentColor: '#a98bff',
+  reach: 180,
+  strokeWidth: 1.4,
+  dashLength: 4,
+  dashGap: 3,
+  labels: false,
+  draggable: false,
+  clickKick: false,
+  sweep: !reduceMotion,
+  speed: 0.7,
+}))
+
 const videoRef = ref(null)
 const heroRef = ref(null)
 
@@ -125,6 +169,7 @@ watch(
 )
 
 onMounted(() => {
+  narrowLayout?.addEventListener?.('change', onNarrowLayout)
   window.addEventListener('natb:glass-drag', onGlassDrag)
   // 首页不再有粒子开场，但顶栏仍靠 isLanded 滑进来
   anim.land()
@@ -149,6 +194,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  narrowLayout?.removeEventListener?.('change', onNarrowLayout)
   window.removeEventListener('natb:glass-drag', onGlassDrag)
   document.documentElement.classList.remove('home-is-dark')
   heroObserver?.disconnect()
@@ -222,9 +268,17 @@ onBeforeUnmount(() => {
             <span class="hero__badge-text">小天才手表 ADB 工具箱</span>
           </p>
 
+          <!-- 标题交给 TechText 的 canvas：指针扫过的字母会从实心字变成虚线矢量轮廓。
+               文本正文留在这里供读屏与搜索索引，视觉上裁到 1px。 -->
           <h1 class="hero__title">
-            <span class="hero__title-line">New Android</span>
-            <span class="hero__title-line hero__title-line--accent">Tool Box</span>
+            <span class="hero__title-sr">New Android Tool Box</span>
+            <span class="hero__title-line hero__title-line--lead" aria-hidden="true">
+              <TechText v-bind="titleTech" text="New Android" :sweep-phase="0" />
+            </span>
+            <span class="hero__title-line hero__title-line--accent" aria-hidden="true">
+              <!-- 相位错开约三分之一程：两行待机扫过各走各的，不会一起从左扫到右 -->
+              <TechText v-bind="titleTech" text="Tool Box" :sweep-phase="5" />
+            </span>
           </h1>
 
           <p class="hero__tagline">小天才手表，一个窗口全部搞定。</p>
@@ -426,7 +480,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  /* 同上：宽度确定下来，标题的 canvas 才有 680 的版心可用（列宽会跟着撑满）。
+   * 但这一列里没有一个可点的地方：让指针穿透这层透明盒子，
+   * 右侧背景才收得到 hover 与点击，而不是被它整片吃掉。 */
+  width: 100%;
   max-width: 680px;
+  pointer-events: none;
 }
 
 /* ── 版本徽章：整条 32 高，与下面的能力标签同一档
@@ -497,11 +556,13 @@ onBeforeUnmount(() => {
 .hero__title {
   /* 字号落在 type scale 的两个端点上：移动 48（text-5xl），桌面 96（text-8xl）。
    * 左列宽 680，96px 时 "NEW ANDROID" 量出来约 510，仍在列宽内。 */
+  /* 标题的 canvas 必须有一个确定宽度：不写这行，h1 会被 canvas 的 1px 内容
+   * 撑成 shrink-to-fit，fit 算出极小的字号，标题就缩成一行小字。 */
+  width: 100%;
   margin: var(--sp-300) 0 0;
-  /* 光学对齐：Archive 的首字母 N 自带 5px 左侧留白（80px 字号下实测），
-   * 而下方正文是中文，几乎没有这层留白。盒子对齐了，墨迹却差 4 到 5px，
-   * 所以整块左移 0.0625em（= 5px @ 80px），让墨迹与下面的文字真正齐左。 */
-  margin-left: -0.0625em;
+  /* 标题改由 canvas 绘制，墨迹正好从容器左缘起：
+   * 原来那处 -0.0625em 的光学补偿（补 Archive 首字自带的留白）不再需要。 */
+  margin-left: 0;
   font-family: var(--lp-display);
   font-size: clamp(3.5rem, 7.6vw, 6rem);
   font-weight: 400;
@@ -521,49 +582,49 @@ onBeforeUnmount(() => {
 
 .hero__title-line {
   display: block;
+  /* 例外：标题的 canvas 靠自己的 pointermove 做"字母变虚线"的悬停 */
+  pointer-events: auto;
   animation: hero-rise 0.95s var(--ease) both;
-  /* 宽度贴合各自文字：撑满父宽时，短的那行只用掉渐变的八成，
-   * 末端收不到紫，看着像漏了半截。贴合之后两行的收色点各自落在自己的句末。 */
-  width: fit-content;
-  /* 金属面：纵向的明暗节奏，不是从亮到暗一根筋。
-   *   0 至 34%：顶部受光，最亮
-   *   34 至 52%：中段压暗，这是"地平线"，金属感全部来自这条暗带
-   *   52 至 76%：回亮，反射面的第二道高光
-   *   76 至 100%：下缘收灰，末端带一点紫——像金属把周围环境的紫光反了上来
-   * 只有明暗交替才有材质，单一方向的渐变永远是塑料。 */
-  /* 两层背景叠出来的同一块材质：
-   *   下层是纵向的黑白灰阶，负责明暗（顶部受光 → 中段暗带 → 回亮 → 下缘收灰）；
-   *   上层是横向的半透明紫，只在行末最后约两成渐入，浓度压到 0.2。
-   * 分层而不是把紫塞进灰阶的停靠点里：灰阶的明暗节奏一点没动，
-   * 紫色是"罩"在金属上的一层环境光，右端才有一点，左边仍然纯白。 */
-  background-image:
-    linear-gradient(90deg, rgba(160, 140, 225, 0) 72%, rgba(160, 140, 225, 0.26) 100%),
-    linear-gradient(
-      180deg,
-      #ffffff 0%,
-      #f8f8f9 16%,
-      #e2e2e6 34%,
-      #b6b6bd 50%,
-      #ececee 62%,
-      #ffffff 71%,
-      #e2e2e6 86%,
-      #bfbfc5 100%
-    );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  /* 两行标题都由 TechText 的 canvas 画，容器只负责尺寸与入场动画。
+   * 旧的 background-clip: text 金属渐变不适用了（canvas 里没有文字，只有像素），
+   * 材质改由组件的 gradient 色标复刻，见脚本里的 TITLE_INK。 */
+  width: 100%;
+  /* TechText 把文字排进容器宽的 90%、高的 66%，并从宽度的 5% 处起排：
+   * 高度给到 1.2em，那 66% 高才仍然宽于字形墨高，字号不会被压小；
+   * 左移 5% 把那处起始留白还回去，墨迹重新贴回内容列左缘。 */
+  height: 1.2em;
+  margin-left: -5%;
 }
 
-.hero__title-line:first-child {
+/* 按钮装在 GlassSurface 里，同样要能从穿透的父层里接回指针 */
+.hero__actions-glass {
+  pointer-events: auto;
+}
+
+/* 两行之间收回到 1em 的行距：容器各占 1.2em，减去这里的 0.2em 正好贴回原来的紧排 */
+.hero__title-line + .hero__title-line {
+  margin-top: -0.2em;
+}
+
+/* 读屏与搜索用的标题正文：canvas 里的像素不能被解析成文本，这段不能省 */
+.hero__title-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hero__title-line--lead {
   animation-delay: 0.14s;
 }
 
-/* 第二行首字 T 的左侧留白只有 1px，比 N 少 4px：
- * 不补的话它看起来会从整块里往左探出去一点。补 0.05em（= 4px @ 80px）拉回来。
- * 右端的 padding 也是同一回事——紧排之后末字形右边会被裁一丁点。 */
+/* 第二行只保留延迟：首字的光学留白与末字右缘裁切，都是 canvas 排版里没有的问题 */
 .hero__title-line--accent {
-  margin-left: 0.05em;
-  padding-right: 0.02em;
   animation-delay: 0.24s;
 }
 
@@ -811,6 +872,11 @@ onBeforeUnmount(() => {
     max-width: 100%;
   }
 
+  /* 居中版式里两行标题各自居中，canvas 那 5% 的起始留白左右对称，不必抵消 */
+  .hero__title-line {
+    margin-left: 0;
+  }
+
   /* 窄屏不认那处手改断行：宽度不够，硬断会切出 "个 Windows" 这种残句 */
   .hero__lead-br {
     display: none;
@@ -826,23 +892,11 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
-  /* 小字号上九段金属渐变会挤成一道脏灰带，只留"受光 → 收紫"两段。
-   * 必须用 background-image：background 是简写，它会把上面的 background-clip: text
-   * 一起重置回 border-box，字就成了一块实心色板。 */
-  .hero__title-line {
-    background-image:
-      linear-gradient(90deg, rgba(160, 140, 225, 0) 78%, rgba(160, 140, 225, 0.18) 100%),
-      linear-gradient(180deg, #ffffff 0%, #f8f8f9 38%, #e2e2e6 78%, #bfbfc5 100%);
-  }
-
+  /* 小字号下九段灰阶会挤成一道脏灰带：色标换成四段（脚本里的 TITLE_INK_NARROW），
+   * 这一档只留字号，标题的材质不再由 CSS 负责。 */
   .hero__title {
     width: 100%;
     font-size: clamp(2.25rem, 12.8vw, 3rem);
-  }
-
-  /* 负字距会在末字后留一截空隙，居中时整行墨迹看着偏右：给每行补回右侧留白抵消 */
-  .hero__title-line {
-    padding-right: 0.055em;
   }
 
   .hero__tagline {

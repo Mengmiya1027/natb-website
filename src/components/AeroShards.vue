@@ -2333,14 +2333,14 @@ onMounted(() => {
       state.inside = false;
     };
 
+    const onInteractive = event =>
+      event.target instanceof Element &&
+      !!event.target.closest('a, button, input, textarea, select, label, [role="button"]');
+
     const onDown = event => {
       const s = settingsRef.value;
       if (event.button !== 0 || prefersReduced() || !s.mouseInteraction) return;
-      if (
-        event.target instanceof Element &&
-        event.target.closest('a, button, input, textarea, select, label, [role="button"]')
-      )
-        return;
+      if (onInteractive(event)) return;
       const hit = local(event);
       if (!hit.inside) return;
       state.pointer = hit.point;
@@ -2378,7 +2378,12 @@ onMounted(() => {
     let interacting = false;
     let lastInteract = 0;
     let yieldTimer = 0;
-    const yieldToUser = () => {
+    const yieldToUser = event => {
+      /* 点在这块背景自己身上，是要它响应（冲击波 / 按住蓄力），不是"用户在操作别处"。
+       * 一次 pointerdown 就让路 250ms：rAF 链还转，但整帧被跳过（不模拟、不上传、不渲染），
+       * 冲击波要等让路结束才出现，所以点下去第一下永远是空的。
+       * 判定用坐标矩形而不是 event.target —— 背景上方可能压着透明的文字列，命中不落在 canvas 上。 */
+      if (event?.type === 'pointerdown' && !onInteractive(event) && local(event).inside) return;
       lastInteract = performance.now();
       if (interacting) return; // 已经在让路，只刷新时间戳，不重建定时器
       interacting = true;
